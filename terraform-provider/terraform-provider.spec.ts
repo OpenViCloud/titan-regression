@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import { closeSessions, useBrowser } from './auth'
 import { API, RESULTS, bodyOf, call, expectStatus, log, newKey, startLog } from './api'
-import { RUN } from './fixtures'
+import { RUN, envOf } from './fixtures'
 import { cleanUp } from './clean-up'
 import { newSecret } from './token'
 
@@ -51,12 +51,14 @@ test.afterAll(async () => {
 test('TFP-01..03, TFP-05..07, TFP-09..10 the provider acceptance tests pass against the env, with a token made in the pod', async () => {
   test.setTimeout(50 * 60_000)
   fs.mkdirSync('/work/tfacc', { recursive: true })
+  // The cluster of the env (envOf: the first one with a listed template), as every other module uses.
+  const { clusterId } = await envOf()
   const result = await new Promise<{ code: number, out: string }>((resolve) => {
     const child = spawn(BINARY, ['-test.run', 'TestAcc', '-test.timeout', '45m', '-test.v', '-test.count', '1'], {
       cwd: '/work/tfacc',
       env: {
         PATH: process.env.PATH, HOME: '/work', TMPDIR: '/work/tfacc',
-        TF_ACC: '1', OPENVICLOUD_API_URL: API, OPENVICLOUD_TOKEN: secret, OPENVICLOUD_TEST_CLUSTER: 'singapore01',
+        TF_ACC: '1', OPENVICLOUD_API_URL: API, OPENVICLOUD_TOKEN: secret, OPENVICLOUD_TEST_CLUSTER: clusterId,
       },
     })
     // Masked once at the end: a secret split across two chunks would pass a per-chunk mask.
