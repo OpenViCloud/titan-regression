@@ -130,7 +130,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
 
   // OpenViCloud/titan-ops:docs/features/vm/design.md#vm-portal · OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx
   test('UI-02 creating a VM through the form shows the transition then Running, with the right name and tier', async () => {
-    const { zoneId, templateId, smallTier } = await envOf()
+    const { clusterId, templateId, smallTier } = await envOf()
     const offerings = await get('anonymous', '/v1/vm-offerings') as Array<{ id: string, name: string }>
     const tierName = offerings.find((o) => o.id === smallTier)?.name ?? smallTier
     const network = await runNetwork()
@@ -145,7 +145,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     await expect(dialog.getByText(/ipv6/i)).toHaveCount(0)
 
     await dialog.getByPlaceholder('e.g. web-server-01').fill(vmName)
-    await dialog.getByRole('combobox', { name: 'Zone' }).selectOption(zoneId)
+    await dialog.getByRole('combobox', { name: 'Cluster' }).selectOption(clusterId)
     await dialog.getByRole('combobox', { name: 'Network' }).selectOption(network.id)
     await dialog.getByRole('combobox', { name: 'Template' }).selectOption(templateId)
     await dialog.getByRole('combobox', { name: 'Size' }).selectOption(smallTier)
@@ -214,16 +214,16 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
       }, (rows) => `count=${rows.length}`)
 
     // --- Volume: create, attach, detach, delete --------------------------------------------------------------
-    const { zoneId, volumeOfferingId } = await envOf()
+    const { clusterId, volumeOfferingId } = await envOf()
     page = await pageOf('tenant')
     await page.goto(PORTAL + '/volumes', { waitUntil: 'networkidle' })
     await page.getByRole('button', { name: 'Create Volume' }).click()
     const volDialog = page.getByRole('dialog')
     await volDialog.getByPlaceholder('e.g. data-vol-01').fill(volumeName)
-    // Zone and offering selects carry no accessible name (OpenViCloud/titan-cloud-console:portal/src/components/VolumeCreateModal.tsx — unlabeled <select>,
-    // unlike VmCreateModal's): scope to the dialog and pick by position — zone first, offering second.
+    // Cluster and offering selects carry no accessible name (OpenViCloud/titan-cloud-console:portal/src/components/VolumeCreateModal.tsx — unlabeled <select>,
+    // unlike VmCreateModal's): scope to the dialog and pick by position — cluster first, offering second.
     const selects = volDialog.locator('select')
-    await selects.nth(0).selectOption(zoneId)
+    await selects.nth(0).selectOption(clusterId)
     await selects.nth(1).selectOption(volumeOfferingId)
     await volDialog.getByPlaceholder('e.g. 50').fill('1')
     await volDialog.getByRole('button', { name: 'Create volume' }).click()

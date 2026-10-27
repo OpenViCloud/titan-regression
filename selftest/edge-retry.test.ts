@@ -49,14 +49,14 @@ afterEach(() => {
 
 test('a connect timeout is sent once more and the second answer is returned', async () => {
   answers = [connectTimeout]
-  const res = await fetchOnceMoreOnEdgeFailure('http://api.test/v1/zones', { method: 'POST' })
+  const res = await fetchOnceMoreOnEdgeFailure('http://api.test/v1/clusters', { method: 'POST' })
   assert.equal(res.status, 200)
   assert.equal(calls, 2)
 })
 
 test('a second connect timeout is not retried again', async () => {
   answers = [connectTimeout, connectTimeout]
-  await assert.rejects(fetchOnceMoreOnEdgeFailure('http://api.test/v1/zones', { method: 'GET' }), (error) => error === connectTimeout)
+  await assert.rejects(fetchOnceMoreOnEdgeFailure('http://api.test/v1/clusters', { method: 'GET' }), (error) => error === connectTimeout)
   assert.equal(calls, 2)
 })
 

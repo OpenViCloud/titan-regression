@@ -51,7 +51,7 @@ test.describe.serial('billing-storage', () => {
   // snapshot of it both exist through a tick: storage grows at both DISK's and SNAPSHOT's rate, neither 0
   // (OpenViCloud/titan-ops:docs/architecture/money-and-wallet.md#round-once · OpenViCloud/titan-ops:docs/features/billing/metering/design.md#meters).
   test('BIL-16 a 1 GB volume and its snapshot both add storage usage over a tick, neither line is 0', async () => {
-    const { zoneId, volumeOfferingId } = await envOf()
+    const { clusterId, volumeOfferingId } = await envOf()
     await runNetwork() // ensures the shared run network exists; this case needs no network of its own
 
     const diskPrice = (await get('anonymous', '/v1/volume-offerings') as any[])
@@ -61,7 +61,7 @@ test.describe.serial('billing-storage', () => {
     log(`BIL-16 disk ${diskPrice}/GB/h × ${BILLED_GB} GB ⇒ ${perTickDisk} ₫ a tick`)
 
     const volumeReply = await call('tenant', 'POST', '/v1/tenant/volumes',
-      { name: `rg-storvol-${RUN}`, volumeOfferingId, zoneId, sizeGb: BILLED_GB }, newKey())
+      { name: `rg-storvol-${RUN}`, volumeOfferingId, clusterId, sizeGb: BILLED_GB }, newKey())
     expectStatus(volumeReply, 202)
     volumeId = bodyOf(volumeReply).volumeId as string
     await waitVolume('BIL-16 volume exists', volumeId, (v) => v.currentExistence === 'Exists' && v.transition === null)

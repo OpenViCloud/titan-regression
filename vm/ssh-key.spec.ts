@@ -89,10 +89,10 @@ test.describe.serial('ssh-key', () => {
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs VendorDataForKeysAsync (SSH_KEY_NOT_FOUND): checked before the VM row is added, so nothing is made.
   test('SSH-04 creating a VM with an unknown key id is 404 SSH_KEY_NOT_FOUND and makes no VM', async () => {
     const networkId = (await runNetwork()).id
-    const { zoneId, templateId, smallTier } = await envOf()
+    const { clusterId, templateId, smallTier } = await envOf()
     const vmName = `rg-vmssh-${RUN}`
     expectError(await call('tenant', 'POST', '/v1/tenant/vms',
-      { name: vmName, networkId, vmOfferingId: smallTier, templateId, zoneId, diskSizeGb: null, sshKeyIds: [randomUUID()] }, newKey()),
+      { name: vmName, networkId, vmOfferingId: smallTier, templateId, clusterId, diskSizeGb: null, sshKeyIds: [randomUUID()] }, newKey()),
       404, 'SSH_KEY_NOT_FOUND')
     const vms = await get('tenant', '/v1/tenant/vms') as Array<{ name: string }>
     expect(vms.filter((v) => v.name === vmName)).toEqual([])

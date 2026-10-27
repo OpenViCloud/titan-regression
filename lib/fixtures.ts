@@ -12,10 +12,10 @@ export function nameOf(kind: string): string {
 export const RUN_NETWORK_PREFIX = 'rg-net-'
 export const RUN_CIDR = '10.76.0.0/24'
 
-// --- environment: zone, template, tiers ----------------------------------------------------------------------
+// --- environment: cluster, template, tiers ----------------------------------------------------------------------
 
 export type Env = {
-  zoneId: string
+  clusterId: string
   templateId: string
   smallTier: string
   otherTier: string
@@ -24,30 +24,30 @@ export type Env = {
 
 let env: Env | null = null
 
-// The first zone whose customer catalog lists a template: dev has local-mac (arm64, only Ubuntu syncs); staging has
+// The first cluster whose customer catalog lists a template: dev has local-mac (arm64, only Ubuntu syncs); staging has
 // singapore01.
 export async function envOf(): Promise<Env> {
   if (env !== null) {
     return env
   }
-  const zones = await get('anonymous', '/v1/zones') as Array<{ id: string }>
-  let zoneId = ''
+  const clusters = await get('anonymous', '/v1/clusters') as Array<{ id: string }>
+  let clusterId = ''
   let templateId = ''
-  for (const zone of zones) {
-    const templates = await get('tenant', `/v1/templates?zoneId=${zone.id}`) as Array<{ id: string }>
+  for (const cluster of clusters) {
+    const templates = await get('tenant', `/v1/templates?clusterId=${cluster.id}`) as Array<{ id: string }>
     if (templates.length > 0) {
-      zoneId = zone.id
+      clusterId = cluster.id
       templateId = templates[0].id
       break
     }
   }
-  expect(zoneId, 'some zone must list a template').not.toEqual('')
+  expect(clusterId, 'some cluster must list a template').not.toEqual('')
   // Smallest first: dev's Incus host has 7 GiB, so the two smallest tiers are the ones that fit side by side.
   const tiers = (await get('anonymous', '/v1/vm-offerings') as Array<{ id: string, memoryMb: number }>)
     .sort((a, b) => a.memoryMb - b.memoryMb)
   const volumeOfferings = await get('anonymous', '/v1/volume-offerings') as Array<{ id: string }>
-  env = { zoneId, templateId, smallTier: tiers[0].id, otherTier: tiers[1].id, volumeOfferingId: volumeOfferings[0].id }
-  log(`env zone=${env.zoneId} template=${env.templateId} tiers=${env.smallTier},${env.otherTier} volumeOffering=${env.volumeOfferingId}`)
+  env = { clusterId, templateId, smallTier: tiers[0].id, otherTier: tiers[1].id, volumeOfferingId: volumeOfferings[0].id }
+  log(`env cluster=${env.clusterId} template=${env.templateId} tiers=${env.smallTier},${env.otherTier} volumeOffering=${env.volumeOfferingId}`)
   return env
 }
 
@@ -90,9 +90,9 @@ export async function runNetwork(): Promise<{ id: string, name: string }> {
     const found = await waitNetwork('run network', live[0].id, networkUsable)
     return { id: found.id, name: found.name }
   }
-  const { zoneId } = await envOf()
+  const { clusterId } = await envOf()
   const name = `${RUN_NETWORK_PREFIX}${RUN}`
-  const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name, zoneId, cidr: RUN_CIDR }, newKey())
+  const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name, clusterId, cidr: RUN_CIDR }, newKey())
   expectStatus(reply, 202)
   const id = bodyOf(reply).networkId as string
   await waitNetwork('run network created', id, networkUsable)
@@ -110,9 +110,9 @@ export async function waitVm(label: string, id: string, done: (vm: any) => boole
 }
 
 export async function createVm(name: string, tier: string, networkId: string, extra: Record<string, unknown> = {}): Promise<string> {
-  const { zoneId, templateId } = await envOf()
+  const { clusterId, templateId } = await envOf()
   const reply = await call('tenant', 'POST', '/v1/tenant/vms',
-    { name, networkId, vmOfferingId: tier, templateId, zoneId, diskSizeGb: null, ...extra }, newKey())
+    { name, networkId, vmOfferingId: tier, templateId, clusterId, diskSizeGb: null, ...extra }, newKey())
   expectStatus(reply, 202)
   // A create answers the id only (OpenViCloud/titan-ops:docs/architecture/http-contract.md#create-returns-id).
   expect(Object.keys(bodyOf(reply))).toEqual(['vmId'])

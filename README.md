@@ -42,7 +42,7 @@ script from a checkout so its first line names the commit. The full procedure (o
 with a tenant of its own (`beta-user`, `beta-user-2`) and a CronJob of its own (`titan-regression`, `titan-regression-b`).
 `lanes.json` says which module runs in which lane and where a lane waits for the other (`barrier`, `signal`/`wait`,
 `external` for what the agent does outside the runner). It refuses a plan in which two modules that share a wallet or a
-shared list (`exclusive`) may run together, or in which the modules that take an IPv6 block from the zone
+shared list (`exclusive`) may run together, or in which the modules that take an IPv6 block from the cluster
 (`same_lane`) are spread over lanes. Every run (`--check` stops after this) also checks `lanes.json` against the table
 below: every module the runner runs on staging is in exactly one lane, except `smoke` and `cleanup`, which each lane
 runs for its own tenant (and `cleanup` runs once more after a red `terraform-provider`). At most `max_pods` jobs run at
@@ -92,14 +92,14 @@ create a network and beta-user may hold one.
 
 | # | Module | Measures | Dev | Staging | Spec |
 |---|---|---|---|---|---|
-| 1 | `smoke` | health, zones, anonymous catalog, clean test account | yes | yes | yes |
-| 2 | `catalog` | offerings and prices, templates per zone, live clusters/OS images, template sync | yes | yes | yes |
+| 1 | `smoke` | health, clusters, anonymous catalog, clean test account | yes | yes | yes |
+| 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes |
 | 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename | yes | yes | yes |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes |
 | 5 | `vm` | VMs: create per tier, stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes |
 | 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes |
 | 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes |
-| 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (zone without an IPv6 block: negative cases only) | yes | yes | yes |
+| 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: negative cases only) | yes | yes | yes |
 | 9 | `tenant` | tenant, quota, terms consent | yes | yes | yes |
 | 10 | `api-token` | API tokens: create, call the API with one, duplicate name/secret, delete ⇒ `401`, unknown token | yes | yes | yes |
 | 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes |
@@ -129,10 +129,10 @@ OpenViCloud, needs an approved `L-x` command; `site` — the public site through
 
 **Spec** is `yes` when every case of the module in `plan.md` has a spec that ran green on staging at a release, except `(host)` cases (Phase 4
 of the release), **NOT COVERED** cases (the reason is in `plan.md`) and cases not applicable to the measured
-environment (the spec calls `test.skip` with the reason, e.g. VM-12 with a single zone). `ACT-*` cases are measured
+environment (the spec calls `test.skip` with the reason, e.g. VM-12 with a single cluster). `ACT-*` cases are measured
 in the module that owns the resource. A case with no spec yet gets one at the next release; a case no spec can be
-written for and that Phase 4 does not measure by hand is **NOT COVERED**, with the reason in its row of `plan.md`. Specs pick the first zone with a listed template (`lib/fixtures.ts`,
-`envOf()`); staging's zone is `singapore01`.
+written for and that Phase 4 does not measure by hand is **NOT COVERED**, with the reason in its row of `plan.md`. Specs pick the first cluster with a listed template (`lib/fixtures.ts`,
+`envOf()`); staging's cluster is `singapore01`.
 
 ## License
 

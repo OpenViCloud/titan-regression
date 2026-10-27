@@ -290,16 +290,16 @@ test.describe.serial('contract-spec', () => {
     }
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/ListTemplatesEndpoint.cs (ListTemplatesRequest: [QueryParam] ZoneId)
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/ListTemplatesEndpoint.cs (ListTemplatesRequest: [QueryParam] ClusterId)
   // · OpenViCloud/titan-ops:docs/features/public-api/design.md#spec-breaking-gate
-  test('CON-13 the served spec declares zoneId on GET /v1/templates as an optional query parameter', async () => {
+  test('CON-13 the served spec declares clusterId on GET /v1/templates as an optional query parameter', async () => {
     const spec = await fetchSpec()
     const op = spec.paths['/v1/templates']['get']
     const parameters = (op.parameters || []) as any[]
-    const zone = parameters.find((p) => p.name === 'zoneId')
+    const cluster = parameters.find((p) => p.name === 'clusterId')
     log(`CON-13 GET /v1/templates parameters=${JSON.stringify(parameters)}`)
-    expect(zone, 'zoneId must be declared').toBeTruthy()
-    expect(zone.in).toBe('query')
-    expect(zone.required === true).toBe(false)
+    expect(cluster, 'clusterId must be declared').toBeTruthy()
+    expect(cluster.in).toBe('query')
+    expect(cluster.required === true).toBe(false)
   })
 })

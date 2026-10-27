@@ -30,20 +30,20 @@ test.describe.serial('catalog', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VmTemplate/Contracts/TemplateQueryResult.cs (TemplateQueryResult)
-  test('CAT-02 templates of a zone carry no sizing and no offering', async () => {
-    const { zoneId } = await envOf()
-    const templates = await get('tenant', `/v1/templates?zoneId=${zoneId}`) as any[]
-    log(`CAT-02 ${zoneId}: ${templates.map((t) => t.name).join(', ')}`)
+  test('CAT-02 templates of a cluster carry no sizing and no offering', async () => {
+    const { clusterId } = await envOf()
+    const templates = await get('tenant', `/v1/templates?clusterId=${clusterId}`) as any[]
+    log(`CAT-02 ${clusterId}: ${templates.map((t) => t.name).join(', ')}`)
     expect(templates.length).toBeGreaterThan(0)
     for (const template of templates) {
       expect(Object.keys(template).sort()).toEqual(['description', 'diskGb', 'id', 'name', 'os'])
     }
-    // Every template the customer sees for the zone Exists there (OpenViCloud/titan-ops:docs/features/catalog/design.md#template-per-zone).
+    // Every template the customer sees for the cluster Exists there (OpenViCloud/titan-ops:docs/features/catalog/design.md#template-per-cluster).
     const admin = await get('admin', '/v1/admin/templates') as any[]
     for (const template of templates) {
       const row = admin.find((a) => a.id === template.id)
-      const zone = row.zones.find((z: any) => z.zoneId === zoneId)
-      expect(zone.currentExistence, `${template.name} in ${zoneId}`).toBe('Exists')
+      const cluster = row.clusters.find((z: any) => z.clusterId === clusterId)
+      expect(cluster.currentExistence, `${template.name} in ${clusterId}`).toBe('Exists')
     }
   })
 
@@ -55,8 +55,8 @@ test.describe.serial('catalog', () => {
     log(`CAT-10 admin: ${admin.map((a) => `${a.name}:${a.listed}`).join(' ')}`)
     expect(admin.every((a) => typeof a.listed === 'boolean'), 'every admin row carries listed').toBe(true)
     test.skip(unlisted.length === 0, 'no unlisted template on this env')
-    const { zoneId } = await envOf()
-    for (const path of ['/v1/templates', `/v1/templates?zoneId=${zoneId}`]) {
+    const { clusterId } = await envOf()
+    for (const path of ['/v1/templates', `/v1/templates?clusterId=${clusterId}`]) {
       const customer = await get('tenant', path) as any[]
       log(`CAT-10 ${path}: ${customer.map((t) => t.name).join(', ')}`)
       expect(customer.length, path).toBeGreaterThan(0)
@@ -66,94 +66,84 @@ test.describe.serial('catalog', () => {
     }
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Options/ZoneOptions.cs Require (ZONE_NOT_FOUND)
-  test('CAT-03 an unknown zone is 404 ZONE_NOT_FOUND', async () => {
-    expectError(await call('tenant', 'GET', '/v1/templates?zoneId=rg-no-such-zone'), 404, 'ZONE_NOT_FOUND')
+  // OpenViCloud/titan-control-plane:Titan.Application/Options/ClusterOptions.cs Require (CLUSTER_NOT_FOUND)
+  test('CAT-03 an unknown cluster is 404 CLUSTER_NOT_FOUND', async () => {
+    expectError(await call('tenant', 'GET', '/v1/templates?clusterId=rg-no-such-cluster'), 404, 'CLUSTER_NOT_FOUND')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VmTemplate/ListTemplatesQueryHandler.cs HandleAsync (ListSyncedInAnyZoneAsync) — no zone ⇒ synced in any zone
-  test('CAT-04 without a zone, every template listed Exists in at least one zone', async () => {
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VmTemplate/ListTemplatesQueryHandler.cs HandleAsync (ListSyncedInAnyClusterAsync) — no cluster ⇒ synced in any cluster
+  test('CAT-04 without a cluster, every template listed Exists in at least one cluster', async () => {
     const templates = await get('tenant', '/v1/templates') as any[]
     const admin = await get('admin', '/v1/admin/templates') as any[]
     for (const template of templates) {
       const row = admin.find((a) => a.id === template.id)
-      const somewhere = row.zones.some((z: any) => z.currentExistence === 'Exists')
+      const somewhere = row.clusters.some((z: any) => z.currentExistence === 'Exists')
       expect(somewhere, template.name).toBe(true)
     }
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/ListClustersEndpoint.cs (Configure: Get("v1/zones/{zoneId}/clusters"), AllowAnonymous),
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/ListClustersEndpoint.cs (Configure: Get("v1/clusters"), AllowAnonymous),
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/ListOsImagesEndpoint.cs (Configure: Get("v1/os-images"), AllowAnonymous)
-  test('CAT-05 clusters and OS images are read live from Incus', async () => {
-    const { zoneId } = await envOf()
-    const clusters = await get('anonymous', `/v1/zones/${zoneId}/clusters`) as any[]
-    log(`CAT-05 clusters of ${zoneId}: ${JSON.stringify(clusters).slice(0, 300)}`)
-    expect(clusters.length).toBeGreaterThan(0)
+  test('CAT-05 the configured clusters, and OS images read live from Incus', async () => {
+    const { clusterId } = await envOf()
+    const clusters = await get('anonymous', '/v1/clusters') as Array<{ id: string, name: string }>
+    log(`CAT-05 clusters: ${JSON.stringify(clusters).slice(0, 300)}`)
+    expect(clusters.map((c) => c.id)).toContain(clusterId)
+    for (const cluster of clusters) {
+      expect(Object.keys(cluster).sort()).toEqual(['id', 'name'])
+    }
     const images = await get('anonymous', '/v1/os-images') as any[]
     log(`CAT-05 os images: ${images.length}`)
     expect(images.length).toBeGreaterThan(0)
-    // A configured zone with no cluster row answers CLUSTER_NOT_FOUND. No env has such a zone today, so this loop
-    // usually checks nothing.
-    const zones = await get('anonymous', '/v1/zones') as Array<{ id: string }>
-    for (const zone of zones) {
-      if (zone.id === zoneId) {
-        continue
-      }
-      const reply = await call('anonymous', 'GET', `/v1/zones/${zone.id}/clusters`)
-      log(`CAT-05 clusters of ${zone.id}: ${reply.status} ${reply.text.slice(0, 200)}`)
-      if (reply.status !== 200) {
-        expectError(reply, 404, 'CLUSTER_NOT_FOUND')
-      }
-    }
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/SyncTemplatesEndpoint.cs HandleAsync (202);
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs HandleAsync (NeedsASyncRequest, RequestSyncIn)
   // a template with no image for the cluster architecture gives up (OpenViCloud/titan-ops:docs/features/catalog/design.md#template-architecture)
-  test('CAT-06 sync: every template ends Exists or gives up in the zone, none stays Syncing', async () => {
-    const { zoneId } = await envOf()
+  test('CAT-06 sync: every template ends Exists or gives up in the cluster, none stays Syncing', async () => {
+    const { clusterId } = await envOf()
     const reply = await call('admin', 'POST', '/v1/admin/templates/sync')
     expectStatus(reply, 202)
     expect(reply.text).toBe('')
     const settled = await pollUntil('CAT-06 sync', () => get('admin', '/v1/admin/templates') as Promise<any[]>,
-      (rows) => rows.every((r) => r.zones.find((z: any) => z.zoneId === zoneId).transition === null),
+      (rows) => rows.every((r) => r.clusters.find((z: any) => z.clusterId === clusterId).transition === null),
       (rows) => rows.map((r) => {
-        const z = r.zones.find((x: any) => x.zoneId === zoneId)
+        const z = r.clusters.find((x: any) => x.clusterId === clusterId)
         return `${r.name}=${z.currentExistence}/${z.transition}/${z.requestFailureReason}`
       }).join(' '))
     for (const row of settled) {
-      const zone = row.zones.find((z: any) => z.zoneId === zoneId)
-      const done = zone.currentExistence === 'Exists' || zone.requestFailureReason !== null
-      expect(done, `${row.name} in ${zoneId}`).toBe(true)
+      const cluster = row.clusters.find((z: any) => z.clusterId === clusterId)
+      const done = cluster.currentExistence === 'Exists' || cluster.requestFailureReason !== null
+      expect(done, `${row.name} in ${clusterId}`).toBe(true)
     }
-    expect(settled.some((r) => r.zones.find((z: any) => z.zoneId === zoneId).currentExistence === 'Exists')).toBe(true)
+    expect(settled.some((r) => r.clusters.find((z: any) => z.clusterId === clusterId).currentExistence === 'Exists')).toBe(true)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs HandleAsync (NeedsASyncRequest) — a zone whose cluster has the alias asks for nothing
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs HandleAsync (NeedsASyncRequest) — a cluster whose cluster has the alias asks for nothing
   test('CAT-07 a second sync leaves the templates that Exist as they are', async () => {
-    const { zoneId } = await envOf()
+    const { clusterId } = await envOf()
     const before = (await get('admin', '/v1/admin/templates') as any[])
-      .filter((r) => r.zones.find((z: any) => z.zoneId === zoneId).currentExistence === 'Exists').map((r) => r.id)
+      .filter((r) => r.clusters.find((z: any) => z.clusterId === clusterId).currentExistence === 'Exists').map((r) => r.id)
     expectStatus(await call('admin', 'POST', '/v1/admin/templates/sync'), 202)
     const after = await pollUntil('CAT-07 second sync', () => get('admin', '/v1/admin/templates') as Promise<any[]>,
-      (rows) => rows.every((r) => r.zones.find((z: any) => z.zoneId === zoneId).transition === null),
-      (rows) => rows.map((r) => `${r.name}=${r.zones.find((z: any) => z.zoneId === zoneId).currentExistence}`).join(' '))
+      (rows) => rows.every((r) => r.clusters.find((z: any) => z.clusterId === clusterId).transition === null),
+      (rows) => rows.map((r) => `${r.name}=${r.clusters.find((z: any) => z.clusterId === clusterId).currentExistence}`).join(' '))
     for (const id of before) {
-      const zone = after.find((r) => r.id === id).zones.find((z: any) => z.zoneId === zoneId)
-      expect(zone.currentExistence, id).toBe('Exists')
+      const cluster = after.find((r) => r.id === id).clusters.find((z: any) => z.clusterId === clusterId)
+      expect(cluster.currentExistence, id).toBe('Exists')
     }
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VmTemplate/Contracts/AdminTemplateQueryResult.cs (AdminTemplateQueryResult)
-  test('CAT-08 the admin template list carries vmOfferingId and existence per zone', async () => {
+  test('CAT-08 the admin template list carries vmOfferingId and existence per cluster', async () => {
     const rows = await get('admin', '/v1/admin/templates') as any[]
     const tiers = (await get('anonymous', '/v1/vm-offerings') as any[]).map((o) => o.id)
     expect(rows.length).toBeGreaterThan(0)
     for (const row of rows) {
       expect(tiers, `${row.name} borrows a real tier`).toContain(row.vmOfferingId)
-      expect(row.zones.length, row.name).toBeGreaterThan(0)
-      for (const zone of row.zones) {
-        expect(['NotCreated', 'Exists', 'NotFound']).toContain(zone.currentExistence)
+      expect(row.clusters.length, row.name).toBeGreaterThan(0)
+      for (const cluster of row.clusters) {
+        expect(['NotCreated', 'Exists', 'NotFound']).toContain(cluster.currentExistence)
       }
     }
     log(`CAT-08 ${rows.map((r) => `${r.name}→${r.vmOfferingId}`).join(' ')}`)

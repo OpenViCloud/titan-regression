@@ -255,7 +255,7 @@ def shared_data_rows(markdown):
 
 
 class SameLaneTest(unittest.TestCase):
-    """Modules that take from one zone-wide pool (an IPv6 /64) must not be spread over lanes."""
+    """Modules that take from one cluster-wide pool (an IPv6 /64) must not be spread over lanes."""
 
     def test_modules_of_a_same_lane_group_in_two_lanes_are_refused(self):
         plan = plan_of({"a": lane(m("load-balancer")), "b": lane(m("terraform-provider"))},

@@ -60,8 +60,8 @@ test.describe.serial('tenant-suspend', () => {
     const tenant = await get('tenant', '/v1/tenant')
     expect(tenant.status).toBe('Suspended')
     expectStatus(await call('tenant', 'GET', '/v1/tenant/vms'), 200)
-    const { zoneId } = await envOf()
-    const write = await call('tenant', 'POST', '/v1/tenant/networks', { name: `rg-susnet-${RUN}`, zoneId, cidr: '10.88.0.0/24' }, newKey())
+    const { clusterId } = await envOf()
+    const write = await call('tenant', 'POST', '/v1/tenant/networks', { name: `rg-susnet-${RUN}`, clusterId, cidr: '10.88.0.0/24' }, newKey())
     log(`SUS-01 write → ${write.status} ${write.text.slice(0, 200)}`)
     expectStatus(write, 403)
     expect(bodyOf(write).code).toBe('TENANT_SUSPENDED')
@@ -93,7 +93,7 @@ test.describe.serial('tenant-suspend', () => {
     suspended = false
     expect((await get('tenant', '/v1/tenant')).status).toBe('Active')
     // A write that changes nothing lasting: a create refused by its validator gets past the tenant gate.
-    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name: '', zoneId: '' }, newKey())
+    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name: '', clusterId: '' }, newKey())
     log(`SUS-03 write → ${reply.status} ${reply.text.slice(0, 200)}`)
     expectStatus(reply, 400)
     expect(bodyOf(reply).code).toBe('VALIDATION_ERROR')

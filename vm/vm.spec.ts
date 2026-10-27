@@ -7,7 +7,7 @@ import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, getVm, runN
 
 // Cases VM-01..19, VM-21 and VM-22 of plan.md, plus ACT-01/ACT-03 for VMs. VM-14 is NOT COVERED, VM-20 reads
 // the Incus host. Create checks run in this order
-// (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync): quota inside Vm.Create, zone,
+// (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync): quota inside Vm.Create, cluster,
 // name, network, offering, template — so the error cases run below the quota.
 test.describe.serial('vm', () => {
   test.describe.configure({ timeout: 15 * 60_000 })
@@ -51,20 +51,20 @@ test.describe.serial('vm', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/CreateVmValidator.cs CreateVmValidator (Name MaximumLength(64))
   test('VM-09 a 65-character name is 400 VALIDATION_ERROR', async () => {
-    const { zoneId, templateId, smallTier } = await envOf()
+    const { clusterId, templateId, smallTier } = await envOf()
     expectError(await call('tenant', 'POST', '/v1/tenant/vms',
-      { name: 'rg-' + 'x'.repeat(62), networkId, vmOfferingId: smallTier, templateId, zoneId, diskSizeGb: null }, newKey()),
+      { name: 'rg-' + 'x'.repeat(62), networkId, vmOfferingId: smallTier, templateId, clusterId, diskSizeGb: null }, newKey()),
       400, 'VALIDATION_ERROR')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync: zones.Require
-  // (OpenViCloud/titan-control-plane:Titan.Application/Options/ZoneOptions.cs Require), VM_OFFERING_NOT_FOUND, TEMPLATE_NOT_FOUND
-  test('VM-11 unknown offering, template, zone are 404 with their codes', async () => {
-    const { zoneId, templateId, smallTier } = await envOf()
-    const base = { name: `rg-vmx-${RUN}`, networkId, vmOfferingId: smallTier, templateId, zoneId, diskSizeGb: null }
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync: clusters.Require
+  // (OpenViCloud/titan-control-plane:Titan.Application/Options/ClusterOptions.cs Require), VM_OFFERING_NOT_FOUND, TEMPLATE_NOT_FOUND
+  test('VM-11 unknown offering, template, cluster are 404 with their codes', async () => {
+    const { clusterId, templateId, smallTier } = await envOf()
+    const base = { name: `rg-vmx-${RUN}`, networkId, vmOfferingId: smallTier, templateId, clusterId, diskSizeGb: null }
     expectError(await call('tenant', 'POST', '/v1/tenant/vms', { ...base, vmOfferingId: 'rg-none' }, newKey()), 404, 'VM_OFFERING_NOT_FOUND')
     expectError(await call('tenant', 'POST', '/v1/tenant/vms', { ...base, templateId: randomUUID() }, newKey()), 404, 'TEMPLATE_NOT_FOUND')
-    expectError(await call('tenant', 'POST', '/v1/tenant/vms', { ...base, zoneId: 'rg-no-such-zone' }, newKey()), 404, 'ZONE_NOT_FOUND')
+    expectError(await call('tenant', 'POST', '/v1/tenant/vms', { ...base, clusterId: 'rg-no-such-cluster' }, newKey()), 404, 'CLUSTER_NOT_FOUND')
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync (!template.IsListed ⇒ TEMPLATE_NOT_FOUND) — not listed ⇒ as if it did not exist
@@ -72,32 +72,32 @@ test.describe.serial('vm', () => {
     const admin = await get('admin', '/v1/admin/templates') as any[]
     const unlisted = admin.find((a) => a.listed === false)
     test.skip(unlisted === undefined, 'no unlisted template on this env')
-    const { zoneId, smallTier } = await envOf()
+    const { clusterId, smallTier } = await envOf()
     const name = `rg-vmu-${RUN}`
-    const body = { name, networkId, vmOfferingId: smallTier, templateId: unlisted.id, zoneId, diskSizeGb: null }
+    const body = { name, networkId, vmOfferingId: smallTier, templateId: unlisted.id, clusterId, diskSizeGb: null }
     log(`VM-22 template ${unlisted.name} (${unlisted.id})`)
     expectError(await call('tenant', 'POST', '/v1/tenant/vms', body, newKey()), 404, 'TEMPLATE_NOT_FOUND')
     const vms = await get('tenant', '/v1/tenant/vms') as any[]
     expect(vms.filter((v) => v.name === name)).toEqual([])
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Networking/Network/Network.cs BeginVmDeployment (NETWORK_ZONE_MISMATCH)
-  test('VM-12 a VM in another zone than its network is 422 NETWORK_ZONE_MISMATCH', async () => {
-    const zones = await get('anonymous', '/v1/zones') as Array<{ id: string }>
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Networking/Network/Network.cs BeginVmDeployment (NETWORK_CLUSTER_MISMATCH)
+  test('VM-12 a VM in another cluster than its network is 422 NETWORK_CLUSTER_MISMATCH', async () => {
+    const clusters = await get('anonymous', '/v1/clusters') as Array<{ id: string }>
     const usable: string[] = []
-    for (const zone of zones) {
-      const templates = await get('tenant', `/v1/templates?zoneId=${zone.id}`) as any[]
+    for (const cluster of clusters) {
+      const templates = await get('tenant', `/v1/templates?clusterId=${cluster.id}`) as any[]
       if (templates.length > 0) {
-        usable.push(zone.id)
+        usable.push(cluster.id)
       }
     }
-    test.skip(usable.length < 2, `N/A: one zone with templates (${usable.join(',')})`)
-    const { zoneId, smallTier } = await envOf()
-    const other = usable.find((z) => z !== zoneId)!
-    const templates = await get('tenant', `/v1/templates?zoneId=${other}`) as any[]
+    test.skip(usable.length < 2, `N/A: one cluster with templates (${usable.join(',')})`)
+    const { clusterId, smallTier } = await envOf()
+    const other = usable.find((z) => z !== clusterId)!
+    const templates = await get('tenant', `/v1/templates?clusterId=${other}`) as any[]
     expectError(await call('tenant', 'POST', '/v1/tenant/vms',
-      { name: `rg-vmz-${RUN}`, networkId, vmOfferingId: smallTier, templateId: templates[0].id, zoneId: other, diskSizeGb: null }, newKey()),
-      422, 'NETWORK_ZONE_MISMATCH')
+      { name: `rg-vmz-${RUN}`, networkId, vmOfferingId: smallTier, templateId: templates[0].id, clusterId: other, diskSizeGb: null }, newKey()),
+      422, 'NETWORK_CLUSTER_MISMATCH')
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/CreateVmEndpoint.cs HandleAsync; current comes from the reconciler:
@@ -117,9 +117,9 @@ test.describe.serial('vm', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync (ExistsByNameAsync ⇒ VM_NAME_TAKEN)
   test('VM-10 a second VM with a live name is 409 VM_NAME_TAKEN', async () => {
-    const { smallTier, zoneId, templateId } = await envOf()
+    const { smallTier, clusterId, templateId } = await envOf()
     expectError(await call('tenant', 'POST', '/v1/tenant/vms',
-      { name: nameA, networkId, vmOfferingId: smallTier, templateId, zoneId, diskSizeGb: null }, newKey()), 409, 'VM_NAME_TAKEN')
+      { name: nameA, networkId, vmOfferingId: smallTier, templateId, clusterId, diskSizeGb: null }, newKey()), 409, 'VM_NAME_TAKEN')
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync (offeringRepo.FindByIdAsync) — the tier asked for is resolved and kept on the VM
@@ -210,12 +210,12 @@ test.describe.serial('vm', () => {
     // A create that gave up and is still listed stays out of the count: VmRepositoryStateTests measures that rule;
     // on Incus nothing in this module makes a create give up any more.
     expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/quota`, { maxVms: counted + 1, maxNetworks: originalQuota!.maxNetworks }), 204)
-    const { smallTier, zoneId, templateId } = await envOf()
+    const { smallTier, clusterId, templateId } = await envOf()
     // A client that still sends the removed VM field is answered as before, not refused (portal before its update).
     const fits = await createVm(`rg-vmq-${RUN}`, smallTier, networkId, { enablePublicIpv6: true })
     made.push(fits)
     expectError(await call('tenant', 'POST', '/v1/tenant/vms',
-      { name: `rg-vmq2-${RUN}`, networkId, vmOfferingId: smallTier, templateId, zoneId, diskSizeGb: null }, newKey()), 422, 'VM_QUOTA_EXCEEDED')
+      { name: `rg-vmq2-${RUN}`, networkId, vmOfferingId: smallTier, templateId, clusterId, diskSizeGb: null }, newKey()), 422, 'VM_QUOTA_EXCEEDED')
     expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/quota`, originalQuota), 204)
     await waitVm('VM-15 extra VM has an instance', fits, (v) => v.currentExistence === 'Exists')
   })

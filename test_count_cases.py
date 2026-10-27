@@ -31,7 +31,7 @@ PLAN = """# Regression plan
 """
 
 LOG = """
-  ✓  1 [chromium] › e2e/smoke.spec.ts:10:7 › smoke › SMOKE-01..02 health and zones (1.0s)
+  ✓  1 [chromium] › e2e/smoke.spec.ts:10:7 › smoke › SMOKE-01..02 health and clusters (1.0s)
   ✓  2 [chromium] › e2e/firewall.spec.ts:84:7 › firewall › FW-01 a rule is 201 (1.5m)
   ✘  3 [chromium] › e2e/firewall.spec.ts:124:7 › firewall › FW-02 quota (2.2m)
   -  4 [chromium] › e2e/firewall.spec.ts:142:7 › firewall › FW-03 an unknown ruleId is 404
@@ -87,7 +87,7 @@ class TwoLanes(unittest.TestCase):
     LANE_A = "  ✓  1 [chromium] › e2e/smoke.spec.ts:10:7 › smoke › SMOKE-01..02 health (1s)\n" + \
              "  ✓  2 [chromium] › e2e/firewall.spec.ts:84:7 › firewall › FW-01 rule (1s)\n"
     LANE_B = "  ✓  1 [chromium] › e2e/smoke.spec.ts:10:7 › smoke › SMOKE-01 health (1s)\n" + \
-             "  ✘  2 [chromium] › e2e/smoke.spec.ts:20:7 › smoke › SMOKE-02 zones (1s)\n"
+             "  ✘  2 [chromium] › e2e/smoke.spec.ts:20:7 › smoke › SMOKE-02 clusters (1s)\n"
 
     def test_an_id_both_lanes_ran_is_counted_once_with_the_worst_mark(self):
         merged = count_cases.merge_marks([count_cases.log_marks(self.LANE_A), count_cases.log_marks(self.LANE_B)])

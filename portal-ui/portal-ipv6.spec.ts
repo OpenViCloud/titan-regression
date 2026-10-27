@@ -7,7 +7,7 @@ import { createVm, deleteVmAndWait, envOf, existenceShape, nameOf, waitNetwork, 
 // Cases UI-16..17 of plan.md: a network with public IPv6 through the form, a VM on it, and a load
 // balancer through its form. beta-user holds MaxNetworks = 1 (the shared run network, with no IPv6), so this
 // module raises maxNetworks by one for its own second network and gives it back in afterAll — the exact pattern
-// of load-balancer/load-balancer.spec.ts. Skips (not fails) when the zone's cluster has no IPv6 block.
+// of load-balancer/load-balancer.spec.ts. Skips (not fails) when the cluster has no IPv6 block.
 
 test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () => {
   test.describe.configure({ timeout: 20 * 60_000 })
@@ -78,11 +78,11 @@ test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () =
   // OpenViCloud/titan-ops:docs/features/network/design.md#ipv6-public · OpenViCloud/titan-ops:docs/features/cloud-console/design.md#quota-card
   // OpenViCloud/titan-cloud-console:portal/src/components/NetworkCreateModal.tsx · OpenViCloud/titan-cloud-console:portal/src/components/QuotaCard.tsx
   test('UI-16 a network with public IPv6 through the form, a VM on it, and the VM page showing its address', async () => {
-    const { zoneId, smallTier, templateId } = await envOf()
+    const { clusterId, smallTier, templateId } = await envOf()
     const clusters = await get('admin', '/v1/admin/clusters') as any[]
-    const block = clusters.find((c) => c.zoneId === zoneId)?.providerSettings?.ipv6Block ?? null
-    log(`UI-16 zone=${zoneId} ipv6Block=${block}`)
-    test.skip(!block, 'the zone has no IPv6 block configured')
+    const block = clusters.find((c) => c.clusterId === clusterId)?.providerSettings?.ipv6Block ?? null
+    log(`UI-16 cluster=${clusterId} ipv6Block=${block}`)
+    test.skip(!block, 'the cluster has no IPv6 block configured')
 
     // A wait on the API may sign in again (auth.ts headersOf) and close the old context: pageOf() again after
     // every wait.
@@ -103,9 +103,9 @@ test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () =
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: 'Create Network' })).toBeVisible()
     await dialog.getByPlaceholder('e.g. production-net').fill(networkName)
-    // The Zone <select> has a <label> with no htmlFor (OpenViCloud/titan-cloud-console:portal/src/components/NetworkCreateModal.tsx, Zone field), so it carries no accessible
+    // The Cluster <select> has a <label> with no htmlFor (OpenViCloud/titan-cloud-console:portal/src/components/NetworkCreateModal.tsx, Cluster field), so it carries no accessible
     // name — it is the dialog's only <select>, selected by position rather than by role name.
-    await dialog.locator('select').selectOption(zoneId)
+    await dialog.locator('select').selectOption(clusterId)
     await dialog.getByLabel('Enable public IPv6').check()
     await dialog.getByRole('button', { name: 'Create Network' }).click()
     await expect(dialog).toHaveCount(0)

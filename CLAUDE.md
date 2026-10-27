@@ -36,7 +36,7 @@ Repo này không có hệ thống nào để chạy: spec chạy bằng runner `
 │   ├── api.ts       #   gọi API, Idempotency-Key, poll tới khi current đạt đích
 │   ├── edge-retry.ts  # gửi lại một lần: connect timeout (mọi method, request chưa rời runner); GET gặp socket hỏng hoặc trang HTML của edge. Ghi gặp lỗi khác thì không gửi lại
 │   ├── clean-up.ts  #   cleanUp(steps) cho afterAll: chạy hết mọi bước dọn, gom lỗi, ném một lần ở cuối — một lỗi mạng không để lại quota nâng
-│   ├── fixtures.ts  #   tên rg-<loại>-<lượt>, chọn zone/template/tier theo env, tìm-hoặc-tạo network của lượt
+│   ├── fixtures.ts  #   tên rg-<loại>-<lượt>, chọn cluster/template/tier theo env, tìm-hoặc-tạo network của lượt
 │   ├── token.ts     #   newSecret(): bí mật token API ovc_…; callWithToken(): gọi API bằng token thay JWT
 │   └── local-proxy.ts  # tự bật khi URL là *.localhost (local-mac: issuer Keycloak mang cổng 8080)
 └── <module>/*.spec.ts
@@ -56,18 +56,18 @@ Repo này không có hệ thống nào để chạy: spec chạy bằng runner `
 
 ## Dữ liệu dùng chung giữa các lane
 
-Hai lane (`lanes.json`) chạy cùng lúc, mỗi lane một tenant test; `admin-test` và mọi thứ toàn zone là chung. Bảng dưới là phép đọc từng spec: module nào đổi quota, trạng thái hay dữ liệu lâu dài của tenant lane (tài nguyên `rg-*` tạo rồi xoá không kể), và cái gì nó đụng mà lane kia cũng đụng. `test_run_lanes.py` đối chiếu cột lane với `lanes.json` (đúng một hàng mỗi module, đúng lane). Module mới hay đổi lane ⇒ sửa hàng ở đây cùng PR.
+Hai lane (`lanes.json`) chạy cùng lúc, mỗi lane một tenant test; `admin-test` và mọi thứ toàn cluster là chung. Bảng dưới là phép đọc từng spec: module nào đổi quota, trạng thái hay dữ liệu lâu dài của tenant lane (tài nguyên `rg-*` tạo rồi xoá không kể), và cái gì nó đụng mà lane kia cũng đụng. `test_run_lanes.py` đối chiếu cột lane với `lanes.json` (đúng một hàng mỗi module, đúng lane). Module mới hay đổi lane ⇒ sửa hàng ở đây cùng PR.
 
 | Module | Lane | Đổi ở tenant của lane (trả lại nếu có ghi) | Chung giữa các lane |
 |---|---|---|---|
 | `smoke` | a, b | không | không |
-| `catalog` | a | không | `POST /v1/admin/templates/sync` đổi alias template của zone (chấp nhận: lane kia tạo VM từ template cùng lúc, rủi ro thấp) |
+| `catalog` | a | không | `POST /v1/admin/templates/sync` đổi alias template của cluster (chấp nhận: lane kia tạo VM từ template cùng lúc, rủi ro thấp) |
 | `network` | a | tạo network của lane (một slot) | không |
 | `firewall` | a | không | không (cap 20 rule mặc định) |
 | `vm` | a | VM-15 đặt `maxVms` = số VM đang đếm + 1, trả lại | không |
 | `vm-snapshot` | a | không | không (cap 3 mặc định) |
 | `volume` | a | không | không (cap 10 mặc định) |
-| `load-balancer` | a | nâng `maxNetworks`, trả lại | lấy một /64 IPv6 từ khối của zone |
+| `load-balancer` | a | nâng `maxNetworks`, trả lại | lấy một /64 IPv6 từ khối của cluster |
 | `tenant` | a | TEN-02 nâng `maxVms` thêm 1 (trả lại `maxVms` và `maxNetworks`); TEN-08 cũng vậy, đọc và trả lại cả 9 cap | đọc `/v1/tenants` (mọi tenant), chọn hàng theo id |
 | `api-token` | a | không | không |
 | `cli` | a | đồng ý điều khoản (bản ghi lâu dài) | không |
@@ -75,12 +75,12 @@ Hai lane (`lanes.json`) chạy cùng lúc, mỗi lane một tenant test; `admin-
 | `billing` | b | đo usage trên tenant của lane | ví `admin-test` (ghi, assert đúng số); danh sách topup Pending (BIL-10 tạo một cái tạm); audit log (BIL-07 ghi một dòng); giá tier và volume offering mà nó so chi phí |
 | `concurrency` | a | không | ví `admin-test` (assert đúng số, trả hoá đơn 4444 do `seed-invoices.sql` của lane b) |
 | `admin` | a | cộng 1 ₫ vào ví tenant của lane (ADM-08), đổi rồi trả `debtCeiling` | danh sách topup Pending (ADM-08 đòi nút Confirm trên mọi hàng Pending); audit log của mọi tenant; giá một tier +1 rồi trả (ADM-06, tier khác với tier của `billing`) |
-| `portal-ui` | a | nâng `maxNetworks` (IPv6), để lại topup Pending | lấy một /64 IPv6 từ khối của zone |
+| `portal-ui` | a | nâng `maxNetworks` (IPv6), để lại topup Pending | lấy một /64 IPv6 từ khối của cluster |
 | `tenant-suspend` | a | treo tenant của lane rồi trả `Active` | không |
 | `network-lifecycle` | a | xoá và tạo lại network của lane | không |
 | `login-page` | a | không | realm Keycloak (chỉ đọc) |
 | `cleanup` | a, b | xoá mọi `rg-*`/`tfacc-*` của tenant lane | không |
-| `terraform-provider` | a | tạo network, firewall rule, SSH key, VM, volume, LB bằng token của lane (token tạo rồi xoá) | lấy một /64 IPv6 từ khối của zone |
+| `terraform-provider` | a | tạo network, firewall rule, SSH key, VM, volume, LB bằng token của lane (token tạo rồi xoá) | lấy một /64 IPv6 từ khối của cluster |
 
 Luật rút ra, ghi ở `lanes.json`: `billing`↔`concurrency` (cùng ví `admin-test`) và `billing`↔`admin` (cùng danh sách topup Pending: topup tạm của BIL-10 làm ADM-08 gặp một hàng Pending lạ; cùng audit log và giá tier) không chồng nhau (`exclusive`); ba module lấy /64 IPv6 (`load-balancer`, `portal-ui`, `terraform-provider`) ở chung một lane (`same_lane`), vì hai lane cùng chọn một /64 thì tranh nhau chỉ mục unique. `contract` không đụng ví nên không bị khoá. Locator tìm hàng theo tên tenant bằng khớp chuỗi con (`hasText: 'beta-user'`) khớp cả hàng `beta-user-2`: tìm theo id, hoặc khớp có chặn đuôi `-<chữ>` như `tenantRowOf()` của `admin/admin-portal.spec.ts`.
 
@@ -89,7 +89,7 @@ Luật rút ra, ghi ở `lanes.json`: `billing`↔`concurrency` (cùng ví `admi
 - Cap per-resource đọc từ hằng mặc định của `TenantQuota` (20 rule/network, 3 snapshot/VM, 3 snapshot/volume) vì không API nào đọc được. Cap volume (10) nay `GET /v1/tenant` trả ở `maxVolumes`, nhưng spec VOL-05 vẫn dùng hằng. Tenant test có cap khác ⇒ FW-04, VMS-03, VOL-05, VOL-10 đỏ có chủ ý — đọc cap bằng SQL (`L-x` của release) trước khi chạy.
 - Mọi module có ghi quota trong bảng ở mục trên (VM-15, TEN-02, TEN-08, `load-balancer`, `portal-ui`) đổi quota của tenant lane rồi trả lại: VM-15, TEN-02 và TEN-08 trả lại ngay và trong `afterAll`; `load-balancer` và `portal-ui` chỉ trong `afterAll`. Pod bị giết giữa chừng ⇒ quota lệch: SMOKE-04 log quota đầu mỗi lượt để so.
 - FW-02, VMS-04, VMS-05 đọc trạng thái ngay sau request: cửa sổ là tới khi worker lease lệnh (poll 2 s) cộng thời gian provider làm — đỏ ở đây phải đối chiếu log trước khi ghi FINDING.
-- CAT-05 đọc `/v1/os-images` trước khi CAT-06 sync, nên cần image đã có sẵn trên cluster của zone.
+- CAT-05 đọc `/v1/os-images` trước khi CAT-06 sync, nên cần image đã có sẵn trên cluster.
 - `billing/seed-invoices.sql` mỗi lượt để lại trên `admin-test` một hoá đơn `New` 900.000.000 ₫ (BIL-06) — quá hạn sau 6 ngày, cộng dồn vào công nợ của `admin-test` trong receivables.
 - `admin` đổi giá một tier vài giây (ADM-06) mỗi lần chạy: trên staging cả module cần `L-x`.
 - `cli` đồng ý điều khoản thay `beta-user` nếu chưa đồng ý (`POST /v1/legal/acceptance` — bản ghi lâu dài).

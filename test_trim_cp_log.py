@@ -8,12 +8,12 @@ import unittest
 SCRIPT = pathlib.Path(__file__).resolve().parent / "trim-cp-log.py"
 
 LOG = """info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
-      Request starting HTTP/1.1 GET http://api/v1/zones - - -
+      Request starting HTTP/1.1 GET http://api/v1/clusters - - -
 info: Microsoft.EntityFrameworkCore.Database.Command[20101]
       Executed DbCommand (2ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
       SELECT 1
 info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
-      Executing endpoint 'HTTP: GET /v1/zones'
+      Executing endpoint 'HTTP: GET /v1/clusters'
 info: Titan.Application.Services.Billing.Metering.ComputeMeterService[0]
       meter tick wrote 3 records
 warn: Microsoft.EntityFrameworkCore.Database.Command[20102]
@@ -22,7 +22,7 @@ fail: Microsoft.AspNetCore.Hosting.Diagnostics[0]
       Unhandled exception
 === control-plane-abc since 2026-10-17T00:00:00Z
 info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
-      Request finished HTTP/1.1 GET http://api/v1/zones - 200
+      Request finished HTTP/1.1 GET http://api/v1/clusters - 200
 """
 
 
