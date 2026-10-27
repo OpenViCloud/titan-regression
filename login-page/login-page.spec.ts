@@ -4,7 +4,7 @@ import { RESULTS, log, startLog } from './api'
 import { startLocalProxyIfNeeded } from './local-proxy'
 
 // Cases LOGIN-01..10 of plan.md: the Keycloak login theme `openvicloud`, read without signing in.
-// Theme: OpenViCloud/titan-ops:gitops/keycloak/realm-import/theme/openvicloud/login/.
+// Theme: OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/.
 // Nothing is submitted: register is opened, never sent.
 // Every case leaves ${RESULTS}/<ID>-<what>.png; the form is empty when it is taken.
 
@@ -99,7 +99,7 @@ async function submitLabels(page: Page): Promise<string[]> {
     els.map((el) => ((el as HTMLInputElement).value || el.textContent || '').trim()))
 }
 
-// English text of the pages in scope: OpenViCloud/titan-ops:gitops/keycloak/realm-import/theme/openvicloud/login/messages/messages_en.properties,
+// English text of the pages in scope: OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/messages/messages_en.properties,
 // and keycloak.v2's own bundle.
 const ENGLISH = [
   'Sign in to your account', 'Username or email', 'New user?', 'Or sign in with',
@@ -115,7 +115,7 @@ test.describe('login-page', () => {
     startLog('login-page')
   })
 
-  // OpenViCloud/titan-ops:gitops/keycloak/realm-import/theme/openvicloud/login/resources/css/openvicloud.css:
+  // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/resources/css/openvicloud.css:
   // row layout from 900 px, column with the panel as a band between header and form below it
   test('LOGIN-01 split layout at 1280 px, panel band above the form at 375 px', async ({ browser }) => {
     const wide = await open(browser, 'light', 1280)
@@ -165,8 +165,8 @@ test.describe('login-page', () => {
     }
   })
 
-  // OpenViCloud/titan-ops:gitops/keycloak/realm-import/configmap.yaml titan.json displayName;
-  // OpenViCloud/titan-ops:gitops/keycloak/realm-import/theme/openvicloud/login/template.ftl .ovc-brand-name
+  // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/configmap.yaml titan.json displayName;
+  // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/template.ftl .ovc-brand-name
   test('LOGIN-03 brand is OpenViCloud on login, register and device, no Titan Cloud', async ({ browser }) => {
     const { context, page } = await open(browser, 'light', 1280)
     const url = await loginUrl(page)
@@ -201,8 +201,8 @@ test.describe('login-page', () => {
     await context.close()
   })
 
-  // OpenViCloud/titan-ops:gitops/keycloak/realm-import/theme/openvicloud/login/resources/css/openvicloud.css @font-face: Be Vietnam Pro from
-  // OpenViCloud/titan-ops:gitops/keycloak/realm-import/theme/openvicloud/login/resources/fonts
+  // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/resources/css/openvicloud.css @font-face: Be Vietnam Pro from
+  // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/resources/fonts
   test('LOGIN-05 fonts come from the Keycloak host, none from Google', async ({ browser }) => {
     // The URL comes from one context; the fonts are counted in a fresh one that opens only Keycloak, so the
     // portal's own fonts (loaded before the redirect) are not counted.
@@ -240,7 +240,7 @@ test.describe('login-page', () => {
     await context.close()
   })
 
-  // OpenViCloud/titan-ops:gitops/keycloak/realm-import/configmap-user-profile.yaml: username, email, profileName
+  // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/configmap-user-profile.yaml: username, email, profileName
   // (optional); no firstName/lastName
   test('LOGIN-06 register asks for Username, Password, Confirm password, Email, optional Profile name', async ({ browser }) => {
     const { context, page } = await open(browser, 'light', 1280)
@@ -260,8 +260,8 @@ test.describe('login-page', () => {
     await context.close()
   })
 
-  // realm i18n en/vi (OpenViCloud/titan-ops:gitops/keycloak/realm-import/configmap.yaml titan.json supportedLocales);
-  // OpenViCloud/titan-ops:gitops/keycloak/realm-import/theme/openvicloud/login/messages/messages_vi.properties;
+  // realm i18n en/vi (OpenViCloud/titan-local-cluster:base/keycloak/realm-import/configmap.yaml titan.json supportedLocales);
+  // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/messages/messages_vi.properties;
   // an unsupported locale falls back to the default (en)
   test('LOGIN-07 ui_locales decides the language with an en-US browser; fr falls back to English', async ({ browser }) => {
     const { context, page } = await open(browser, 'light', 1280)
@@ -351,7 +351,7 @@ test.describe('login-page', () => {
     await browserVi.context.close()
   })
 
-  // OpenViCloud/titan-ops:gitops/keycloak/realm-import/theme/openvicloud/login/template.ftl #login-select-toggle:
+  // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/template.ftl #login-select-toggle:
   // options from the realm's supported locales
   test('LOGIN-09 the language picker offers English and Tiếng Việt and switches the page', async ({ browser }) => {
     const { context, page } = await open(browser, 'light', 1280)

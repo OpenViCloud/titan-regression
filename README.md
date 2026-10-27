@@ -6,7 +6,7 @@ release the whole suite runs against staging; a release pins the commit of this 
 
 The specs drive the public API, the portals and the CLI of a running OpenViCloud environment. They do not run on a
 laptop: each module runs as a job of the `titan-regression` runner inside the cluster (its manifests are in
-[titan-ops's `gitops/regression-runner/`](https://github.com/OpenViCloud/titan-ops/tree/main/gitops/regression-runner)),
+[titan-local-cluster's `base/regression-runner/`](https://github.com/OpenViCloud/titan-local-cluster/tree/main/base/regression-runner)),
 which signs in with the test accounts there, so no credential passes through the machine that starts the run.
 
 ## Layout
