@@ -2,7 +2,7 @@
 
 Bộ spec regression **bền** của OpenViCloud: mọi hành vi còn đúng ở release sau có một case trong [`plan.md`](plan.md) và một spec ở đây. Quy trình (ai thêm case, ai viết spec, chạy thế nào) sống ở repo [`OpenViCloud/titan-ops`](https://github.com/OpenViCloud/titan-ops): `iteration:enhance-regression-plan` thêm case của story vào `plan.md` sau mỗi lần deploy dev; [`release:regression`](https://github.com/OpenViCloud/titan-ops/blob/main/.claude/commands/release/regression.md) viết spec cho case chưa có spec rồi chạy **hết** repo này trên staging, ở sha `release-plan.md` ghim. Bảng module và thứ tự: [README](README.md).
 
-Repo này không có hệ thống nào để chạy: spec chạy bằng runner `titan-regression` (lane B: `titan-regression-b`) trong cụm (manifest ở `OpenViCloud/titan-ops:gitops/regression-runner/`), không trên máy agent. CI chỉ chạy test của tooling (`selftest/`, `test_*.py`).
+Repo này không có hệ thống nào để chạy: spec chạy bằng runner `titan-regression` (lane B: `titan-regression-b`) trong cụm (manifest ở `OpenViCloud/titan-local-cluster:base/regression-runner/`), không trên máy agent. CI chỉ chạy test của tooling (`selftest/`, `test_*.py`).
 
 ## Cây thư mục
 

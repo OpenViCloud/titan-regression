@@ -17,7 +17,7 @@ import { newSecret } from './token'
 // Tokens stay in this process.
 //
 // Login and the binary wait are file-level (outside every describe): Playwright restarts the worker process after
-// any failed test in this file (workers: 1, fullyParallel: false — OpenViCloud/titan-ops:gitops/regression-runner/runner-configmap.yaml),
+// any failed test in this file (workers: 1, fullyParallel: false — OpenViCloud/titan-local-cluster:base/regression-runner/runner-configmap.yaml),
 // which drops module state (authUrl, browserRef) and re-runs only the hooks of describes that still have tests
 // left — a root-level beforeAll runs again, a nested one does not. The CLI's own session lives on disk under
 // CLI_HOME and survives a worker restart, so login happens at most once. A red case in CLI-06..11's serial chain
