@@ -51,7 +51,7 @@ Kỳ vọng chung cho mọi case tạo tài nguyên (không nhắc lại từng 
 | NET-07 | tạo network thứ hai tên mới, CIDR trùng network của lượt | `422 NETWORK_CIDR_OVERLAP` (kiểm trước quota) | [network §network-lifecycle](https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/network/design.md#network-lifecycle) |
 | NET-08 (host) | `incus network show net-<networkId>` | network OVN không uplink (`network=none`), ACL `acl-<networkId>` gắn vào | [network §firewall-on-incus](https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/network/design.md#firewall-on-incus) |
 | NET-09 | `admin-test` `GET`/`DELETE` network của lượt (của `beta-user`) | `404 NETWORK_NOT_FOUND` | [tenancy §tenant-isolation](https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/tenancy-and-admin.md#tenant-isolation) |
-| NET-10 | tạo network `enablePublicIpv6: true` ở cluster mà cluster không khai khối IPv6 (cluster có khối ⇒ skip) | `422 IPV6_NOT_AVAILABLE` | [network §ipv6-public](https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/network/design.md#ipv6-public) |
+| NET-10 | tạo network `enablePublicIpv6: true` ở cluster không khai khối IPv6 (cluster có khối ⇒ skip) | `422 IPV6_NOT_AVAILABLE` | [network §ipv6-public](https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/network/design.md#ipv6-public) |
 
 ## firewall
 

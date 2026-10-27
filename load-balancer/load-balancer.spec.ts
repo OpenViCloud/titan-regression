@@ -6,7 +6,7 @@ import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, existenceSh
 
 // Cases LB-01..LB-07 and LB-09 of plan.md (LB-08, traffic through the VIP, reads the Incus host). The run network has
 // no public IPv6 and beta-user holds one network, so the positive cases raise maxNetworks by one for a second network
-// with IPv6, and give it back in afterAll — in a cluster whose cluster has no IPv6 block they are skipped.
+// with IPv6, and give it back in afterAll — in a cluster that names no IPv6 block they are skipped.
 test.describe.serial('load-balancer', () => {
   test.describe.configure({ timeout: 20 * 60_000 })
 

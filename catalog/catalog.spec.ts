@@ -119,7 +119,7 @@ test.describe.serial('catalog', () => {
     expect(settled.some((r) => r.clusters.find((z: any) => z.clusterId === clusterId).currentExistence === 'Exists')).toBe(true)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs HandleAsync (NeedsASyncRequest) — a cluster whose cluster has the alias asks for nothing
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs HandleAsync (NeedsASyncRequest) — a cluster that has the alias asks for nothing
   test('CAT-07 a second sync leaves the templates that Exist as they are', async () => {
     const { clusterId } = await envOf()
     const before = (await get('admin', '/v1/admin/templates') as any[])

@@ -100,7 +100,7 @@ test.describe.serial('network', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs FreePublicIpv6Async — a
-  // cluster whose cluster names no IPv6 block refuses; a cluster with one is skipped here
+  // cluster that names no IPv6 block refuses; a cluster with one is skipped here
   test('NET-10 a network asking for public IPv6 in a cluster without an IPv6 block is 422 IPV6_NOT_AVAILABLE', async () => {
     const { clusterId } = await envOf()
     const clusters = await get('admin', '/v1/admin/clusters') as any[]
