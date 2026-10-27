@@ -113,41 +113,41 @@ test.describe.serial('portal-ui forms: network, firewall, volume and VM form val
   })
 
   // OpenViCloud/titan-ops:docs/features/network/design.md#network-portal · OpenViCloud/titan-cloud-console:portal/src/components/NetworkCreateModal.tsx
-  // (zoneRequired, shown under the field) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts, OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts (networkCreate.zoneRequired)
-  test('UI-19 Create Network with no zone shows a field error and sends no request', async () => {
+  // (clusterRequired, shown under the field) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts, OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts (networkCreate.clusterRequired)
+  test('UI-19 Create Network with no cluster shows a field error and sends no request', async () => {
     const page = await pageOf('tenant')
     await page.goto(PORTAL + '/networks', { waitUntil: 'networkidle' })
     await page.getByRole('button', { name: 'Create Network' }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: 'Create Network' })).toBeVisible()
-    await dialog.getByPlaceholder('e.g. production-net').fill(nameOf('netnozone'))
+    await dialog.getByPlaceholder('e.g. production-net').fill(nameOf('netnocluster'))
 
     let posted = false
     page.on('request', (req) => {
       if (req.method() === 'POST' && req.url().includes('/v1/tenant/networks')) posted = true
     })
     await dialog.getByRole('button', { name: 'Create Network' }).click()
-    await expect(dialog.getByText('Choose a zone')).toBeVisible()
+    await expect(dialog.getByText('Choose a cluster')).toBeVisible()
     await page.waitForTimeout(500) // give a wrongly-sent request a moment to show up before asserting its absence
-    expect(posted, 'no POST should be sent while the zone field is in error').toBe(false)
+    expect(posted, 'no POST should be sent while the cluster field is in error').toBe(false)
     await expect(dialog).toBeVisible() // the dialog stays open — the create was never attempted
-    await page.screenshot({ path: `${RESULTS}/UI-19-zone-required.png` })
+    await page.screenshot({ path: `${RESULTS}/UI-19-cluster-required.png` })
     await page.keyboard.press('Escape')
-    log('UI-19 "Choose a zone" shown, no POST sent')
+    log('UI-19 "Choose a cluster" shown, no POST sent')
   })
 
   // OpenViCloud/titan-ops:docs/features/vm/design.md#vm-portal · OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx
   // (choicesRequired, shown as apiError when the template is left empty) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts (vmCreate.choicesRequired)
-  test('UI-24 Create VM with no template shows "Choose a zone, network, template and size." and sends no request', async () => {
+  test('UI-24 Create VM with no template shows "Choose a cluster, network, template and size." and sends no request', async () => {
     await runNetwork() // the Network select must offer at least one usable network, or Create VM stays disabled
-    const { zoneId, smallTier } = await envOf()
+    const { clusterId, smallTier } = await envOf()
     const page = await pageOf('tenant')
     await page.goto(PORTAL + '/vms', { waitUntil: 'networkidle' })
     await page.getByRole('button', { name: 'Create VM' }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: 'Create Virtual Machine' })).toBeVisible()
     await dialog.getByPlaceholder('e.g. web-server-01').fill(nameOf('vmnotpl'))
-    await dialog.getByRole('combobox', { name: 'Zone' }).selectOption(zoneId)
+    await dialog.getByRole('combobox', { name: 'Cluster' }).selectOption(clusterId)
     const network = await runNetwork()
     await dialog.getByRole('combobox', { name: 'Network' }).selectOption(network.id)
     // Template left at its placeholder ('') on purpose; Size is filled so only the template is missing.
@@ -158,7 +158,7 @@ test.describe.serial('portal-ui forms: network, firewall, volume and VM form val
       if (req.method() === 'POST' && req.url().includes('/v1/tenant/vms')) posted = true
     })
     await dialog.getByRole('button', { name: 'Create VM' }).click()
-    await expect(dialog.getByText('Choose a zone, network, template and size.')).toBeVisible()
+    await expect(dialog.getByText('Choose a cluster, network, template and size.')).toBeVisible()
     await page.waitForTimeout(500)
     expect(posted, 'no POST should be sent while a required choice is missing').toBe(false)
     await expect(dialog).toBeVisible()
@@ -224,9 +224,9 @@ test.describe.serial('portal-ui forms: network, firewall, volume and VM form val
   // (handleConfirmDelete: VOLUME_HAS_SNAPSHOTS → t.volumes.hasSnapshots toast; dialog closes via setDeleteTarget(null) either way)
   // OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts (volumes.hasSnapshots)
   test('UI-21 deleting a volume that still has a snapshot is refused, the dialog closes, the volume stays', async () => {
-    const { zoneId, volumeOfferingId } = await envOf()
+    const { clusterId, volumeOfferingId } = await envOf()
     const created = await call('tenant', 'POST', '/v1/tenant/volumes',
-      { name: volumeName, volumeOfferingId, zoneId, sizeGb: 1 }, newKey())
+      { name: volumeName, volumeOfferingId, clusterId, sizeGb: 1 }, newKey())
     expectStatus(created, 202)
     volumeId = bodyOf(created).volumeId as string
     await pollUntil('UI-21 volume ready', () => get('tenant', '/v1/tenant/volumes').then((rows: any[]) => rows.find((v) => v.id === volumeId)),
@@ -262,7 +262,7 @@ test.describe.serial('portal-ui forms: network, firewall, volume and VM form val
   // the interval the VM list itself refetches at while a row waits)
   test('UI-20 creating a VM through the form: Delete is disabled only while Creating and NotCreated, enabled once Exists', async () => {
     const POLL_MS = 5_000
-    const { zoneId, templateId, smallTier } = await envOf()
+    const { clusterId, templateId, smallTier } = await envOf()
     const network = await runNetwork()
     let page = await pageOf('tenant')
     await page.goto(PORTAL + '/vms', { waitUntil: 'networkidle' })
@@ -270,7 +270,7 @@ test.describe.serial('portal-ui forms: network, firewall, volume and VM form val
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: 'Create Virtual Machine' })).toBeVisible()
     await dialog.getByPlaceholder('e.g. web-server-01').fill(vmName20)
-    await dialog.getByRole('combobox', { name: 'Zone' }).selectOption(zoneId)
+    await dialog.getByRole('combobox', { name: 'Cluster' }).selectOption(clusterId)
     await dialog.getByRole('combobox', { name: 'Network' }).selectOption(network.id)
     await dialog.getByRole('combobox', { name: 'Template' }).selectOption(templateId)
     await dialog.getByRole('combobox', { name: 'Size' }).selectOption(smallTier)

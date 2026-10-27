@@ -6,7 +6,7 @@ import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, existenceSh
 
 // Cases LB-01..LB-07 and LB-09 of plan.md (LB-08, traffic through the VIP, reads the Incus host). The run network has
 // no public IPv6 and beta-user holds one network, so the positive cases raise maxNetworks by one for a second network
-// with IPv6, and give it back in afterAll — in a zone whose cluster has no IPv6 block they are skipped.
+// with IPv6, and give it back in afterAll — in a cluster that names no IPv6 block they are skipped.
 test.describe.serial('load-balancer', () => {
   test.describe.configure({ timeout: 20 * 60_000 })
 
@@ -105,15 +105,15 @@ test.describe.serial('load-balancer', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Compute/LoadBalancer/LoadBalancerVip.cs (LoadBalancerVip) — interface id 0:0:1:n of the /64
   test('LB-03 on an IPv6 network with a VM: 202, then Exists, VIP <64>::1:1, the VM as backend', async () => {
-    const { zoneId, smallTier } = await envOf()
+    const { clusterId, smallTier } = await envOf()
     const clusters = await get('admin', '/v1/admin/clusters') as any[]
-    const block = clusters.find((c) => c.zoneId === zoneId)?.providerSettings?.ipv6Block ?? null
-    log(`LB-03 zone=${zoneId} ipv6Block=${block}`)
-    test.skip(!block, 'the zone has no IPv6 block')
+    const block = clusters.find((c) => c.clusterId === clusterId)?.providerSettings?.ipv6Block ?? null
+    log(`LB-03 cluster=${clusterId} ipv6Block=${block}`)
+    test.skip(!block, 'the cluster has no IPv6 block')
 
     expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/quota`,
       { maxVms: originalQuota!.maxVms, maxNetworks: originalQuota!.maxNetworks + 1 }), 204)
-    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name: `rg-net6-${RUN}`, zoneId, enablePublicIpv6: true }, newKey())
+    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name: `rg-net6-${RUN}`, clusterId, enablePublicIpv6: true }, newKey())
     expectStatus(reply, 202)
     ipv6NetworkId = bodyOf(reply).networkId
     const network = await waitNetwork('IPv6 network usable', ipv6NetworkId, networkUsable)

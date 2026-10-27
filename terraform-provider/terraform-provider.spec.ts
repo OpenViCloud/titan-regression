@@ -56,7 +56,7 @@ test('TFP-01..03, TFP-05..07, TFP-09..10 the provider acceptance tests pass agai
       cwd: '/work/tfacc',
       env: {
         PATH: process.env.PATH, HOME: '/work', TMPDIR: '/work/tfacc',
-        TF_ACC: '1', OPENVICLOUD_API_URL: API, OPENVICLOUD_TOKEN: secret, OPENVICLOUD_TEST_ZONE: 'singapore01',
+        TF_ACC: '1', OPENVICLOUD_API_URL: API, OPENVICLOUD_TOKEN: secret, OPENVICLOUD_TEST_CLUSTER: 'singapore01',
       },
     })
     // Masked once at the end: a secret split across two chunks would pass a per-chunk mask.

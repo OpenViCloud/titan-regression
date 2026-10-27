@@ -72,8 +72,8 @@ test.describe.serial('network-lifecycle', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/NetworkRepository.cs ExistsByNameAsync — a Deleted network no longer holds its name
   test('NETL-03 a network may take the name and CIDR of a Deleted one', async () => {
-    const { zoneId } = await envOf()
-    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name: networkName, zoneId, cidr: RUN_CIDR }, newKey())
+    const { clusterId } = await envOf()
+    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name: networkName, clusterId, cidr: RUN_CIDR }, newKey())
     expectStatus(reply, 202)
     recreatedId = bodyOf(reply).networkId
     await waitNetwork('NETL-03', recreatedId, networkUsable)

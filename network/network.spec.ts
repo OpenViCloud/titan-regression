@@ -33,16 +33,16 @@ test.describe.serial('network', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Auth/IdempotencyMiddleware.cs InvokeAsync (IDEMPOTENCY_KEY_REQUIRED)
   test('NET-01 create without Idempotency-Key is 400 IDEMPOTENCY_KEY_REQUIRED and makes nothing', async () => {
-    const { zoneId } = await envOf()
-    expectError(await call('tenant', 'POST', '/v1/tenant/networks', { name, zoneId, cidr: RUN_CIDR }), 400, 'IDEMPOTENCY_KEY_REQUIRED')
+    const { clusterId } = await envOf()
+    expectError(await call('tenant', 'POST', '/v1/tenant/networks', { name, clusterId, cidr: RUN_CIDR }), 400, 'IDEMPOTENCY_KEY_REQUIRED')
     expect((await listNetworks()).some((n) => n.name === name)).toBe(false)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs HandleAsync (name, CIDR and zone checks);
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs HandleAsync (name, CIDR and cluster checks);
   // the reconciler reports Created (OpenViCloud/titan-ops:docs/features/network/design.md#network-lifecycle)
   test('NET-02 create with a key and a cidr is 202 {networkId}, then Created and Exists', async () => {
-    const { zoneId } = await envOf()
-    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name, zoneId, cidr: RUN_CIDR }, key)
+    const { clusterId } = await envOf()
+    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name, clusterId, cidr: RUN_CIDR }, key)
     expectStatus(reply, 202)
     networkId = bodyOf(reply).networkId
     expect(Object.keys(bodyOf(reply))).toEqual(['networkId'])
@@ -57,8 +57,8 @@ test.describe.serial('network', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Auth/IdempotencyMiddleware.cs InvokeAsync (IdempotencyDecision.Replay) — the same key and body replay the stored answer
   test('NET-03 the same key and body answers the same networkId and makes no second network', async () => {
-    const { zoneId } = await envOf()
-    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name, zoneId, cidr: RUN_CIDR }, key)
+    const { clusterId } = await envOf()
+    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name, clusterId, cidr: RUN_CIDR }, key)
     expectStatus(reply, 202)
     expect(bodyOf(reply).networkId).toBe(networkId)
     expect((await listNetworks()).filter((n) => n.name === name).length).toBe(1)
@@ -66,19 +66,19 @@ test.describe.serial('network', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Auth/IdempotencyMiddleware.cs InvokeAsync (IDEMPOTENCY_KEY_REUSED)
   test('NET-04 the same key with another body is 422 IDEMPOTENCY_KEY_REUSED', async () => {
-    const { zoneId } = await envOf()
-    expectError(await call('tenant', 'POST', '/v1/tenant/networks', { name: `${name}-other`, zoneId, cidr: '10.78.0.0/24' }, key),
+    const { clusterId } = await envOf()
+    expectError(await call('tenant', 'POST', '/v1/tenant/networks', { name: `${name}-other`, clusterId, cidr: '10.78.0.0/24' }, key),
       422, 'IDEMPOTENCY_KEY_REUSED')
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs HandleAsync (NetworkAggregate.Create) — quota refuses in the factory, after the name and CIDR checks
   test('NET-05 a second network (new name, free CIDR) past maxNetworks is 422 NETWORK_QUOTA_EXCEEDED', async () => {
-    const { zoneId } = await envOf()
+    const { clusterId } = await envOf()
     const tenant = await get('tenant', '/v1/tenant')
     const live = (await listNetworks()).filter((n) => n.desiredExistence === 'Exists').length
     log(`NET-05 maxNetworks=${tenant.maxNetworks} live=${live}`)
     test.skip(live < tenant.maxNetworks, `N/A: the tenant still has room (maxNetworks=${tenant.maxNetworks}, live=${live})`)
-    expectError(await call('tenant', 'POST', '/v1/tenant/networks', { name: `rg-net2-${RUN}`, zoneId, cidr: '10.77.0.0/24' }, newKey()),
+    expectError(await call('tenant', 'POST', '/v1/tenant/networks', { name: `rg-net2-${RUN}`, clusterId, cidr: '10.77.0.0/24' }, newKey()),
       422, 'NETWORK_QUOTA_EXCEEDED')
   })
 
@@ -94,20 +94,20 @@ test.describe.serial('network', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs HandleAsync (HasCidrOverlapAsync) — the CIDR check runs before quota
   test('NET-07 a second network whose CIDR overlaps the run network is 422 NETWORK_CIDR_OVERLAP', async () => {
-    const { zoneId } = await envOf()
-    expectError(await call('tenant', 'POST', '/v1/tenant/networks', { name: `rg-net3-${RUN}`, zoneId, cidr: '10.76.0.128/25' }, newKey()),
+    const { clusterId } = await envOf()
+    expectError(await call('tenant', 'POST', '/v1/tenant/networks', { name: `rg-net3-${RUN}`, clusterId, cidr: '10.76.0.128/25' }, newKey()),
       422, 'NETWORK_CIDR_OVERLAP')
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs FreePublicIpv6Async — a
-  // zone whose cluster names no IPv6 block refuses; a zone with one is skipped here
-  test('NET-10 a network asking for public IPv6 in a zone without an IPv6 block is 422 IPV6_NOT_AVAILABLE', async () => {
-    const { zoneId } = await envOf()
+  // cluster that names no IPv6 block refuses; a cluster with one is skipped here
+  test('NET-10 a network asking for public IPv6 in a cluster without an IPv6 block is 422 IPV6_NOT_AVAILABLE', async () => {
+    const { clusterId } = await envOf()
     const clusters = await get('admin', '/v1/admin/clusters') as any[]
-    const cluster = clusters.find((c) => c.zoneId === zoneId)
-    log(`NET-10 zone=${zoneId} ipv6Block=${cluster?.providerSettings?.ipv6Block ?? null}`)
-    test.skip(Boolean(cluster?.providerSettings?.ipv6Block), 'the zone has an IPv6 block')
-    expectError(await call('tenant', 'POST', '/v1/tenant/networks', { name: `rg-net6-${RUN}`, zoneId, enablePublicIpv6: true }, newKey()),
+    const cluster = clusters.find((c) => c.clusterId === clusterId)
+    log(`NET-10 cluster=${clusterId} ipv6Block=${cluster?.providerSettings?.ipv6Block ?? null}`)
+    test.skip(Boolean(cluster?.providerSettings?.ipv6Block), 'the cluster has an IPv6 block')
+    expectError(await call('tenant', 'POST', '/v1/tenant/networks', { name: `rg-net6-${RUN}`, clusterId, enablePublicIpv6: true }, newKey()),
       422, 'IPV6_NOT_AVAILABLE')
   })
 

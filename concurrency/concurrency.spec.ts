@@ -60,10 +60,10 @@ test.describe.serial('concurrency', () => {
   // OpenViCloud/titan-ops:docs/architecture/http-contract.md#idempotency-key — the second request under a key in flight is 409
   // IDEMPOTENCY_IN_PROGRESS, or replays the first one's answer
   test('CC-02 two creates with one Idempotency-Key at once make one volume', async () => {
-    const { zoneId, volumeOfferingId } = await envOf()
+    const { clusterId, volumeOfferingId } = await envOf()
     const name = `rg-ccvol-${RUN}`
     const key = newKey()
-    const body = { name, volumeOfferingId, zoneId, sizeGb: 1 }
+    const body = { name, volumeOfferingId, clusterId, sizeGb: 1 }
     const replies = await Promise.all([
       call('tenant', 'POST', '/v1/tenant/volumes', body, key),
       call('tenant', 'POST', '/v1/tenant/volumes', body, key),

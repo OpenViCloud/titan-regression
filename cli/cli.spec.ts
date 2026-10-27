@@ -445,27 +445,27 @@ test.describe.serial('cli', () => {
 // Runs outside the serial VM/ssh chain: a catalog read does not depend on CLI-06..11, and must not be skipped when a
 // case of that chain goes red.
 test.describe('cli catalog', () => {
-  // OpenViCloud/titan-cli:command/catalog/catalog.go NewZone (zone list) ·
+  // OpenViCloud/titan-cli:command/catalog/catalog.go NewCluster (cluster list) ·
   // OpenViCloud/titan-ops:docs/architecture/money-and-wallet.md#money-is-long-vnd (the money-of-tenant part
   // of CLI-05 stays NOT COVERED in plan.md: no CLI command reads a tenant's own cost yet)
-  test('CLI-05 zone/template/size list match GET /v1/zones, /v1/templates, /v1/vm-offerings to every digit', async () => {
-    const { zoneId } = await envOf()
+  test('CLI-05 cluster/template/size list match GET /v1/clusters, /v1/templates, /v1/vm-offerings to every digit', async () => {
+    const { clusterId } = await envOf()
 
-    const zoneResult = await runCli(['zone', 'list', '-o', 'json'])
-    expect(zoneResult.code, zoneResult.stderr).toBe(0)
-    const zonesFromCli = JSON.parse(zoneResult.stdout) as Array<{ id: string, name: string }>
-    const zonesFromApi = await get('anonymous', '/v1/zones') as Array<{ id: string, name: string }>
-    expect(zonesFromCli.map((z) => z.id).sort()).toEqual(zonesFromApi.map((z) => z.id).sort())
-    for (const zone of zonesFromApi) {
-      const fromCli = zonesFromCli.find((z) => z.id === zone.id)
-      expect(fromCli, zone.id).toBeTruthy()
-      expect(fromCli!.name).toBe(zone.name)
+    const clusterResult = await runCli(['cluster', 'list', '-o', 'json'])
+    expect(clusterResult.code, clusterResult.stderr).toBe(0)
+    const clustersFromCli = JSON.parse(clusterResult.stdout) as Array<{ id: string, name: string }>
+    const clustersFromApi = await get('anonymous', '/v1/clusters') as Array<{ id: string, name: string }>
+    expect(clustersFromCli.map((z) => z.id).sort()).toEqual(clustersFromApi.map((z) => z.id).sort())
+    for (const cluster of clustersFromApi) {
+      const fromCli = clustersFromCli.find((z) => z.id === cluster.id)
+      expect(fromCli, cluster.id).toBeTruthy()
+      expect(fromCli!.name).toBe(cluster.name)
     }
 
-    const templateResult = await runCli(['template', 'list', '--zone', zoneId, '-o', 'json'])
+    const templateResult = await runCli(['template', 'list', '--cluster', clusterId, '-o', 'json'])
     expect(templateResult.code, templateResult.stderr).toBe(0)
     const templatesFromCli = JSON.parse(templateResult.stdout) as Array<{ id: string, name: string, os: string, diskGb: number }>
-    const templatesFromApi = await get('tenant', `/v1/templates?zoneId=${zoneId}`) as Array<{ id: string, name: string, os: string, diskGb: number }>
+    const templatesFromApi = await get('tenant', `/v1/templates?clusterId=${clusterId}`) as Array<{ id: string, name: string, os: string, diskGb: number }>
     expect(templatesFromCli.map((t) => t.id).sort()).toEqual(templatesFromApi.map((t) => t.id).sort())
     for (const template of templatesFromApi) {
       const fromCli = templatesFromCli.find((t) => t.id === template.id)
@@ -497,7 +497,7 @@ test.describe('cli catalog', () => {
       expect(rawNumberField(sizeResult.stdout, offering.id, 'cpu'))
         .toBe(rawNumberField(offeringsReply.text, offering.id, 'cpu'))
     }
-    log(`CLI-05 zones=${zonesFromApi.length} templates=${templatesFromApi.length} sizes=${offeringsFromApi.length}`)
+    log(`CLI-05 clusters=${clustersFromApi.length} templates=${templatesFromApi.length} sizes=${offeringsFromApi.length}`)
   })
 })
 
@@ -562,14 +562,14 @@ test.describe.serial('cli lifecycle', () => {
   // OpenViCloud/titan-cli:command/vm/vm.go resolve (ssh by name) — create by name, size m, then log in
   test('CLI-13 `vm create --wait` reaches Running/Ready and matches the API; `vm ssh … id -un` prints ubuntu', async () => {
     test.setTimeout(20 * 60_000)
-    const { zoneId, templateId } = await envOf()
+    const { clusterId, templateId } = await envOf()
     const network = await runNetwork()
-    const templates = await get('tenant', `/v1/templates?zoneId=${zoneId}`) as Array<{ id: string, name: string }>
+    const templates = await get('tenant', `/v1/templates?clusterId=${clusterId}`) as Array<{ id: string, name: string }>
     const template = templates.find((t) => t.id === templateId)
-    expect(template, `template ${templateId} must still be listed in zone ${zoneId}`).toBeTruthy()
+    expect(template, `template ${templateId} must still be listed in cluster ${clusterId}`).toBeTruthy()
     const templateName = template!.name
 
-    const created = await runCli(['vm', 'create', VM2_NAME, '--zone', zoneId, '--network', network.name,
+    const created = await runCli(['vm', 'create', VM2_NAME, '--cluster', clusterId, '--network', network.name,
       '--template', templateName, '--size', 'm', '--ssh-key', KEY_NAME, '--wait', '--timeout', '10m'])
     log(`CLI-13 create exit=${created.code} stdout="${created.stdout.trim()}" stderr="${created.stderr.trim()}"`)
     expect(created.code, created.stderr).toBe(0)
@@ -616,9 +616,9 @@ test.describe.serial('cli lifecycle', () => {
   // OpenViCloud/titan-ops:docs/features/cli/design.md#error-codes. Runs before CLI-15 renames/deletes VM2_NAME: the taken-name case
   // needs a live VM holding that name.
   test('CLI-16 create refuses an unknown network with no new VM, and a taken name with (VM_NAME_TAKEN)', async () => {
-    const { zoneId, templateId } = await envOf()
+    const { clusterId, templateId } = await envOf()
     const beforeVms = await get('tenant', '/v1/tenant/vms') as Array<{ id: string }>
-    const noNetwork = await runCli(['vm', 'create', `rg-vmcli-bad-${RUN}`, '--zone', zoneId, '--network', `rg-nope-${RUN}`,
+    const noNetwork = await runCli(['vm', 'create', `rg-vmcli-bad-${RUN}`, '--cluster', clusterId, '--network', `rg-nope-${RUN}`,
       '--template', templateId, '--size', 'm', '--wait'])
     log(`CLI-16 no-network exit=${noNetwork.code} stderr="${noNetwork.stderr.trim()}"`)
     expect(noNetwork.code).not.toBe(0)
@@ -627,7 +627,7 @@ test.describe.serial('cli lifecycle', () => {
     expect(afterVms.map((v) => v.id).sort()).toEqual(beforeVms.map((v) => v.id).sort())
 
     const network = await runNetwork()
-    const taken = await runCli(['vm', 'create', VM2_NAME, '--zone', zoneId, '--network', network.name,
+    const taken = await runCli(['vm', 'create', VM2_NAME, '--cluster', clusterId, '--network', network.name,
       '--template', templateId, '--size', 'm'])
     log(`CLI-16 taken-name exit=${taken.code} stderr="${taken.stderr.trim()}"`)
     expect(taken.code).not.toBe(0)

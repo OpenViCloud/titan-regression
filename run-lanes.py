@@ -13,7 +13,7 @@ and "only_if_failed": "<module>" (runs only when that module of the lane was red
 A red module skips the rest of its lane except "always" steps and signals. A red module listed in "abort_on" (smoke)
 stops every lane. "exclusive" lists groups of modules that must never overlap in time (same wallet, same shared list):
 a plan in which two of a group may run together is refused when it is loaded, before any job starts. "same_lane" lists
-groups of modules that take from one pool the whole zone shares (an IPv6 block) and must run in one lane.
+groups of modules that take from one pool the whole cluster shares (an IPv6 block) and must run in one lane.
 
 Usage:
   python3 run-lanes.py --check                      # lanes.json against README.md's Staging column, no cluster
@@ -97,7 +97,7 @@ def load_plan(body):
 
 
 def _refuse_split_pools(plan):
-    """Modules of a same_lane group take from one pool the whole zone shares (an IPv6 /64): two lanes would race for it."""
+    """Modules of a same_lane group take from one pool the whole cluster shares (an IPv6 /64): two lanes would race for it."""
     for group in plan.same_lane:
         lanes = {lane for lane, steps in plan.lanes.items() for s in steps if s.kind == "module" and s.name in group}
         if len(lanes) > 1:

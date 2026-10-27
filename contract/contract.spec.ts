@@ -93,7 +93,7 @@ test.describe.serial('contract', () => {
 
   // OpenViCloud/titan-ops:docs/architecture/http-contract.md#error-envelope — { status, title, code }
   test('CON-04 a body that breaks the validator is 400 {status, title, code: VALIDATION_ERROR}', async () => {
-    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name: '', zoneId: '' }, randomUUID())
+    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name: '', clusterId: '' }, randomUUID())
     expectError(reply, 400, 'VALIDATION_ERROR')
     const body = bodyOf(reply)
     expect(body.status).toBe(400)
@@ -119,7 +119,7 @@ test.describe.serial('contract', () => {
   // OpenViCloud/titan-ops:docs/architecture/provider-and-worker.md#provider-command-lease — /internal/* needs X-Internal-Token
   test('CON-07 /internal/* without X-Internal-Token is 401, even with a user token', async () => {
     const user = await headersOf('tenant')
-    for (const path of ['/internal/reconcile/vms?zoneId=x', '/internal/reconcile/networks?zoneId=x']) {
+    for (const path of ['/internal/reconcile/vms?clusterId=x', '/internal/reconcile/networks?clusterId=x']) {
       const anonymous = await raw('GET', path, {})
       const withUser = await raw('GET', path, user)
       log(`CON-07 ${path} → ${anonymous.status} / ${withUser.status}`)

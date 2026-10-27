@@ -67,15 +67,15 @@ test.describe.serial('admin', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/GetProviderClientCertificateEndpoint.cs (Configure, Roles("platform-admin")),
-  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/TestAdminClusterEndpoint.cs (Configure: Post("v1/admin/clusters/test")) — Titan's certificate, and a live test of the zone's saved connection
-  test('ADM-05 Titan client certificate is readable and the zone cluster tests ok', async () => {
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/TestAdminClusterEndpoint.cs (Configure: Post("v1/admin/clusters/test")) — Titan's certificate, and a live test of the cluster's saved connection
+  test('ADM-05 Titan client certificate is readable and the cluster tests ok', async () => {
     const certificate = await get('admin', '/v1/admin/clusters/client-certificate')
     expect(certificate.certificatePem).toContain('BEGIN CERTIFICATE')
     expect(certificate.fingerprint.length).toBeGreaterThan(0)
-    const { zoneId } = await envOf()
+    const { clusterId } = await envOf()
     const clusters = await get('admin', '/v1/admin/clusters') as any[]
-    const cluster = clusters.find((c) => c.zoneId === zoneId)
-    log(`ADM-05 cluster of ${zoneId}: endpoint=${cluster.endpoint}`)
+    const cluster = clusters.find((c) => c.clusterId === clusterId)
+    log(`ADM-05 cluster of ${clusterId}: endpoint=${cluster.endpoint}`)
     const result = await call('admin', 'POST', '/v1/admin/clusters/test', { endpoint: cluster.endpoint, serverFingerprint: cluster.serverFingerprint })
     expectStatus(result, 200)
     log(`ADM-05 test: ${result.text}`)

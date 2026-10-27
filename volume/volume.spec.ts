@@ -26,9 +26,9 @@ test.describe.serial('volume', () => {
   const snapshotsOfA: string[] = []
 
   async function createVolume(label: string): Promise<string> {
-    const { zoneId, volumeOfferingId } = await envOf()
+    const { clusterId, volumeOfferingId } = await envOf()
     const reply = await call('tenant', 'POST', '/v1/tenant/volumes',
-      { name: `rg-${label}-${RUN}`, volumeOfferingId, zoneId, sizeGb: 1 }, newKey())
+      { name: `rg-${label}-${RUN}`, volumeOfferingId, clusterId, sizeGb: 1 }, newKey())
     expectStatus(reply, 202)
     expect(Object.keys(bodyOf(reply))).toEqual(['volumeId'])
     const id = bodyOf(reply).volumeId as string
@@ -100,9 +100,9 @@ test.describe.serial('volume', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/CreateVolumeCommandHandler.cs HandleAsync (VOLUME_OFFERING_NOT_FOUND)
   test('VOL-02 an unknown offering is 404 VOLUME_OFFERING_NOT_FOUND and makes no row', async () => {
-    const { zoneId } = await envOf()
+    const { clusterId } = await envOf()
     const name = `rg-volx-${RUN}`
-    expectError(await call('tenant', 'POST', '/v1/tenant/volumes', { name, volumeOfferingId: 'rg-none', zoneId, sizeGb: 1 }, newKey()),
+    expectError(await call('tenant', 'POST', '/v1/tenant/volumes', { name, volumeOfferingId: 'rg-none', clusterId, sizeGb: 1 }, newKey()),
       404, 'VOLUME_OFFERING_NOT_FOUND')
     const rows = await get('tenant', '/v1/tenant/volumes') as any[]
     expect(rows.some((v) => v.name === name)).toBe(false)
@@ -202,7 +202,7 @@ test.describe.serial('volume', () => {
       await createVolume(`volq${i}`)
     }
     expectError(await call('tenant', 'POST', '/v1/tenant/volumes',
-      { name: `rg-volq-over-${RUN}`, volumeOfferingId: (await envOf()).volumeOfferingId, zoneId: (await envOf()).zoneId, sizeGb: 1 }, newKey()),
+      { name: `rg-volq-over-${RUN}`, volumeOfferingId: (await envOf()).volumeOfferingId, clusterId: (await envOf()).clusterId, sizeGb: 1 }, newKey()),
       422, 'VOLUME_QUOTA_EXCEEDED')
   })
 

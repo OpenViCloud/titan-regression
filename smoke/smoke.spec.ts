@@ -24,11 +24,11 @@ test.describe.serial('smoke', () => {
     expect(reconcilers.text).toContain('Healthy')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/ListZonesEndpoint.cs (Configure, AllowAnonymous)
-  test('SMOKE-02 zones are listed without a token', async () => {
-    const zones = await get('anonymous', '/v1/zones') as Array<{ id: string }>
-    log(`SMOKE-02 zones ${zones.map((z) => z.id).join(',')}`)
-    expect(zones.length).toBeGreaterThan(0)
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/ListClustersEndpoint.cs (Configure, AllowAnonymous)
+  test('SMOKE-02 clusters are listed without a token', async () => {
+    const clusters = await get('anonymous', '/v1/clusters') as Array<{ id: string }>
+    log(`SMOKE-02 clusters ${clusters.map((z) => z.id).join(',')}`)
+    expect(clusters.length).toBeGreaterThan(0)
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/ListVmOfferingsEndpoint.cs (Configure, AllowAnonymous),
