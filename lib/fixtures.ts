@@ -24,8 +24,8 @@ export type Env = {
 
 let env: Env | null = null
 
-// The first cluster whose customer catalog lists a template: dev has local-mac (arm64, only Ubuntu syncs); staging has
-// singapore01.
+// The first cluster whose customer catalog lists a template: dev has local (arm64 on macOS: only Ubuntu syncs; amd64 on
+// Ubuntu: all three do); staging has singapore01.
 export async function envOf(): Promise<Env> {
   if (env !== null) {
     return env

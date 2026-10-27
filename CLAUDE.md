@@ -38,7 +38,7 @@ Repo này không có hệ thống nào để chạy: spec chạy bằng runner `
 │   ├── clean-up.ts  #   cleanUp(steps) cho afterAll: chạy hết mọi bước dọn, gom lỗi, ném một lần ở cuối — một lỗi mạng không để lại quota nâng
 │   ├── fixtures.ts  #   tên rg-<loại>-<lượt>, chọn cluster/template/tier theo env, tìm-hoặc-tạo network của lượt
 │   ├── token.ts     #   newSecret(): bí mật token API ovc_…; callWithToken(): gọi API bằng token thay JWT
-│   └── local-proxy.ts  # tự bật khi URL là *.localhost (local-mac: issuer Keycloak mang cổng 8080)
+│   └── local-proxy.ts  # tự bật khi URL là *.localhost (cụm dev `local`: issuer Keycloak mang cổng 8080)
 └── <module>/*.spec.ts
 ```
 
