@@ -305,7 +305,7 @@ Hoá đơn để trả do `billing/seed-invoices.sql` tạo trên tenant `admin-
 
 ## backup (cần cặp khoá backup của env; chạy sau `admin`, không tạo `rg-*`)
 
-Admin API của Backups; màn admin portal ở BAK-08 và BAK-13. BAK-11 trở đi: đĩa VM và volume của tenant, ID riêng của plan (BAK-04…BAK-06 của plan không phải story BAK-04…BAK-06 của titan-ops). Target là cấu hình của pod: không case nào đổi nó. `admin-test` là platform-admin; `beta-user` là tenant thường.
+Admin API của Backups; màn admin portal ở BAK-08 và BAK-13. BAK-11 trở đi: đĩa VM và volume của tenant, ID riêng của plan (BAK-04…BAK-06 của plan không phải story BAK-04…BAK-06 của titan-ops). Target là cấu hình của pod: không case nào đổi nó. `admin-test` là platform-admin; `beta-user` là tenant thường. BAK-15…BAK-17 đọc cụm bằng `kubectl` (agent), không cần cặp khoá backup.
 
 | ID | Khi | Kỳ vọng | Nguồn |
 |---|---|---|---|
