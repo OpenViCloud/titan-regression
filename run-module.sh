@@ -31,10 +31,22 @@ if [ "$#" -lt 6 ] || [ "$#" -gt 7 ]; then
   exit 2
 fi
 kc="$1"; src="$2"; module="$3"; label="$4"; out="$5"; logs_dir="$6"; bin="${7:-}"
-ns="titan-auth-staging"
 lane="${REGRESSION_LANE:-sequential}"   # run-lanes.py sets a/b; a module run by hand is the sequential run
-app_ns="titan-staging"
 k() { kubectl --kubeconfig "$kc" "$@"; }
+# Each environment names its namespaces its own way: the runner's is where CronJob titan-regression is, the apps' where
+# Deployment control-plane runs. Exactly one of each, or the run stops before it creates anything.
+namespace_of() {
+  k get "$1" -A -o json | python3 -c '
+import json, sys
+found = [i["metadata"]["namespace"] for i in json.load(sys.stdin)["items"] if i["metadata"]["name"] == sys.argv[1]]
+print(found[0] if len(found) == 1 else "")' "$2"
+}
+ns="$(namespace_of cronjob titan-regression)"
+app_ns="$(namespace_of deployment control-plane)"
+if [ -z "$ns" ] || [ -z "$app_ns" ]; then
+  echo "not exactly one CronJob titan-regression and one Deployment control-plane on this cluster" >&2
+  exit 2
+fi
 phase_of() { k -n "$ns" get pod "$1" -o json | python3 -c 'import sys,json; print(json.load(sys.stdin)["status"]["phase"])'; }
 
 case "$module" in
