@@ -32,7 +32,7 @@ function listen(): Promise<void> {
   })
 }
 
-// Only the local cluster needs it: staging URLs are real hosts.
+// Only the local cluster needs it: every other environment's URLs are real hosts.
 export function startLocalProxyIfNeeded(portalUrl: string): Promise<void> {
   const isLocal = new URL(portalUrl).hostname.endsWith('.localhost')
   if (!isLocal) {

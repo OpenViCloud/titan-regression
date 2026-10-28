@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Bộ spec regression **bền** của OpenViCloud: mọi hành vi còn đúng ở release sau có một case trong [`plan.md`](plan.md) và một spec ở đây. Quy trình (ai thêm case, ai viết spec, chạy thế nào) sống ở repo [`OpenViCloud/titan-ops`](https://github.com/OpenViCloud/titan-ops): `iteration:enhance-regression-plan` thêm case của story vào `plan.md` sau mỗi lần deploy dev; [`release:regression`](https://github.com/OpenViCloud/titan-ops/blob/main/.claude/commands/release/regression.md) viết spec cho case chưa có spec rồi chạy **hết** repo này trên staging, ở sha `release-plan.md` ghim. Bảng module và thứ tự: [README](README.md).
+Bộ spec regression **bền** của OpenViCloud: mọi hành vi còn đúng ở release sau có một case trong [`plan.md`](plan.md) và một spec ở đây. Quy trình (ai thêm case, ai viết spec, chạy thế nào) sống ở repo [`OpenViCloud/titan-ops`](https://github.com/OpenViCloud/titan-ops): `iteration:enhance-regression-plan` thêm case của story vào `plan.md` sau mỗi lần deploy dev; [`release:regression`](https://github.com/OpenViCloud/titan-ops/blob/main/.claude/commands/release/regression.md) viết spec cho case chưa có spec rồi chạy **hết** repo này trên env của release (prd), ở sha `release-plan.md` ghim. Bảng module và thứ tự: [README](README.md).
 
 Repo này không có hệ thống nào để chạy: spec chạy bằng runner `titan-regression` (lane B: `titan-regression-b`) trong cụm (manifest ở `OpenViCloud/titan-local-cluster:base/regression-runner/`), không trên máy agent. CI chỉ chạy test của tooling (`selftest/`, `test_*.py`).
 
@@ -8,10 +8,10 @@ Repo này không có hệ thống nào để chạy: spec chạy bằng runner `
 
 ```
 ├── README.md        # tiếng Anh: là gì, chạy thế nào, bảng module (cột Spec)
-├── CLAUDE.md        # file này: luật viết spec, giả định khi chạy trên staging
+├── CLAUDE.md        # file này: luật viết spec, giả định khi chạy trên env của release
 ├── plan.md          # mọi case: ID, kỳ vọng, nguồn
 ├── run-module.sh    # một module = một job runner: nạp spec, chờ .done, chép kết quả + so sha256, xoá job và ConfigMap của nó;
-│                   #   kubeconfig là tham số đầu (staging hay dev), $REGRESSION_CRONJOB chọn CronJob của lane (mặc định
+│                   #   kubeconfig là tham số đầu (prd hay dev), $REGRESSION_CRONJOB chọn CronJob của lane (mặc định
 │                   #   titan-regression), $REGRESSION_LANE (a, b; mặc định sequential) là nhãn ở dòng đầu log pod, ConfigMap spec riêng mỗi job (titan-regression-specs-<job>),
 │                   #   cli và terraform-provider: chép binary khi BINARY_WAIT;
 │                   #   output runner vào thư mục làm việc (không commit), log control-plane + incus-worker
@@ -38,6 +38,7 @@ Repo này không có hệ thống nào để chạy: spec chạy bằng runner `
 │   ├── clean-up.ts  #   cleanUp(steps) cho afterAll: chạy hết mọi bước dọn, gom lỗi, ném một lần ở cuối — một lỗi mạng không để lại quota nâng
 │   ├── fixtures.ts  #   tên rg-<loại>-<lượt>, chọn cluster/template/tier theo env, tìm-hoặc-tạo network của lượt
 │   ├── token.ts     #   newSecret(): bí mật token API ovc_…; callWithToken(): gọi API bằng token thay JWT
+│   ├── portal-config.ts  # topUpEnabledOf(PORTAL): đọc <portal>/config.json một lần; đọc không được ⇒ ném (case đỏ, không N/A)
 │   └── local-proxy.ts  # tự bật khi URL là *.localhost (cụm dev `local`: issuer Keycloak mang cổng 8080)
 └── <module>/*.spec.ts
 ```
@@ -75,7 +76,7 @@ Hai lane (`lanes.json`) chạy cùng lúc, mỗi lane một tenant test; `admin-
 | `billing` | b | đo usage trên tenant của lane | ví `admin-test` (ghi, assert đúng số); danh sách topup Pending (BIL-10 tạo một cái tạm); audit log (BIL-07 ghi một dòng); giá tier và volume offering mà nó so chi phí |
 | `concurrency` | a | không | ví `admin-test` (assert đúng số, trả hoá đơn 4444 do `seed-invoices.sql` của lane b) |
 | `admin` | a | cộng 1 ₫ vào ví tenant của lane (ADM-08), đổi rồi trả `debtCeiling` | danh sách topup Pending (ADM-08 đòi nút Confirm trên mọi hàng Pending); audit log của mọi tenant; giá một tier +1 rồi trả (ADM-06, tier khác với tier của `billing`) |
-| `portal-ui` | a | nâng `maxNetworks` (IPv6), để lại topup Pending | lấy một /64 IPv6 từ khối của cluster |
+| `portal-ui` | a | nâng `maxNetworks` (IPv6), để lại topup Pending (UI-07, UI-18; chỉ khi portal có `topUpEnabled: true`) | lấy một /64 IPv6 từ khối của cluster |
 | `tenant-suspend` | a | treo tenant của lane rồi trả `Active` | không |
 | `network-lifecycle` | a | xoá và tạo lại network của lane | không |
 | `login-page` | a | không | realm Keycloak (chỉ đọc) |
@@ -84,13 +85,16 @@ Hai lane (`lanes.json`) chạy cùng lúc, mỗi lane một tenant test; `admin-
 
 Luật rút ra, ghi ở `lanes.json`: `billing`↔`concurrency` (cùng ví `admin-test`) và `billing`↔`admin` (cùng danh sách topup Pending: topup tạm của BIL-10 làm ADM-08 gặp một hàng Pending lạ; cùng audit log và giá tier) không chồng nhau (`exclusive`); ba module lấy /64 IPv6 (`load-balancer`, `portal-ui`, `terraform-provider`) ở chung một lane (`same_lane`), vì hai lane cùng chọn một /64 thì tranh nhau chỉ mục unique. `contract` không đụng ví nên không bị khoá. Locator tìm hàng theo tên tenant bằng khớp chuỗi con (`hasText: 'beta-user'`) khớp cả hàng `beta-user-2`: tìm theo id, hoặc khớp có chặn đuôi `-<chữ>` như `tenantRowOf()` của `admin/admin-portal.spec.ts`.
 
-## Giả định khi chạy trên staging (dữ liệu sống lâu)
+## Giả định khi chạy trên env của release (prd, dữ liệu sống lâu)
 
+- Ba thứ đổi trạng thái mà mọi tenant của env dùng chung — ADM-06 (giá toàn cục), `billing/seed-invoices.sql` (ghi thẳng vào DB), lệnh `L-x` ghi trên host Incus `singapore01` — chỉ chạy trên prd tới khách thật đầu tiên ([known-state §first-real-customer](https://github.com/OpenViCloud/titan-ops/blob/main/docs/status/known-state.md#first-real-customer)); từ đó chúng không chạy trên prd (N/A kèm lý do đó, hoặc một env riêng — Tôn Chủ chọn lúc đó). Kéo theo, tới khi spec tách hoặc tự bỏ qua: cả module `admin` (ADM-03 chung spec tuần tự với ADM-06 ở `admin/admin.spec.ts`; `run-module.sh` chạy cả thư mục, gồm ADM-08, ADM-09) và CC-03, CC-04 (CC-03 trả hoá đơn mà seed để lại; spec tuần tự nên CC-04 bị bỏ theo). Module khác chỉ đụng tenant test vẫn chạy.
+- Realm prd có `admin-test` và `beta-user`, chưa có `beta-user-2` ⇒ trên prd chạy một lane (`run-module.sh` từng module theo thứ tự README); máy hai lane (`lanes.json`, `run-lanes.py`) giữ nguyên.
+- `config.json` của portal prd không có `topUpEnabled` (prd không nhận thanh toán) ⇒ UI-07, UI-18 gọi `test.skip` kèm lý do `topUpEnabled` (report ghi N/A); UI-06 đo không có mục Receipts. `POST /v1/tenant/topups` không đọc `topUpEnabled` ⇒ ADM-08 vẫn tạo topup của nó qua API.
 - Cap per-resource đọc từ hằng mặc định của `TenantQuota` (20 rule/network, 3 snapshot/VM, 3 snapshot/volume) vì không API nào đọc được. Cap volume (10) nay `GET /v1/tenant` trả ở `maxVolumes`, nhưng spec VOL-05 vẫn dùng hằng. Tenant test có cap khác ⇒ FW-04, VMS-03, VOL-05, VOL-10 đỏ có chủ ý — đọc cap bằng SQL (`L-x` của release) trước khi chạy.
 - Mọi module có ghi quota trong bảng ở mục trên (VM-15, TEN-02, TEN-08, `load-balancer`, `portal-ui`) đổi quota của tenant lane rồi trả lại: VM-15, TEN-02 và TEN-08 trả lại ngay và trong `afterAll`; `load-balancer` và `portal-ui` chỉ trong `afterAll`. Pod bị giết giữa chừng ⇒ quota lệch: SMOKE-04 log quota đầu mỗi lượt để so.
 - FW-02, VMS-04, VMS-05 đọc trạng thái ngay sau request: cửa sổ là tới khi worker lease lệnh (poll 2 s) cộng thời gian provider làm — đỏ ở đây phải đối chiếu log trước khi ghi FINDING.
 - CAT-05 đọc `/v1/os-images` trước khi CAT-06 sync, nên cần image đã có sẵn trên cluster.
-- `billing/seed-invoices.sql` mỗi lượt để lại trên `admin-test` một hoá đơn `New` 900.000.000 ₫ (BIL-06) — quá hạn sau 6 ngày, cộng dồn vào công nợ của `admin-test` trong receivables.
-- `admin` đổi giá một tier vài giây (ADM-06) mỗi lần chạy: trên staging cả module cần `L-x`.
+- `billing/seed-invoices.sql` mỗi lượt để lại trên `admin-test` một hoá đơn `New` 900.000.000 ₫ (BIL-06) — quá hạn sau 6 ngày, cộng dồn vào công nợ của `admin-test` trong receivables. Trên prd nó là một `L-x`, chỉ tới khách thật đầu tiên.
+- `admin` đổi giá một tier vài giây (ADM-06) mỗi lần chạy: trên prd cả module cần `L-x`, và chỉ chạy tới khách thật đầu tiên.
 - `cli` đồng ý điều khoản thay `beta-user` nếu chưa đồng ý (`POST /v1/legal/acceptance` — bản ghi lâu dài).
 - NET-05 chỉ đo khi tenant đã hết chỗ network (`test.skip` kèm lý do khi còn chỗ).

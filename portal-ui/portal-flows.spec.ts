@@ -2,10 +2,12 @@ import { test, expect } from '@playwright/test'
 import { PORTAL, closeSessions, pageOf, useBrowser } from './auth'
 import { RESULTS, bodyOf, call, expectStatus, get, log, pollUntil, startLog } from './api'
 import { activityOf, countOf, envOf, nameOf, runNetwork, runs, waitVm, waitVolume } from './fixtures'
+import { topUpEnabledOf } from './portal-config'
 
 // Cases UI-01..08 of plan.md: dashboard gate, VM create/snapshot/volume/stop-start-delete, billing,
 // wallet, buy-credit and the static account pages. Two independent describe.serial groups so a slow VM boot
-// (group A) cannot erase the billing/wallet/account coverage (group B), which needs no VM.
+// (group A) cannot erase the billing/wallet/account coverage (group B), which needs no VM. UI-07 is N/A where the
+// portal config has no topUpEnabled: true.
 
 async function readVm(vmId: string): Promise<any> {
   return get('tenant', `/v1/tenant/vms/${vmId}`)
@@ -386,15 +388,17 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
   })
 
   // OpenViCloud/titan-ops:docs/features/billing/wallet/design.md#wallet-portal · OpenViCloud/titan-ops:docs/architecture/money-and-wallet.md#confirmed-topup-is-receipt
-  // OpenViCloud/titan-cloud-console:portal/src/pages/WalletPage.tsx
+  // OpenViCloud/titan-cloud-console:portal/src/pages/WalletPage.tsx (WalletPage: Receipts only when topUpEnabled === true;
+  // StatementSection: statementEmptyHint only when topUpEnabled) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts (wallet)
   test('UI-06 Wallet balance, statement and receipts match the API, in English formatting', async () => {
     const wallet = await get('tenant', '/v1/tenant/wallet')
     const statement = await get('tenant', '/v1/tenant/wallet/statement')
     const topups = await get('tenant', '/v1/tenant/topups') as any[]
     const receipts = topups.filter((t) => t.status === 'Confirmed')
-    log(`UI-06 balance=${wallet.balance} statementLines=${statement.lines.length} receipts=${receipts.length}`)
 
     const page = await pageOf('tenant')
+    const topUpEnabled = await topUpEnabledOf(PORTAL)
+    log(`UI-06 topUpEnabled=${topUpEnabled} balance=${wallet.balance} statementLines=${statement.lines.length} receipts=${receipts.length}`)
     await page.goto(PORTAL + '/wallet', { waitUntil: 'networkidle' })
     await expect(page.getByRole('heading', { level: 1, name: 'Wallet' })).toBeVisible()
     // "Wallet balance" (StatCard) sits two ancestors above its label text (label → its row div → the card
@@ -406,13 +410,19 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
 
     if (statement.lines.length === 0) {
       await expect(page.getByText('No wallet activity yet')).toBeVisible()
+      if (!topUpEnabled) {
+        await expect(page.getByText('Buy credit to get started')).toHaveCount(0)
+      }
     } else {
       await expect(page.getByRole('heading', { name: 'Statement' })).toBeVisible()
       // Statement and Receipts are two tables, one <section> each (OpenViCloud/titan-cloud-console:portal/src/pages/WalletPage.tsx StatementSection, ReceiptsSection).
       const statementSection = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Statement' }) })
       await expect(statementSection.getByRole('row')).toHaveCount(statement.lines.length + 1) // +1 header row
     }
-    if (receipts.length === 0) {
+    if (!topUpEnabled) {
+      // No top-up on this env: the Receipts section is not rendered at all, whatever the top-up list holds.
+      await expect(page.getByRole('heading', { name: 'Receipts' })).toHaveCount(0)
+    } else if (receipts.length === 0) {
       await expect(page.getByText('No receipts yet')).toBeVisible()
     } else {
       // A receipt IS a Confirmed top-up (OpenViCloud/titan-ops:docs/architecture/money-and-wallet.md#confirmed-topup-is-receipt): its paymentRef is the row's reference.
@@ -425,6 +435,7 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
   // OpenViCloud/titan-ops:docs/features/billing/topup/design.md#topup-portal · OpenViCloud/titan-cloud-console:portal/src/pages/WalletPage.tsx (BuyCreditDialog)
   test('UI-07 Buy credit shows the transfer code; nothing is confirmed or paid', async () => {
     const page = await pageOf('tenant')
+    test.skip(!(await topUpEnabledOf(PORTAL)), 'N/A: the portal config.json has no topUpEnabled: true (no Buy credit on this env)')
     await page.goto(PORTAL + '/wallet', { waitUntil: 'networkidle' })
     await page.getByRole('button', { name: 'Buy credit' }).click()
     const dialog = page.getByRole('dialog')

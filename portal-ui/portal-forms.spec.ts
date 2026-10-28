@@ -2,11 +2,12 @@ import { test, expect } from '@playwright/test'
 import { PORTAL, closeSessions, pageOf, useBrowser } from './auth'
 import { RESULTS, bodyOf, call, expectStatus, get, log, newKey, pollUntil, startLog } from './api'
 import { envOf, nameOf, runNetwork, runs, waitVm, waitVolume } from './fixtures'
+import { topUpEnabledOf } from './portal-config'
 
 // Cases UI-18..21, UI-24..26 of plan.md: form validation (network, VM, firewall rule), the buy-credit
 // amount parser, the VM delete button's existence/transition invariant, deleting a volume that still has a
-// snapshot, and the 404 page. UI-22 is NOT COVERED (plan.md says why: needs a provider-refused delete
-// on staging, no fault injection on any environment).
+// snapshot, and the 404 page. UI-18 is N/A where the portal config has no topUpEnabled: true. UI-22 is NOT COVERED
+// (plan.md says why: needs a provider-refused delete, no fault injection on any environment).
 //
 // POLL_MS — OpenViCloud/titan-cloud-console:portal/src/hooks/pollUntilSettled.ts — is the interval the VM list page itself refetches at
 // while a row is waiting, used below to size how long an "enabled" assertion is given to catch up with it.
@@ -177,7 +178,7 @@ test.describe.serial('portal-ui forms: network, firewall, volume and VM form val
     runNetworkName = network.name
     const page = await pageOf('tenant')
     await page.goto(PORTAL + '/networks', { waitUntil: 'networkidle' })
-    // Exact name, not a prefix match: an older run's network can still be listed on a long-lived staging tenant,
+    // Exact name, not a prefix match: an older run's network can still be listed on a long-lived test tenant,
     // and one run's name could otherwise be a prefix of another's.
     const row = page.getByRole('listitem').filter({ has: page.getByText(runNetworkName, { exact: true }) })
     await row.getByRole('button', { name: 'Firewall' }).click()
@@ -352,6 +353,8 @@ test.describe.serial('portal-ui forms: buy credit and not-found page', () => {
   // query string carries amount=<integer>) · OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts (walletBuy.title Nạp tiền, walletBuy.continue Tiếp tục)
   test('UI-18 in Vietnamese: 500.000 produces a QR for amount=500000; 5a0 disables Continue', async () => {
     const page = await pageOf('tenant')
+    // Before the language switch, so a skipped case leaves the language as it found it.
+    test.skip(!(await topUpEnabledOf(PORTAL)), 'N/A: the portal config.json has no topUpEnabled: true (no Buy credit on this env)')
     await page.goto(PORTAL + '/', { waitUntil: 'networkidle' })
     await page.getByRole('button', { name: /account menu for|menu tài khoản của/i }).click()
     await page.getByRole('menuitemradio', { name: 'Tiếng Việt' }).click()
