@@ -2,7 +2,8 @@
 
 The durable regression suite of [OpenViCloud](https://github.com/OpenViCloud/titan-ops). Every behaviour that must still
 hold at the next release has a case in [`plan.md`](plan.md) and, once written, a Playwright spec here. Before each
-release the whole suite runs against staging; a release pins the commit of this repository it ran.
+release the whole suite runs against the release environment (production, `prd`); a release pins the commit of this
+repository it ran.
 
 The specs drive the public API, the portals and the CLI of a running OpenViCloud environment. They do not run on a
 laptop: each module runs as a job of the `titan-regression` runner inside the cluster (its manifests are in
@@ -15,7 +16,7 @@ which signs in with the test accounts there, so no credential passes through the
 |---|---|
 | [`plan.md`](plan.md) | Every case: stable ID, expectation, source |
 | `<module>/*.spec.ts` | Specs of one module; the test name carries the case ID |
-| `lib/` | Helpers loaded with every module (sign-in, API calls with polling, cleanup, fixtures) |
+| `lib/` | Helpers loaded with every module (sign-in, API calls with polling, cleanup, fixtures, the portal's `config.json`) |
 | `run-module.sh` | Runs one module in the cluster and copies its results and logs back |
 | `count-cases.py` | Counts `plan.md`'s IDs against the runner logs, for the report's first line |
 | `check-screenshots.py` | Fails when a browser case passed without its `<ID>-*.png` screenshot |
@@ -23,7 +24,7 @@ which signs in with the test accounts there, so no credential passes through the
 | `run-lanes.py`, `lanes.json`, `lanes-dev.json`, `lanes-dev-sequential.json` | Runs the modules as lanes, one lane per test tenant, lanes side by side (below); the two dev plans cover the Dev column |
 | `patch-job.py` | Points a job's `specs` volume at a ConfigMap of its own, so jobs started together never read each other's specs |
 | `selftest/`, `test_*.py` | Tests of the helpers and scripts above |
-| [`CLAUDE.md`](CLAUDE.md) | How specs are written and the assumptions a run on staging makes |
+| [`CLAUDE.md`](CLAUDE.md) | How specs are written and the assumptions a run on the release environment makes |
 
 ## Run one module
 
@@ -44,10 +45,11 @@ with a tenant of its own (`beta-user`, `beta-user-2`) and a CronJob of its own (
 `external` for what the agent does outside the runner). It refuses a plan in which two modules that share a wallet or a
 shared list (`exclusive`) may run together, or in which the modules that take an IPv6 block from the cluster
 (`same_lane`) are spread over lanes. Every run (`--check` stops after this) also checks `lanes.json` against the table
-below: every module the runner runs on staging is in exactly one lane, except `smoke` and `cleanup`, which each lane
-runs for its own tenant (and `cleanup` runs once more after a red `terraform-provider`). At most `max_pods` jobs run at
-once: staging is one small node. The second lane needs the test tenant `beta-user-2` and the CronJob
-`titan-regression-b` in the cluster. What each module changes and shares is the table in `CLAUDE.md`.
+below: every module the runner runs on the release environment (the Release column) is in exactly one lane, except
+`smoke` and `cleanup`, which each lane runs for its own tenant (and `cleanup` runs once more after a red
+`terraform-provider`). At most `max_pods` jobs run at once: the release environment is a single node. The second lane needs the test tenant `beta-user-2` and the CronJob
+`titan-regression-b` in the cluster; prd's realm has no `beta-user-2` yet, so on prd the modules run one at a time
+with `run-module.sh`, in the order below. What each module changes and shares is the table in `CLAUDE.md`.
 
 The dev cluster runs fewer modules (the Dev column of the table below), so it has plans of its own, checked with `python3 run-lanes.py --check --column dev --lanes lanes-dev.json` (two lanes) or `--lanes lanes-dev-sequential.json` (one lane), and run with the same flags as below plus `--column dev --lanes <plan>`. Dev holds one pod at a time (`max_pods` 1), so those runs show that the two tenants do not disturb each other, not what load does; `test_run_lanes.py` keeps both plans covering the Dev column.
 
@@ -90,7 +92,7 @@ module that changes the tenant's state and the one that deletes the run's networ
 `cleanup` after every module that leaves `rg-*` resources, and `terraform-provider` after `cleanup`, because its tests
 create a network and beta-user may hold one.
 
-| # | Module | Measures | Dev | Staging | Spec |
+| # | Module | Measures | Dev | Release | Spec |
 |---|---|---|---|---|---|
 | 1 | `smoke` | health, clusters, anonymous catalog, clean test account | yes | yes | yes |
 | 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes |
@@ -113,12 +115,12 @@ create a network and beta-user may hold one.
 | 19 | `login-page` | Keycloak sign-in page: layout, colours, font, brand, sign-up form, language (no sign-in) | yes | yes | yes |
 | 20 | `cleanup` | sweeps `rg-*` (and the `tfacc-*` a red `terraform-provider` run left) through the API, asserts 0 (on Incus: CLN-02, host) | yes | yes | yes |
 | 21 | `terraform-provider` | the public provider: catalog, network + firewall rule, SSH key + VM + volume + attachment, load balancer (create, import, update in place, delete), plan-time validation — `go test -c` of the provider repo, run in the pod with an API token the spec makes there; after `cleanup`, because the tests create networks | no | yes | yes — `terraform-provider.spec.ts` runs `acceptance_*test.go` of the provider repo (TFP-04, TFP-08 by hand) |
-| 22 | `worker` | the worker image staging runs comes from `OpenViCloud/titan-incus-worker`, pulls anonymously; the worker's command kinds match the control plane's — `gh`/`curl`/`kubectl` reads on the agent's machine | no | yes | no |
-| 23 | `control-plane-image` | the control plane image staging runs comes from `OpenViCloud/titan-control-plane`, pulls anonymously, digest matches the pod — `gh`/`curl`/`kubectl` reads on the agent's machine | no | yes | no |
-| 24 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: Keycloak's database `keycloak` as a `Database` object, ArgoCD's health checks, schema `public` for its owner only (`kubectl` reads). **Plan only**: no spec yet, so no runner lane; the release that writes the spec also puts the module in a lane and sets Dev and Staging to yes | no | no | no |
+| 22 | `worker` | the worker image the release environment runs comes from `OpenViCloud/titan-incus-worker`, pulls anonymously; the worker's command kinds match the control plane's — `gh`/`curl`/`kubectl` reads on the agent's machine | no | yes | no |
+| 23 | `control-plane-image` | the control plane image the release environment runs comes from `OpenViCloud/titan-control-plane`, pulls anonymously, digest matches the pod — `gh`/`curl`/`kubectl` reads on the agent's machine | no | yes | no |
+| 24 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: Keycloak's database `keycloak` as a `Database` object, ArgoCD's health checks, schema `public` for its owner only (`kubectl` reads). **Plan only**: no spec yet, so no runner lane; the release that writes the spec also puts the module in a lane and sets Dev and Release to yes | no | no | no |
 
 Steps outside the runner: before `billing` the agent runs `billing/seed-invoices.sql` (psql on the environment's
-database; on staging an approved `L-x`), after `concurrency` it runs `billing/check-wallets.sql` (read only, BIL-14);
+database; on the release environment an approved `L-x`), after `concurrency` it runs `billing/check-wallets.sql` (read only, BIL-14);
 modules `cli` and `terraform-provider` need the agent to copy a binary into the pod when the spec logs `BINARY_WAIT`
 (`cli`: the CLI built for the node's architecture; `terraform-provider`: `GOOS=linux GOARCH=<node> CGO_ENABLED=0 go test -c`
 of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud`).
@@ -127,12 +129,19 @@ Not run by the runner (Phase 4 of `release:regression`): `observation` — state
 OpenViCloud, needs an approved `L-x` command; `site` — the public site through Playwright MCP on the agent's machine;
 `worker`, `control-plane-image` — read-only `gh`/`curl`/`kubectl` on the agent's machine.
 
-**Spec** is `yes` when every case of the module in `plan.md` has a spec that ran green on staging at a release, except `(host)` cases (Phase 4
+Three things change state every tenant of the environment shares: ADM-06 (a global price), `billing/seed-invoices.sql`
+(written straight into the database) and the `L-x` writes on the Incus host. On prd they run only until the first real
+customer is approved ([known-state §first-real-customer](https://github.com/OpenViCloud/titan-ops/blob/main/docs/status/known-state.md#first-real-customer)).
+Until the specs are split or skip themselves, that stops the whole `admin` module (ADM-03 shares the serial
+`admin/admin.spec.ts` with ADM-06, and `run-module.sh` runs the whole directory, ADM-08 and ADM-09 included) and CC-03
+with CC-04 (CC-03 pays the invoice the seed leaves; the serial spec then skips CC-04).
+
+**Spec** is `yes` when every case of the module in `plan.md` has a spec that ran green on the release environment at a release, except `(host)` cases (Phase 4
 of the release), **NOT COVERED** cases (the reason is in `plan.md`) and cases not applicable to the measured
 environment (the spec calls `test.skip` with the reason, e.g. VM-12 with a single cluster). `ACT-*` cases are measured
 in the module that owns the resource. A case with no spec yet gets one at the next release; a case no spec can be
 written for and that Phase 4 does not measure by hand is **NOT COVERED**, with the reason in its row of `plan.md`. Specs pick the first cluster with a listed template (`lib/fixtures.ts`,
-`envOf()`); staging's cluster is `singapore01`.
+`envOf()`); prd's cluster is `singapore01`.
 
 ## License
 

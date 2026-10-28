@@ -4,8 +4,8 @@ import { call, expectStatus, get, log, startLog } from './api'
 import { RUN, activityOf, countOf, createVm, envOf, runNetwork, waitVm } from './fixtures'
 
 // The API half of cases ADM-03..07 of plan.md; the admin portal screens wait for PORTAL-REDESIGN.
-// ADM-06 changes a global price for a few seconds every time this module runs: on staging, running the module at all
-// needs an approved L-x (CLAUDE.md).
+// ADM-06 changes a global price for a few seconds every time this module runs: on the release environment (prd), running
+// the module at all needs an approved L-x (CLAUDE.md), and only until the first real customer (OpenViCloud/titan-ops:docs/status/known-state.md#first-real-customer).
 test.describe.serial('admin', () => {
   test.describe.configure({ timeout: 10 * 60_000 })
 
@@ -83,7 +83,7 @@ test.describe.serial('admin', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/UpdateVmOfferingPriceEndpoint.cs (Configure: Patch("v1/admin/vm-offerings/{offeringId}/price");
-  // HandleAsync: SendNoContentAsync) — L-x on staging
+  // HandleAsync: SendNoContentAsync) — L-x on the release environment
   test('ADM-06 admin changes a tier price: 204, the anonymous list shows it, then it is put back', async () => {
     const { otherTier } = await envOf()
     tier = otherTier

@@ -142,7 +142,7 @@ test.describe.serial('contract', () => {
     expect(stranger.headers.get('access-control-allow-origin')).toBeNull()
   })
 
-  // OpenViCloud/titan-ops:docs/architecture/platform-infra.md — staging serves api, portal and admin over TLS on its own names
+  // OpenViCloud/titan-ops:docs/architecture/platform-infra.md — the release environment serves api, portal and admin over TLS on its own names
   // OpenViCloud/titan-ops:docs/architecture/http-contract.md#error-envelope — error bodies declare their length; the edge turns a refused
   // upgrade answered chunked into its own 502. OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/OpenVmSshEndpoint.cs
   // HandleAsync (GetVmShellTargetQuery) → OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/ComputeOwnership.cs RequireVmAsync (VM_NOT_FOUND)
