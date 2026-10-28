@@ -271,7 +271,7 @@ class SameLaneTest(unittest.TestCase):
 
 README = """## Modules and order
 
-| # | Module | Measures | Dev | Staging | Spec |
+| # | Module | Measures | Dev | Release | Spec |
 |---|---|---|---|---|---|
 | 1 | `smoke` | health | yes | yes | yes |
 | 2 | `billing` | money | no | yes | yes |
@@ -318,13 +318,20 @@ class CoverageTest(unittest.TestCase):
 
 
 class DevColumnTest(unittest.TestCase):
-    """Dev runs fewer modules than staging; a plan for dev is checked against the Dev column."""
+    """Dev runs fewer modules than the release environment; a plan for dev is checked against the Dev column."""
 
     def test_the_dev_column_picks_the_modules_dev_runs(self):
         self.assertEqual(run_lanes.readme_modules(README, "dev"), ["smoke", "login-page", "only-on-dev"])
         self.assertEqual(run_lanes.readme_modules(README), ["smoke", "billing", "worker", "login-page"])
+        self.assertEqual(run_lanes.readme_modules(README, "release"), run_lanes.readme_modules(README))
 
-    def test_a_dev_plan_is_clean_against_dev_and_wrong_against_staging(self):
+    def test_the_readme_table_names_the_columns_the_script_reads(self):
+        # readme_modules reads cells by position: a reordered or renamed header must fail here, not pick a wrong column.
+        header = next(line for line in (HERE / "README.md").read_text().splitlines() if line.startswith("| # | Module |"))
+        cells = [c.strip() for c in header.split("|")]
+        self.assertEqual((cells[4], cells[5]), ("Dev", "Release"))
+
+    def test_a_dev_plan_is_clean_against_dev_and_wrong_against_release(self):
         plan = run_lanes.load_plan(plan_of({"a": lane(m("smoke"), m("only-on-dev"), m("login-page"))}))
         self.assertEqual(run_lanes.coverage_problems(plan, README, "dev"), [])
         self.assertNotEqual(run_lanes.coverage_problems(plan, README), [])
@@ -398,7 +405,7 @@ class RepoPlanTest(unittest.TestCase):
         cls.body = json.loads((HERE / "lanes.json").read_text())
         cls.plan = run_lanes.load_plan(cls.body)
 
-    def test_every_staging_module_of_the_readme_is_in_exactly_one_lane_or_is_agent_side(self):
+    def test_every_release_module_of_the_readme_is_in_exactly_one_lane_or_is_agent_side(self):
         self.assertEqual(run_lanes.coverage_problems(self.plan, (HERE / "README.md").read_text()), [])
 
     def test_terraform_provider_runs_after_cleanup_in_its_own_lane(self):

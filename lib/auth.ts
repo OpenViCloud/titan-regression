@@ -58,7 +58,7 @@ async function login(page: Page, host: string, user: string, password: string): 
   await username.fill(user)
   await page.locator('#password, input[name="password"]').first().fill(password)
   await page.locator('#kc-login, button[type="submit"], input[type="submit"]').first().click()
-  // Compare origins: on staging the portal host also appears, unencoded, inside Keycloak's redirect_uri.
+  // Compare origins: on a real host (prd) the portal host also appears, unencoded, inside Keycloak's redirect_uri.
   const origin = new URL(host).origin
   await page.waitForURL((url) => url.origin === origin, { timeout: 45_000 })
 }

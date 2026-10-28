@@ -16,7 +16,7 @@ a plan in which two of a group may run together is refused when it is loaded, be
 groups of modules that take from one pool the whole cluster shares (an IPv6 block) and must run in one lane.
 
 Usage:
-  python3 run-lanes.py --check                      # lanes.json against README.md's Staging column, no cluster
+  python3 run-lanes.py --check                      # lanes.json against README.md's Release column, no cluster
   python3 run-lanes.py --check --column dev --lanes lanes-dev.json     # a dev plan against the Dev column
   python3 run-lanes.py --kubeconfig <kc> --src <source tree> --out <work dir> --logs <evidence dir> --label <run> \
       [--binary cli=<path>] [--binary terraform-provider=<path>]
@@ -144,9 +144,9 @@ def _refuse_overlaps(plan):
                     raise PlanError(f"{sa.name} (lane {la}) and {sb.name} (lane {lb}) may run at the same time")
 
 
-def readme_modules(readme_text, column="staging"):
-    """Modules whose Staging (or Dev) column says yes, from the README's `| # | Module | Measures | Dev | Staging | Spec |` table."""
-    index = {"dev": 4, "staging": 5}[column]
+def readme_modules(readme_text, column="release"):
+    """Modules whose Release (or Dev) column says yes, from the README's `| # | Module | Measures | Dev | Release | Spec |` table."""
+    index = {"dev": 4, "release": 5}[column]
     found = []
     for line in readme_text.splitlines():
         cells = [c.strip() for c in line.split("|")]
@@ -156,7 +156,7 @@ def readme_modules(readme_text, column="staging"):
     return found
 
 
-def coverage_problems(plan, readme_text, column="staging"):
+def coverage_problems(plan, readme_text, column="release"):
     """Every runner module of the README runs exactly once (once per lane for `per_lane` modules, which every tenant needs)."""
     known = readme_modules(readme_text, column)
     in_lanes = {lane: [s.name for s in steps if s.kind == "module" and not s.label] for lane, steps in plan.lanes.items()}
@@ -312,8 +312,8 @@ def main(argv):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--lanes", default=str(HERE / "lanes.json"))
     parser.add_argument("--check", action="store_true", help="validate the plan (--lanes) against the README column (--column) and exit")
-    parser.add_argument("--column", choices=["staging", "dev"], default="staging",
-                        help="README column the plan must cover: staging (lanes.json), dev (give --lanes lanes-dev.json or lanes-dev-sequential.json too)")
+    parser.add_argument("--column", choices=["release", "dev"], default="release",
+                        help="README column the plan must cover: release (lanes.json), dev (give --lanes lanes-dev.json or lanes-dev-sequential.json too)")
     parser.add_argument("--kubeconfig")
     parser.add_argument("--src")
     parser.add_argument("--out")

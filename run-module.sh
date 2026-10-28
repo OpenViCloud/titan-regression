@@ -14,7 +14,7 @@
 # `go test -c` of the provider): it is copied into the pod as /work/bin/openvicloud when the runner logs BINARY_WAIT.
 #
 # Usage:  bash run-module.sh <kubeconfig> <src tree> <module> <label> <work dir> <log dir> [binary]
-#   <kubeconfig>  ~/.kube/titan-staging.yaml (staging) or ~/.lima/titan-k3s/copied-from-guest/kubeconfig.yaml (dev)
+#   <kubeconfig>  ~/.kube/titan-prd.yaml (prd) or ~/.lima/titan-k3s/copied-from-guest/kubeconfig.yaml (dev)
 #   <src tree>    `git archive <sha>` of this repository at the sha the release pins, extracted (with the
 #                 release's new specs copied in at their repo path); run this script from a checkout
 #   <module>      a module of this repository (vm), or a spec directory relative to <src tree>
