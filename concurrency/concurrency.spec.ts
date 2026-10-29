@@ -35,7 +35,7 @@ test.describe.serial('concurrency', () => {
     await closeSessions()
   })
 
-  // OpenViCloud/titan-ops:docs/architecture/provider-and-worker.md#provider-command-key — the second writer of the same command key
+  // titan-ops architecture/provider-and-worker.md#provider-command-key — the second writer of the same command key
   // rolls back with 409 REQUEST_IN_PROGRESS, or arrives after the first and is answered as a repeat
   test('CC-01 two deletes of one VM at once: one 202, the other 202 or 409 REQUEST_IN_PROGRESS; one delete request', async () => {
     const { smallTier } = await envOf()
@@ -57,7 +57,7 @@ test.describe.serial('concurrency', () => {
     expect(countOf(await activityOf(name), 'vm.delete_requested')).toBe(1)
   })
 
-  // OpenViCloud/titan-ops:docs/architecture/http-contract.md#idempotency-key — the second request under a key in flight is 409
+  // titan-ops architecture/http-contract.md#idempotency-key — the second request under a key in flight is 409
   // IDEMPOTENCY_IN_PROGRESS, or replays the first one's answer
   test('CC-02 two creates with one Idempotency-Key at once make one volume', async () => {
     const { clusterId, volumeOfferingId } = await envOf()
@@ -80,7 +80,7 @@ test.describe.serial('concurrency', () => {
     expect(named.length).toBe(1)
   })
 
-  // OpenViCloud/titan-ops:docs/architecture/money-and-wallet.md#double-pay-guard — Invoice.Status is the concurrency token
+  // titan-ops architecture/money-and-wallet.md#double-pay-guard — Invoice.Status is the concurrency token
   test('CC-03 two pays of one invoice at once debit the wallet once', async () => {
     const all = await get('admin', '/v1/tenant/billing/invoices') as any[]
     const seeded = all.filter((i) => i.periodYear >= 2001 && i.periodYear < 2100 && i.total === 4444 && i.status === 'New')
@@ -105,7 +105,7 @@ test.describe.serial('concurrency', () => {
     expect(before - after).toBe(4444)
   })
 
-  // OpenViCloud/titan-ops:docs/architecture/provider-and-worker.md#provider-command-key — a new request that finds its key's command open
+  // titan-ops architecture/provider-and-worker.md#provider-command-key — a new request that finds its key's command open
   // is 409 (ProviderCommandQueue.EnqueueVolumeDeleteAsync → EnqueueRequestAsync); one that arrives after the first
   // commit is a repeat
   // (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DeleteVolumeCommandHandler.cs HandleAsync, alreadyRequestedOrDone) answered like the first, with nothing recorded

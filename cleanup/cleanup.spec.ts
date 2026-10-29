@@ -6,8 +6,8 @@ import { deleteVmAndWait, existenceShape, readVolume, waitNetwork, waitVolume } 
 // Case CLN-01 of plan.md (CLN-02 reads the Incus host). Runs after every module that leaves rg-* resources: removes every
 // rg-* resource of the lane's tenant a module left behind, and the tfacc-* ones a red terraform-provider run left (that module
 // runs after this one, so a red run is followed by one more cleanup job), in an order Titan accepts — load balancers (a VM a live
-// one sends to refuses its delete: OpenViCloud/titan-ops:docs/features/load-balancer/design.md#lb-and-vm-network), rules, VMs (their snapshots go
-// with them, attached volumes are released: OpenViCloud/titan-ops:docs/features/volume/design.md#vm-delete-releases-volumes), volume snapshots,
+// one sends to refuses its delete: titan-ops features/load-balancer/design.md#lb-and-vm-network), rules, VMs (their snapshots go
+// with them, attached volumes are released: titan-ops features/volume/design.md#vm-delete-releases-volumes), volume snapshots,
 // volumes, networks, SSH keys, API tokens.
 function isTest(r: { name: string }): boolean {
   return r.name.startsWith('rg-') || r.name.startsWith('tfacc-')
@@ -34,7 +34,7 @@ test.describe.serial('cleanup', () => {
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Platform/ApiToken/DeleteApiTokenCommandHandler.cs (HandleAsync: repo.Remove),
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/SshKey/DeleteSshKeyEndpoint.cs (HandleAsync: SendNoContentAsync),
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/ApiToken/DeleteApiTokenEndpoint.cs (HandleAsync: SendNoContentAsync).
-  // A leftover token counts toward the tenant's 20 forever (OpenViCloud/titan-ops:docs/features/public-api/design.md#api-token).
+  // A leftover token counts toward the tenant's 20 forever (titan-ops features/public-api/design.md#api-token).
   test('CLN-01 no rg-* or tfacc-* load balancer, network, VM, volume, snapshot, SSH key or API token is left', async () => {
     for (const lb of (await get('tenant', '/v1/tenant/load-balancers') as any[]).filter(isTest)) {
       log(`CLN-01 load balancer ${lb.name}`)

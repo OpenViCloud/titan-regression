@@ -114,7 +114,7 @@ export async function createVm(name: string, tier: string, networkId: string, ex
   const reply = await call('tenant', 'POST', '/v1/tenant/vms',
     { name, networkId, vmOfferingId: tier, templateId, clusterId, diskSizeGb: null, ...extra }, newKey())
   expectStatus(reply, 202)
-  // A create answers the id only (OpenViCloud/titan-ops:docs/architecture/http-contract.md#create-returns-id).
+  // A create answers the id only (titan-ops architecture/http-contract.md#create-returns-id).
   expect(Object.keys(bodyOf(reply))).toEqual(['vmId'])
   return bodyOf(reply).vmId as string
 }
@@ -145,7 +145,7 @@ export async function waitVolume(label: string, id: string, done: (v: any) => bo
 
 // --- activity ------------------------------------------------------------------------------------------------
 
-// The feed holds the 50 newest rows (OpenViCloud/titan-ops:docs/features/activity/design.md#activity-data-and-route), so a module reads
+// The feed holds the 50 newest rows (titan-ops features/activity/design.md#activity-data-and-route), so a module reads
 // it right after its own requests and counts rows by the resource name it made.
 export async function activityOf(resourceName: string): Promise<string[]> {
   const rows = await get('tenant', '/v1/tenant/activity?limit=50') as Array<{ action: string, resourceName: string }>

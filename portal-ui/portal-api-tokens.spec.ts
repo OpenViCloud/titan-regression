@@ -27,8 +27,8 @@ test.describe.serial('portal-ui api tokens', () => {
 
   // OpenViCloud/titan-cloud-console:portal/src/pages/ApiTokensPage.tsx (CreateApiTokenDialog: secret shown once with showOnce, Copy writes it
   // to the clipboard, close() forgets it; ApiTokensPage: row name, `prefix…`, expiryText; DeleteConfirmDialog);
-  // OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts (apiTokens) · OpenViCloud/titan-ops:docs/features/public-api/design.md#api-token
-  // · OpenViCloud/titan-ops:docs/features/cloud-console/design.md#portal-language
+  // OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts (apiTokens) · titan-ops features/public-api/design.md#api-token
+  // · titan-ops features/cloud-console/design.md#portal-language
   test('UI-27 create a 30-day token, copy it, Done hides it, the row shows name, prefix and expiry; delete removes it and the secret is 401', async () => {
     test.setTimeout(5 * 60_000)
     const page = await pageOf('tenant')

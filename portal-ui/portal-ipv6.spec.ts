@@ -75,7 +75,7 @@ test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () =
     ])
   })
 
-  // OpenViCloud/titan-ops:docs/features/network/design.md#ipv6-public · OpenViCloud/titan-ops:docs/features/cloud-console/design.md#quota-card
+  // titan-ops features/network/design.md#ipv6-public · titan-ops features/cloud-console/design.md#quota-card
   // OpenViCloud/titan-cloud-console:portal/src/components/NetworkCreateModal.tsx · OpenViCloud/titan-cloud-console:portal/src/components/QuotaCard.tsx
   test('UI-16 a network with public IPv6 through the form, a VM on it, and the VM page showing its address', async () => {
     const { clusterId, smallTier, templateId } = await envOf()
@@ -155,7 +155,7 @@ test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () =
     log(`UI-16 vm=${vmName} publicIpv6=${vm.publicIpv6Address}`)
   })
 
-  // OpenViCloud/titan-ops:docs/features/load-balancer/design.md#portal · OpenViCloud/titan-cloud-console:portal/src/pages/LoadBalancerListPage.tsx
+  // titan-ops features/load-balancer/design.md#portal · OpenViCloud/titan-cloud-console:portal/src/pages/LoadBalancerListPage.tsx
   // OpenViCloud/titan-cloud-console:portal/src/components/LoadBalancerFormModal.tsx
   test('UI-17 create a load balancer through the form, edit its listeners, then delete it', async () => {
     test.skip(networkId === '' || vmId === '', 'UI-16 did not produce an IPv6 network and VM')
@@ -171,7 +171,7 @@ test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () =
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: 'Create load balancer' })).toBeVisible()
 
-    // The network select offers only networks with a /64 (OpenViCloud/titan-ops:docs/features/load-balancer/design.md#lb-needs-public-ipv6):
+    // The network select offers only networks with a /64 (titan-ops features/load-balancer/design.md#lb-needs-public-ipv6):
     // the shared run network (no IPv6) must not be an option, the IPv6 one from UI-16 must be. Its accessible
     // name is the field label "Network" (OpenViCloud/titan-cloud-console:portal/src/components/LoadBalancerFormModal.tsx, Network field) — "Select a network with public IPv6" is
     // only the placeholder <option> text, not an aria-label.

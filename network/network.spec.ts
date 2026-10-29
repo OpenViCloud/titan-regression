@@ -39,7 +39,7 @@ test.describe.serial('network', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs HandleAsync (name, CIDR and cluster checks);
-  // the reconciler reports Created (OpenViCloud/titan-ops:docs/features/network/design.md#network-lifecycle)
+  // the reconciler reports Created (titan-ops features/network/design.md#network-lifecycle)
   test('NET-02 create with a key and a cidr is 202 {networkId}, then Created and Exists', async () => {
     const { clusterId } = await envOf()
     const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name, clusterId, cidr: RUN_CIDR }, key)
@@ -48,7 +48,7 @@ test.describe.serial('network', () => {
     expect(Object.keys(bodyOf(reply))).toEqual(['networkId'])
     const network = await waitNetwork('NET-02', networkId, networkUsable)
     expect(network.cidr).toBe(RUN_CIDR)
-    // ACT-02: one request row, one outcome row (OpenViCloud/titan-ops:docs/features/activity/design.md#request-and-outcome-names)
+    // ACT-02: one request row, one outcome row (titan-ops features/activity/design.md#request-and-outcome-names)
     const actions = await activityOf(name)
     log(`ACT-02 network ${name}: ${actions.join(', ')}`)
     expect(countOf(actions, 'network.create_requested')).toBe(1)

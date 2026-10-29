@@ -53,7 +53,7 @@ test.describe.serial('tenant-suspend', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Tenant/UpdateTenantStatusEndpoint.cs (Configure: Patch("v1/tenants/{tenantId:guid}/status");
   // HandleAsync: SendNoContentAsync);
-  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Auth/TenantResolutionMiddleware.cs InvokeAsync (isWrite ⇒ TENANT_SUSPENDED) (a middleware 403 is {code, message}: OpenViCloud/titan-ops:docs/architecture/http-contract.md, named exceptions) — writes refused, reads pass
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Auth/TenantResolutionMiddleware.cs InvokeAsync (isWrite ⇒ TENANT_SUSPENDED) (a middleware 403 is {code, message}: titan-ops architecture/http-contract.md, named exceptions) — writes refused, reads pass
   test('SUS-01 a suspended tenant reads but cannot write: 403 TENANT_SUSPENDED', async () => {
     suspended = true
     await setStatus('Suspended')
@@ -69,7 +69,7 @@ test.describe.serial('tenant-suspend', () => {
     expect(networks.some((n) => n.name === `rg-susnet-${RUN}`)).toBe(false)
   })
 
-  // OpenViCloud/titan-ops:docs/features/tenant/design.md#tenant-status-repeats
+  // titan-ops features/tenant/design.md#tenant-status-repeats
   test('SUS-02 suspending again is 204', async () => {
     await setStatus('Suspended')
     expect((await get('tenant', '/v1/tenant')).status).toBe('Suspended')
@@ -77,7 +77,7 @@ test.describe.serial('tenant-suspend', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Auth/ApiTokenAuthenticationHandler.cs (HandleAuthenticateAsync: the token is the
   // member's `sub`, so TenantResolutionMiddleware applies suspension unchanged); OpenViCloud/titan-control-plane:Titan.Infrastructure/Auth/
-  // TenantResolutionMiddleware.cs InvokeAsync (isWrite ⇒ TENANT_SUSPENDED) · OpenViCloud/titan-ops:docs/features/public-api/design.md#api-token
+  // TenantResolutionMiddleware.cs InvokeAsync (isWrite ⇒ TENANT_SUSPENDED) · titan-ops features/public-api/design.md#api-token
   test('SUS-04 an API token of the suspended tenant reads 200 and its write is 403 TENANT_SUSPENDED', async () => {
     const read = await callWithToken(tokenSecret, 'GET', '/v1/tenant')
     expectStatus(read, 200)

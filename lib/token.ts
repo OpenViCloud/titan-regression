@@ -4,7 +4,7 @@ import { fetchOnceMoreOnEdgeFailure } from './edge-retry'
 import { startLocalProxyIfNeeded } from './local-proxy'
 
 // API tokens the specs create: the secret is made here as the portal makes it, ovc_ + 32 random bytes in
-// base64url (OpenViCloud/titan-ops:docs/features/public-api/design.md#api-token), and is never logged.
+// base64url (titan-ops features/public-api/design.md#api-token), and is never logged.
 export function newSecret(): string {
   return 'ovc_' + randomBytes(32).toString('base64url')
 }

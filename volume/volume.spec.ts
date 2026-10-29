@@ -109,7 +109,7 @@ test.describe.serial('volume', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Volume/AttachVolumeEndpoint.cs HandleAsync — 202, no body;
-  // attachment is read from used_by (OpenViCloud/titan-ops:docs/features/volume/design.md#attachment-from-used-by)
+  // attachment is read from used_by (titan-ops features/volume/design.md#attachment-from-used-by)
   test('VOL-03 attach to a running VM is 202 with no body, then attached to it', async () => {
     const reply = await call('tenant', 'POST', `/v1/tenant/volumes/${volumeA}/attach`, { vmId })
     expectStatus(reply, 202)

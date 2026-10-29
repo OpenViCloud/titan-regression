@@ -1,6 +1,6 @@
 # titan-regression — OpenViCloud's regression suite
 
-The durable regression suite of [OpenViCloud](https://github.com/OpenViCloud/titan-ops). Every behaviour that must still
+The durable regression suite of [OpenViCloud](https://github.com/OpenViCloud). Every behaviour that must still
 hold at the next release has a case in [`plan.md`](plan.md) and, once written, a Playwright spec here. Before each
 release the whole suite runs against the release environment (production, `prd`); a release pins the commit of this
 repository it ran.
@@ -35,7 +35,7 @@ python3 count-cases.py <work dir of each module>/runner.log ...
 
 The source tree is `git archive <sha>` of this repository, extracted, with any new specs copied in; run the
 script from a checkout so its first line names the commit. The full procedure (order, steps outside the runner, evidence) is
-[`release:regression`](https://github.com/OpenViCloud/titan-ops/blob/main/.claude/commands/release/regression.md).
+`release:regression` (a skill of titan-ops, private).
 
 ## Run the lanes
 
@@ -131,7 +131,7 @@ OpenViCloud, needs an approved `L-x` command; `site` — the public site through
 
 Three things change state every tenant of the environment shares: ADM-06 (a global price), `billing/seed-invoices.sql`
 (written straight into the database) and the `L-x` writes on the Incus host. On prd they run only until the first real
-customer is approved ([known-state §first-real-customer](https://github.com/OpenViCloud/titan-ops/blob/main/docs/status/known-state.md#first-real-customer)).
+customer is approved (`titan-ops status/known-state.md#first-real-customer`).
 Until the specs are split or skip themselves, that stops the whole `admin` module (ADM-03 shares the serial
 `admin/admin.spec.ts` with ADM-06, and `run-module.sh` runs the whole directory, ADM-08 and ADM-09 included) and CC-03
 with CC-04 (CC-03 pays the invoice the seed leaves; the serial spec then skips CC-04).

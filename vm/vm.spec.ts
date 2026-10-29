@@ -132,7 +132,7 @@ test.describe.serial('vm', () => {
     expect(vm.vmOfferingId).toBe(otherTier)
   })
 
-  // Public IPv6 is the network's (OpenViCloud/titan-ops:docs/features/network/design.md#ipv6-public): the VM has no switch, and on the run
+  // Public IPv6 is the network's (titan-ops features/network/design.md#ipv6-public): the VM has no switch, and on the run
   // network (no public IPv6) the reconciler reports no global IPv6 — OpenViCloud/titan-incus-worker:resource/vm/reconcile.go
   test('VM-13 a VM on a network without public IPv6 has no IPv6 switch and no public IPv6 address', async () => {
     const vm = await get('tenant', `/v1/tenant/vms/${vmA}`)

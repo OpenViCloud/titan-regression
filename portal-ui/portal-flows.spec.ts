@@ -89,7 +89,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     await closeSessions()
   })
 
-  // OpenViCloud/titan-ops:docs/features/cloud-console/design.md#portal-gate-order · OpenViCloud/titan-cloud-console:portal/src/contexts/TenantContext.tsx
+  // titan-ops features/cloud-console/design.md#portal-gate-order · OpenViCloud/titan-cloud-console:portal/src/contexts/TenantContext.tsx
   // (TenantProvider: PendingApproval → consent gate → app) · OpenViCloud/titan-cloud-console:portal/src/components/ConsentGate.tsx
   // OpenViCloud/titan-cloud-console:portal/src/pages/DashboardPage.tsx
   test('UI-01 beta-user signs in, passes the gates, and the dashboard KPIs match the API', async () => {
@@ -121,7 +121,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     await expect(page.getByTestId('volume-count')).toHaveText(String(volumes.length))
 
     // The month's cost is read again right after the page: metering can tick a VM's usage up between the
-    // two reads (OpenViCloud/titan-ops:docs/features/billing/metering/design.md), so either value is accepted.
+    // two reads (titan-ops features/billing/metering/design.md), so either value is accepted.
     const shown = await page.getByTestId('month-cost').textContent()
     await page.screenshot({ path: `${RESULTS}/UI-01-dashboard.png` })
     const after = await get('tenant', `/v1/tenant/billing/summary?month=${currentMonth()}`)
@@ -130,7 +130,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     log(`UI-01 vms=${vms.length} networks=${networks.length} volumes=${volumes.length} monthCost=${shown}`)
   })
 
-  // OpenViCloud/titan-ops:docs/features/vm/design.md#vm-portal · OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx
+  // titan-ops features/vm/design.md#vm-portal · OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx
   test('UI-02 creating a VM through the form shows the transition then Running, with the right name and tier', async () => {
     const { clusterId, templateId, smallTier } = await envOf()
     const offerings = await get('anonymous', '/v1/vm-offerings') as Array<{ id: string, name: string }>
@@ -142,7 +142,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     await page.getByRole('button', { name: 'Create VM' }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: 'Create Virtual Machine' })).toBeVisible()
-    // The form has no IPv6 field at all (OpenViCloud/titan-ops:docs/features/network/design.md#ipv6-public: IPv6 is a network
+    // The form has no IPv6 field at all (titan-ops features/network/design.md#ipv6-public: IPv6 is a network
     // property, requested at network create, not at VM create).
     await expect(dialog.getByText(/ipv6/i)).toHaveCount(0)
 
@@ -170,7 +170,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     await waitVm('UI-02 vm running', vmId, runs)
     page = await pageOf('tenant')
     await page.goto(PORTAL + '/vms', { waitUntil: 'networkidle' })
-    // Incus may settle on Running or Ready (OpenViCloud/titan-ops:docs/features/vm/design.md#status-mapping); either satisfies "runs".
+    // Incus may settle on Running or Ready (titan-ops features/vm/design.md#status-mapping); either satisfies "runs".
     await expect(rowOf().getByText(/^(Running|Ready)$/)).toBeVisible()
     await expect(rowOf()).toContainText(vmName)
     await expect(rowOf()).toContainText(tierName)
@@ -178,7 +178,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     log(`UI-02 ${vmName} id=${vmId} tier=${tierName}`)
   })
 
-  // OpenViCloud/titan-ops:docs/features/volume/design.md#volume-portal · OpenViCloud/titan-cloud-console:portal/src/pages/VmDetailPage.tsx (Snapshots tab)
+  // titan-ops features/volume/design.md#volume-portal · OpenViCloud/titan-cloud-console:portal/src/pages/VmDetailPage.tsx (Snapshots tab)
   // OpenViCloud/titan-cloud-console:portal/src/pages/VolumeListPage.tsx (create, attach, detach)
   test('UI-04 VM snapshot and volume create/attach/detach/delete through the portal', async () => {
     test.skip(vmId === '', 'UI-02 did not create a VM')
@@ -268,8 +268,8 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     log(`UI-04 vm-snapshot=${snapName} volume=${volumeName}`)
   })
 
-  // OpenViCloud/titan-ops:docs/features/vm/design.md#requests-follow-incus ·
-  // OpenViCloud/titan-ops:docs/features/vm/design.md#portal-refresh-after-mutation
+  // titan-ops features/vm/design.md#requests-follow-incus ·
+  // titan-ops features/vm/design.md#portal-refresh-after-mutation
   // OpenViCloud/titan-cloud-console:portal/src/components/vm/VmActions.tsx · OpenViCloud/titan-cloud-console:portal/src/lib/queryClient.ts (MutationCache invalidates ['activity'])
   test('UI-03 Stop, Start and Delete follow the Incus table, and the Dashboard feed refreshes after each mutation', async () => {
     test.skip(vmId === '', 'UI-02 did not create a VM')
@@ -343,7 +343,7 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
     useBrowser(browser)
     const page = await pageOf('tenant')
     // UI-05/UI-06 compare against English number formatting: force English regardless of the runner's IP
-    // (OpenViCloud/titan-ops:docs/features/cloud-console/design.md#portal-language), independent of whatever UI-15 left behind.
+    // (titan-ops features/cloud-console/design.md#portal-language), independent of whatever UI-15 left behind.
     await page.goto(PORTAL + '/', { waitUntil: 'networkidle' })
     await page.evaluate(() => localStorage.setItem('ovc-lang', 'en'))
   })
@@ -354,7 +354,7 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
     await closeSessions()
   })
 
-  // OpenViCloud/titan-ops:docs/features/billing/invoice/design.md#invoice · OpenViCloud/titan-cloud-console:portal/src/pages/BillingPage.tsx · OpenViCloud/titan-cloud-console:portal/src/pages/InvoicesPage.tsx
+  // titan-ops features/billing/invoice/design.md#invoice · OpenViCloud/titan-cloud-console:portal/src/pages/BillingPage.tsx · OpenViCloud/titan-cloud-console:portal/src/pages/InvoicesPage.tsx
   test('UI-05 Billing and Invoices show numbers formatted in English, matching the API', async () => {
     const before = await get('tenant', `/v1/tenant/billing/summary?month=${currentMonth()}`)
     const invoices = await get('tenant', '/v1/tenant/billing/invoices') as any[]
@@ -387,7 +387,7 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
     await page.screenshot({ path: `${RESULTS}/UI-05-invoices.png` })
   })
 
-  // OpenViCloud/titan-ops:docs/features/billing/wallet/design.md#wallet-portal · OpenViCloud/titan-ops:docs/architecture/money-and-wallet.md#confirmed-topup-is-receipt
+  // titan-ops features/billing/wallet/design.md#wallet-portal · titan-ops architecture/money-and-wallet.md#confirmed-topup-is-receipt
   // OpenViCloud/titan-cloud-console:portal/src/pages/WalletPage.tsx (WalletPage: Receipts only when topUpEnabled === true;
   // StatementSection: statementEmptyHint only when topUpEnabled) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts (wallet)
   test('UI-06 Wallet balance, statement and receipts match the API, in English formatting', async () => {
@@ -425,14 +425,14 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
     } else if (receipts.length === 0) {
       await expect(page.getByText('No receipts yet')).toBeVisible()
     } else {
-      // A receipt IS a Confirmed top-up (OpenViCloud/titan-ops:docs/architecture/money-and-wallet.md#confirmed-topup-is-receipt): its paymentRef is the row's reference.
+      // A receipt IS a Confirmed top-up (titan-ops architecture/money-and-wallet.md#confirmed-topup-is-receipt): its paymentRef is the row's reference.
       await expect(page.getByText(receipts[0].paymentRef)).toBeVisible()
       const receiptsSection = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Receipts' }) })
       await expect(receiptsSection.getByRole('row')).toHaveCount(receipts.length + 1) // +1 header row
     }
   })
 
-  // OpenViCloud/titan-ops:docs/features/billing/topup/design.md#topup-portal · OpenViCloud/titan-cloud-console:portal/src/pages/WalletPage.tsx (BuyCreditDialog)
+  // titan-ops features/billing/topup/design.md#topup-portal · OpenViCloud/titan-cloud-console:portal/src/pages/WalletPage.tsx (BuyCreditDialog)
   test('UI-07 Buy credit shows the transfer code; nothing is confirmed or paid', async () => {
     const page = await pageOf('tenant')
     test.skip(!(await topUpEnabledOf(PORTAL)), 'N/A: the portal config.json has no topUpEnabled: true (no Buy credit on this env)')
@@ -464,7 +464,7 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
     expect(pending?.status).toBe('Pending')
   })
 
-  // OpenViCloud/titan-ops:docs/features/legal/design.md#legal-ui · OpenViCloud/titan-cloud-console:portal/src/pages/MembersPage.tsx, OpenViCloud/titan-cloud-console:portal/src/pages/ProfilePage.tsx,
+  // titan-ops features/legal/design.md#legal-ui · OpenViCloud/titan-cloud-console:portal/src/pages/MembersPage.tsx, OpenViCloud/titan-cloud-console:portal/src/pages/ProfilePage.tsx,
   // OpenViCloud/titan-cloud-console:portal/src/pages/LegalTermsPage.tsx
   test('UI-08 Members, Profile and the terms page show real content', async () => {
     const members = await get('tenant', '/v1/tenant/members') as any[]

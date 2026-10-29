@@ -49,7 +49,7 @@ test.describe.serial('billing-storage', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Billing/Metering/DiskMeterService.cs (DiskMeterService) — a 1 GB volume plus one
   // snapshot of it both exist through a tick: storage grows at both DISK's and SNAPSHOT's rate, neither 0
-  // (OpenViCloud/titan-ops:docs/architecture/money-and-wallet.md#round-once · OpenViCloud/titan-ops:docs/features/billing/metering/design.md#meters).
+  // (titan-ops architecture/money-and-wallet.md#round-once · titan-ops features/billing/metering/design.md#meters).
   test('BIL-16 a 1 GB volume and its snapshot both add storage usage over a tick, neither line is 0', async () => {
     const { clusterId, volumeOfferingId } = await envOf()
     await runNetwork() // ensures the shared run network exists; this case needs no network of its own

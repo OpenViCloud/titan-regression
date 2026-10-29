@@ -2,7 +2,7 @@ import * as net from 'node:net'
 
 // The host reaches the local cluster on *.localhost:8080 (host port 8080 → Traefik :80), and Keycloak's issuer
 // carries that port, so the browser in the runner pod must use the same URLs. Chromium maps *.localhost to
-// loopback; this proxy carries loopback:8080 to Traefik's service (OpenViCloud/titan-ops:docs/infra/environments/local-cluster/topology.md#runbook).
+// loopback; this proxy carries loopback:8080 to Traefik's service (https://github.com/OpenViCloud/titan-local-cluster/blob/main/docs/topology.md#runbook).
 const TRAEFIK_HOST = 'traefik.kube-system.svc.cluster.local'
 const TRAEFIK_PORT = 80
 

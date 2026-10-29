@@ -60,7 +60,7 @@ test.describe.serial('tenant', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Tenant/UpdateTenantStatusEndpoint.cs (Configure: Patch("v1/tenants/{tenantId:guid}/status");
-  // HandleAsync: SendNoContentAsync) · OpenViCloud/titan-ops:docs/features/tenant/design.md#tenant-status-repeats
+  // HandleAsync: SendNoContentAsync) · titan-ops features/tenant/design.md#tenant-status-repeats
   test('TEN-04 Active on an Active tenant is 204 and it stays Active', async () => {
     expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/status`, { status: 'Active' }), 204)
     expect((await get('tenant', '/v1/tenant')).status).toBe('Active')
@@ -80,7 +80,7 @@ test.describe.serial('tenant', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Legal/GetLegalDocumentQueryHandler.cs (GetLegalDocumentQueryHandler) ·
-  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Legal/GetLegalDocumentEndpoint.cs (GetLegalDocumentEndpoint) (OpenViCloud/titan-ops:docs/features/legal/design.md#legal-endpoints)
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Legal/GetLegalDocumentEndpoint.cs (GetLegalDocumentEndpoint) (titan-ops features/legal/design.md#legal-endpoints)
   test('TEN-07 the terms come in English by default and in Vietnamese on request, under one version', async () => {
     const english = await get('anonymous', '/v1/legal/document')
     const vietnamese = await get('anonymous', '/v1/legal/document?lang=vi')

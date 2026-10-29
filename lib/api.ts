@@ -78,7 +78,7 @@ export function bodyOf(reply: Reply): any {
 }
 
 // The error envelope is { status, title, code }: the code is in `code`, not `detail`
-// (OpenViCloud/titan-ops:docs/architecture/http-contract.md#error-envelope).
+// (titan-ops architecture/http-contract.md#error-envelope).
 export function expectError(reply: Reply, status: number, code: string): void {
   expectStatus(reply, status)
   expect(bodyOf(reply).code, `${reply.url} → ${reply.text.slice(0, 300)}`).toBe(code)
@@ -92,7 +92,7 @@ export async function get(as: As, path: string): Promise<any> {
 
 // --- waiting -------------------------------------------------------------------------------------------------
 
-// Long enough for two reconciler cycles (2 minutes each, OpenViCloud/titan-ops:docs/architecture/provider-and-worker.md#reconciler-is-a-worker-ticker)
+// Long enough for two reconciler cycles (2 minutes each, titan-ops architecture/provider-and-worker.md#reconciler-is-a-worker-ticker)
 // plus the provider work itself.
 export const OBSERVED_WITHIN_MS = 6 * 60_000
 

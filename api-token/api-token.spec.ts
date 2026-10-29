@@ -44,7 +44,7 @@ test.describe.serial('api-token', () => {
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/ApiToken/CreateApiTokenEndpoint.cs (SendAsync(result, 201));
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Platform/ApiToken/ApiToken.cs (Create: Prefix = secret[..PrefixLength],
   // ExpiresAt = now.AddDays); OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/ApiToken/Contracts/ApiTokenQueryResult.cs
-  // (ApiTokenQueryResult: never the secret nor its hash) · OpenViCloud/titan-ops:docs/features/public-api/design.md#api-token
+  // (ApiTokenQueryResult: never the secret nor its hash) · titan-ops features/public-api/design.md#api-token
   test('TOK-01 create is 201 {apiTokenId}; the list shows prefix and a 90-day expiry, never the secret or its hash', async () => {
     tenantId = (await get('tenant', '/v1/tenant')).id
     countBefore = (await get('tenant', '/v1/tenant/api-tokens') as any[]).length
@@ -64,7 +64,7 @@ test.describe.serial('api-token', () => {
     const text = JSON.stringify(list)
     expect(text.includes(firstSecret)).toBe(false)
     expect(text.includes(hash)).toBe(false)
-    // ACT-02: one request row, one outcome row (OpenViCloud/titan-ops:docs/features/activity/design.md#request-and-outcome-names)
+    // ACT-02: one request row, one outcome row (titan-ops features/activity/design.md#request-and-outcome-names)
     const actions = await activityOf(firstName)
     log(`ACT-02 api token ${firstName}: ${actions.join(', ')}`)
     expect(countOf(actions, 'api_token.create_requested')).toBe(1)
@@ -90,7 +90,7 @@ test.describe.serial('api-token', () => {
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Platform/ApiToken/CreateApiTokenCommandHandler.cs (HandleAsync:
   // API_TOKEN_NAME_TAKEN, then API_TOKEN_EXISTS); OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/ApiToken/CreateApiTokenEndpoint.cs
   // (CreateApiTokenValidator: ovc_ + 43 base64url, 30/90/365 or null); OpenViCloud/titan-control-plane:Titan.Infrastructure/Auth/IdempotencyMiddleware.cs
-  // (Replay) · OpenViCloud/titan-ops:docs/architecture/http-contract.md#idempotency-key
+  // (Replay) · titan-ops architecture/http-contract.md#idempotency-key
   test('TOK-03 a second token through the token: replay, name taken, secret taken, malformed, bad lifetime, no key', async () => {
     const key = newKey()
     const data = { name: secondName, token: secondSecret, expiresInDays: null }
