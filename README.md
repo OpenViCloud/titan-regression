@@ -112,7 +112,7 @@ create a network and beta-user may hold one.
 | 16 | `portal-ui` | customer portal end to end, signed in | no | yes | yes |
 | 17 | `tenant-suspend` | suspended ⇒ writes refused, reads allowed; reactivated | no | yes | yes |
 | 18 | `network-lifecycle` | deletes the run's network (with its rules), recreates the same name | yes | yes | yes |
-| 19 | `login-page` | Keycloak sign-in page: layout, colours, font, brand, sign-up form, language (no sign-in) | yes | yes | yes |
+| 19 | `login-page` | Keycloak sign-in page: layout, colours, font, brand, sign-up form, language, redirect URIs per client (no sign-in) | yes | yes | yes |
 | 20 | `cleanup` | sweeps `rg-*` (and the `tfacc-*` a red `terraform-provider` run left) through the API, asserts 0 (on Incus: CLN-02, host) | yes | yes | yes |
 | 21 | `terraform-provider` | the public provider: catalog, network + firewall rule, SSH key + VM + volume + attachment, load balancer (create, import, update in place, delete), plan-time validation — `go test -c` of the provider repo, run in the pod with an API token the spec makes there; after `cleanup`, because the tests create networks | no | yes | yes — `terraform-provider.spec.ts` runs `acceptance_*test.go` of the provider repo (TFP-04, TFP-08 by hand) |
 | 22 | `worker` | the worker image the release environment runs comes from `OpenViCloud/titan-incus-worker`, pulls anonymously; the worker's command kinds match the control plane's — `gh`/`curl`/`kubectl` reads on the agent's machine | no | yes | no |
