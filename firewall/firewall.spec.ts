@@ -19,7 +19,7 @@ function ruleShape(r: any): string {
   return `state=${r.currentState} existence=${r.currentExistence} desired=${r.desiredExistence} transition=${r.transition} failure=${r.requestFailureReason}`
 }
 
-// The server's count: desired Exists and (Exists, or its create waits) — OpenViCloud/titan-ops:docs/features/network/design.md#firewall-rule-quota-counting
+// The server's count: desired Exists and (Exists, or its create waits) — titan-ops features/network/design.md#firewall-rule-quota-counting
 function counts(r: any): boolean {
   return r.desiredExistence === 'Exists' && (r.currentExistence === 'Exists' || r.transition === 'Creating')
 }
@@ -91,7 +91,7 @@ test.describe.serial('firewall', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Network/CreateFirewallRuleEndpoint.cs (Configure: Post("v1/tenant/networks/{networkId:guid}/firewall-rules");
   // HandleAsync: SendAsync(result, 201)); the reconciler
-  // reports the ACL line (OpenViCloud/titan-ops:docs/features/network/design.md#firewall-rule-status)
+  // reports the ACL line (titan-ops features/network/design.md#firewall-rule-status)
   test('FW-01 a rule is 201 {ruleId}, then enabled and Exists', async () => {
     const id = await createRule(0)
     const rule = await pollUntil('FW-01', () => readRule(id), (r) => r.currentState === 'enabled' && r.transition === null, ruleShape)
@@ -133,7 +133,7 @@ test.describe.serial('firewall', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Platform/Tenant/Tenant.cs EnsureCanCreateFirewallRule; a delete asked stops counting
-  // (OpenViCloud/titan-ops:docs/features/network/design.md#firewall-rule-quota-counting)
+  // (titan-ops features/network/design.md#firewall-rule-quota-counting)
   test('FW-04 the rule past MaxFirewallRulesPerNetwork is 422 FIREWALL_QUOTA_EXCEEDED; a delete frees a slot', async () => {
     const live = (await get('tenant', rulePath(networkId)) as any[]).filter(counts).length
     log(`FW-04 live rules before: ${live}`)

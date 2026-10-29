@@ -156,7 +156,7 @@ test.describe.serial('load-balancer', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/LoadBalancer/RenameLoadBalancerEndpoint.cs (Patch, 204, no provider command);
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/LoadBalancer/RenameLoadBalancerCommandHandler.cs HandleAsync
-  // (LOAD_BALANCER_NAME_TAKEN) · OpenViCloud/titan-ops:docs/features/load-balancer/design.md#lb-rename
+  // (LOAD_BALANCER_NAME_TAKEN) · titan-ops features/load-balancer/design.md#lb-rename
   test('LB-09 rename is 204 and keeps the VIP; a name another load balancer holds is 409 LOAD_BALANCER_NAME_TAKEN', async () => {
     test.skip(lbId === '', 'LB-03 did not create a load balancer')
     const created = await call('tenant', 'POST', '/v1/tenant/load-balancers',

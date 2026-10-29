@@ -18,6 +18,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # titan-ops is private, so a link into it is a 404 for every reader of this repository; a titan-ops doc is named
+      # `titan-ops <path under its docs/>#<anchor>` instead.
+      - name: No URL into private titan-ops
+        run: |
+          if git grep -n -I -i -E 'github\.com/openvicloud/titan-ops([^[:alnum:]_-]|$)' -- ':/'; then
+            echo "URL into private titan-ops above: write titan-ops <path>#<anchor>"; exit 1
+          fi
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22.23.3

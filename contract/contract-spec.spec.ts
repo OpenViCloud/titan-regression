@@ -15,7 +15,7 @@ import { runNetwork } from './fixtures'
 //
 // VM/volume/snapshot/load-balancer creates are expensive (provider work, minutes to observe); this spec does not
 // create any of them. Their declared codes are asserted against the documented expectation
-// (OpenViCloud/titan-ops:docs/features/public-api/design.md#success-codes) and the codes vm.spec.ts/volume.spec.ts/vm-snapshot.spec.ts/
+// (titan-ops features/public-api/design.md#success-codes) and the codes vm.spec.ts/volume.spec.ts/vm-snapshot.spec.ts/
 // load-balancer.spec.ts already assert the live API returns for those routes.
 
 type Spec = { paths: Record<string, Record<string, any>>, components: { schemas: Record<string, any> } }
@@ -50,7 +50,7 @@ function operationOf(spec: Spec, method: string, concretePath: string): any {
 }
 
 // Asserts the spec declares exactly one 2xx response for this call, equal to the status actually returned, and
-// that a body is declared exactly when one was sent (OpenViCloud/titan-ops:docs/features/public-api/design.md#success-codes).
+// that a body is declared exactly when one was sent (titan-ops features/public-api/design.md#success-codes).
 async function assertDeclaredCode(label: string, method: string, path: string, status: number, hasBody: boolean): Promise<void> {
   const spec = await fetchSpec()
   const op = operationOf(spec, method, path)
@@ -169,7 +169,7 @@ test.describe.serial('contract-spec', () => {
     sshKeyId = bodyOf(keyReply).id as string
     await assertDeclaredCode('CON-10 ssh key create', 'POST', '/v1/tenant/ssh-keys', 201, true)
 
-    // rename (PUT/PATCH): 204, no body — OpenViCloud/titan-ops:docs/architecture/http-contract.md#commands-return-no-data
+    // rename (PUT/PATCH): 204, no body — titan-ops architecture/http-contract.md#commands-return-no-data
     renamedTo = `${networkName}-rg`
     const renameReply = await call('tenant', 'PATCH', `/v1/tenant/networks/${networkId}`, { name: renamedTo })
     expectStatus(renameReply, 204)
@@ -185,7 +185,7 @@ test.describe.serial('contract-spec', () => {
     await assertDeclaredCode('CON-10 network get', 'GET', `/v1/tenant/networks/${networkId}`, 200, true)
 
     // network create: 202 WITH a body (id-only) — unlike a delete or stop/start, a create answers the id
-    // (OpenViCloud/titan-ops:docs/architecture/http-contract.md#create-returns-id), so 202 does not always mean "no body".
+    // (titan-ops architecture/http-contract.md#create-returns-id), so 202 does not always mean "no body".
     await assertDeclaredCode('CON-10 network create (not exercised here)', 'POST', '/v1/tenant/networks', 202, true)
 
     // delete rule: 204, no body
@@ -206,7 +206,7 @@ test.describe.serial('contract-spec', () => {
     await assertDeclaredCode('CON-10 network delete (not exercised here)', 'DELETE', '/v1/tenant/networks/{networkId}', 202, false)
   })
 
-  // OpenViCloud/titan-ops:docs/features/public-api/design.md#state-enums — every currentState/desiredState/currentExistence/
+  // titan-ops features/public-api/design.md#state-enums — every currentState/desiredState/currentExistence/
   // desiredExistence/transition (and tenant/invoice/topup status) is null or a value the spec's enum declares for
   // that field. Lists may be empty elsewhere in the run, but the run network + a fresh rule make the network and
   // firewall-rule checks non-empty here.
@@ -291,7 +291,7 @@ test.describe.serial('contract-spec', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/ListTemplatesEndpoint.cs (ListTemplatesRequest: [QueryParam] ClusterId)
-  // · OpenViCloud/titan-ops:docs/features/public-api/design.md#spec-breaking-gate
+  // · titan-ops features/public-api/design.md#spec-breaking-gate
   test('CON-13 the served spec declares clusterId on GET /v1/templates as an optional query parameter', async () => {
     const spec = await fetchSpec()
     const op = spec.paths['/v1/templates']['get']

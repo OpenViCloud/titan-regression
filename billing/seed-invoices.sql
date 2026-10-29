@@ -1,7 +1,7 @@
 -- Seeds the invoices the billing and concurrency modules pay, on admin-test's tenant (money only moves there:
 -- CLAUDE.md). Not loaded into the runner: the agent runs it with psql before those modules — on dev as
 -- a dev write, on the release environment (prd) as an L-x of the release plan, and there only until the first real
--- customer (OpenViCloud/titan-ops:docs/status/known-state.md#first-real-customer).
+-- customer (titan-ops status/known-state.md#first-real-customer).
 --   psql -U postgres -d titan -v ON_ERROR_STOP=1 -f seed-invoices.sql
 -- Each run takes the first year in 2001..2099 admin-test has no invoice in, so runs never collide and nothing
 -- is deleted. Totals mark each invoice's role; the specs find them by year and total.

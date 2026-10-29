@@ -38,7 +38,7 @@ test.describe.serial('catalog', () => {
     for (const template of templates) {
       expect(Object.keys(template).sort()).toEqual(['description', 'diskGb', 'id', 'name', 'os'])
     }
-    // Every template the customer sees for the cluster Exists there (OpenViCloud/titan-ops:docs/features/catalog/design.md#template-per-cluster).
+    // Every template the customer sees for the cluster Exists there (titan-ops features/catalog/design.md#template-per-cluster).
     const admin = await get('admin', '/v1/admin/templates') as any[]
     for (const template of templates) {
       const row = admin.find((a) => a.id === template.id)
@@ -99,7 +99,7 @@ test.describe.serial('catalog', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/SyncTemplatesEndpoint.cs HandleAsync (202);
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs HandleAsync (NeedsASyncRequest, RequestSyncIn)
-  // a template with no image for the cluster architecture gives up (OpenViCloud/titan-ops:docs/features/catalog/design.md#template-architecture)
+  // a template with no image for the cluster architecture gives up (titan-ops features/catalog/design.md#template-architecture)
   test('CAT-06 sync: every template ends Exists or gives up in the cluster, none stays Syncing', async () => {
     const { clusterId } = await envOf()
     const reply = await call('admin', 'POST', '/v1/admin/templates/sync')

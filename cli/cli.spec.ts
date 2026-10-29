@@ -244,7 +244,7 @@ test.describe.serial('cli', () => {
     expect(info.version.length).toBeGreaterThan(0)
   })
 
-  // OpenViCloud/titan-ops:docs/features/cli/design.md#login-on-the-web; OpenViCloud/titan-cli:command/tenant/tenant.go newGet — the fields
+  // titan-ops features/cli/design.md#login-on-the-web; OpenViCloud/titan-cli:command/tenant/tenant.go newGet — the fields
   // `tenant get` shows
   test('CLI-02 login on the web, then `tenant get` answers what the API answers', async ({ browser }) => {
     const login = spawn(BINARY, ['auth', 'login'], { env: cliEnv() })
@@ -446,7 +446,7 @@ test.describe.serial('cli', () => {
 // case of that chain goes red.
 test.describe('cli catalog', () => {
   // OpenViCloud/titan-cli:command/catalog/catalog.go NewCluster (cluster list) ·
-  // OpenViCloud/titan-ops:docs/architecture/money-and-wallet.md#money-is-long-vnd (the money-of-tenant part
+  // titan-ops architecture/money-and-wallet.md#money-is-long-vnd (the money-of-tenant part
   // of CLI-05 stays NOT COVERED in plan.md: no CLI command reads a tenant's own cost yet)
   test('CLI-05 cluster/template/size list match GET /v1/clusters, /v1/templates, /v1/vm-offerings to every digit', async () => {
     const { clusterId } = await envOf()
@@ -531,7 +531,7 @@ test.describe.serial('cli lifecycle', () => {
     await cleanUp(steps)
   })
 
-  // OpenViCloud/titan-cli:command/sshkey/sshkey.go newAdd (add), newList (list) · OpenViCloud/titan-ops:docs/features/vm/design.md#ssh-key
+  // OpenViCloud/titan-cli:command/sshkey/sshkey.go newAdd (add), newList (list) · titan-ops features/vm/design.md#ssh-key
   test('CLI-12 `ssh-key add` then `ssh-key list` shows the fingerprint ssh-keygen computes for the same file', async () => {
     fs.rmSync(LIFECYCLE_SSH_DIR, { recursive: true, force: true })
     fs.mkdirSync(LIFECYCLE_SSH_DIR, { recursive: true })
@@ -613,7 +613,7 @@ test.describe.serial('cli lifecycle', () => {
   })
 
   // OpenViCloud/titan-cli:command/vm/lifecycle.go newCreate (resolveNetwork/createVm — client-side resolution before any POST) ·
-  // OpenViCloud/titan-ops:docs/features/cli/design.md#error-codes. Runs before CLI-15 renames/deletes VM2_NAME: the taken-name case
+  // titan-ops features/cli/design.md#error-codes. Runs before CLI-15 renames/deletes VM2_NAME: the taken-name case
   // needs a live VM holding that name.
   test('CLI-16 create refuses an unknown network with no new VM, and a taken name with (VM_NAME_TAKEN)', async () => {
     const { clusterId, templateId } = await envOf()
@@ -718,7 +718,7 @@ test.describe.serial('cli api token', () => {
   })
 
   // OpenViCloud/titan-cli:command/root.go (Deps.ApiToken, ApiTokenFromEnv: OPENVICLOUD_TOKEN replaces the session);
-  // OpenViCloud/titan-cli:output/problem.go Explain (401 with SentApiToken names OPENVICLOUD_TOKEN) · OpenViCloud/titan-ops:docs/features/cli/design.md#api-token
+  // OpenViCloud/titan-cli:output/problem.go Explain (401 with SentApiToken names OPENVICLOUD_TOKEN) · titan-ops features/cli/design.md#api-token
   test('CLI-18 OPENVICLOUD_TOKEN with no session: tenant get and vm list work; an unknown token names OPENVICLOUD_TOKEN, not auth login', async () => {
     fs.rmSync(emptyHome, { recursive: true, force: true })
     fs.mkdirSync(emptyHome, { recursive: true })

@@ -5,7 +5,7 @@ import { RUN, activityOf, countOf, createVm, envOf, runNetwork, waitVm } from '.
 
 // The API half of cases ADM-03..07 of plan.md; the admin portal screens wait for PORTAL-REDESIGN.
 // ADM-06 changes a global price for a few seconds every time this module runs: on the release environment (prd), running
-// the module at all needs an approved L-x (CLAUDE.md), and only until the first real customer (OpenViCloud/titan-ops:docs/status/known-state.md#first-real-customer).
+// the module at all needs an approved L-x (CLAUDE.md), and only until the first real customer (titan-ops status/known-state.md#first-real-customer).
 test.describe.serial('admin', () => {
   test.describe.configure({ timeout: 10 * 60_000 })
 
@@ -45,7 +45,7 @@ test.describe.serial('admin', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Admin/Vm/DeleteAdminVmCommandHandler.cs HandleAsync (audit action vm.delete.cross_tenant);
-  // OpenViCloud/titan-ops:docs/features/activity/design.md#request-and-outcome-names — admin delete records no request in the tenant feed
+  // titan-ops features/activity/design.md#request-and-outcome-names — admin delete records no request in the tenant feed
   test('ADM-03 admin deletes a tenant VM: 204, an audit row, no delete request in the tenant feed', async () => {
     const reply = await call('admin', 'DELETE', `/v1/admin/vms/${vmId}`)
     expectStatus(reply, 204)

@@ -91,7 +91,7 @@ test.describe.serial('contract', () => {
     }
   })
 
-  // OpenViCloud/titan-ops:docs/architecture/http-contract.md#error-envelope — { status, title, code }
+  // titan-ops architecture/http-contract.md#error-envelope — { status, title, code }
   test('CON-04 a body that breaks the validator is 400 {status, title, code: VALIDATION_ERROR}', async () => {
     const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name: '', clusterId: '' }, randomUUID())
     expectError(reply, 400, 'VALIDATION_ERROR')
@@ -116,7 +116,7 @@ test.describe.serial('contract', () => {
     }
   })
 
-  // OpenViCloud/titan-ops:docs/architecture/provider-and-worker.md#provider-command-lease — /internal/* needs X-Internal-Token
+  // titan-ops architecture/provider-and-worker.md#provider-command-lease — /internal/* needs X-Internal-Token
   test('CON-07 /internal/* without X-Internal-Token is 401, even with a user token', async () => {
     const user = await headersOf('tenant')
     for (const path of ['/internal/reconcile/vms?clusterId=x', '/internal/reconcile/networks?clusterId=x']) {
@@ -142,8 +142,8 @@ test.describe.serial('contract', () => {
     expect(stranger.headers.get('access-control-allow-origin')).toBeNull()
   })
 
-  // OpenViCloud/titan-ops:docs/architecture/platform-infra.md — the release environment serves api, portal and admin over TLS on its own names
-  // OpenViCloud/titan-ops:docs/architecture/http-contract.md#error-envelope — error bodies declare their length; the edge turns a refused
+  // titan-ops architecture/platform-infra.md — the release environment serves api, portal and admin over TLS on its own names
+  // titan-ops architecture/http-contract.md#error-envelope — error bodies declare their length; the edge turns a refused
   // upgrade answered chunked into its own 502. OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/OpenVmSshEndpoint.cs
   // HandleAsync (GetVmShellTargetQuery) → OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/ComputeOwnership.cs RequireVmAsync (VM_NOT_FOUND)
   test('CON-12 a refused websocket upgrade reaches the client with its JSON code, not the edge 502', async () => {

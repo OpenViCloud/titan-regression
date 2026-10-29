@@ -11,7 +11,7 @@ import { RUN, createVm, deleteVmAndWait, envOf, runNetwork, runs, waitVm, waitVo
 const TICK_MS = 10 * 60_000
 
 // A usage record keeps the raw product; whole VND happens once, on the invoice line
-// (OpenViCloud/titan-ops:docs/architecture/money-and-wallet.md#round-once). Any size bills; 10 GB makes the storage step easy to read in the log.
+// (titan-ops architecture/money-and-wallet.md#round-once). Any size bills; 10 GB makes the storage step easy to read in the log.
 const BILLED_GB = 10
 
 type Invoice = { id: string, status: string, total: number, paymentState: string | null, paidBy: string | null }
@@ -112,7 +112,7 @@ test.describe.serial('billing', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Billing/Invoice/InvoiceWalletSettlement.cs (SettleAsync); the consumer applies
-  // the debit later (OpenViCloud/titan-ops:docs/features/billing/invoice/design.md#pay-routes)
+  // the debit later (titan-ops features/billing/invoice/design.md#pay-routes)
   test('BIL-04 the tenant pays an invoice from a wallet that covers it: 202, then Settled and debited once', async () => {
     const before = await wallet()
     const debitsBefore = (await get('admin', '/v1/tenant/wallet/statement')).lines.filter((l: any) => l.amount === -1111).length
@@ -180,7 +180,7 @@ test.describe.serial('billing', () => {
     expect(line.overCeiling).toBe(line.outstanding > line.debtCeiling)
   })
 
-  // OpenViCloud/titan-ops:docs/features/billing/topup/design.md#topup-routes — the old routes are gone
+  // titan-ops features/billing/topup/design.md#topup-routes — the old routes are gone
   test('BIL-12 removed wallet routes answer 404', async () => {
     expectStatus(await call('admin', 'GET', '/v1/tenant/wallet/receipts'), 404)
     expectStatus(await call('admin', 'GET', '/v1/tenant/wallet/topups'), 404)
@@ -194,7 +194,7 @@ test.describe.serial('billing', () => {
   })
 
   // Metering, on the lane's tenant (no money moves). OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/VmRepository.cs
-  // ListBillableAsync — Running, Ready, Frozen, Error are billed; Stopped is not (OpenViCloud/titan-ops:docs/features/vm/design.md#counting-and-billing)
+  // ListBillableAsync — Running, Ready, Frozen, Error are billed; Stopped is not (titan-ops features/vm/design.md#counting-and-billing)
   test('BIL-01..03 a running VM gets RUNNING_VM usage at the tier price, a 10 GB volume gets storage usage, a stopped VM gets no more', async () => {
     const { smallTier, clusterId, volumeOfferingId } = await envOf()
     const networkId = (await runNetwork()).id
@@ -209,7 +209,7 @@ test.describe.serial('billing', () => {
     const cost = await pollUntil('BIL-01 compute usage', () => get('tenant', `/v1/tenant/vms/${vmId}/cost`),
       (c) => c.breakdown.length > 0, (c) => `lines=${c.breakdown.length} total=${c.totalCost}`, 2 * TICK_MS + 2 * 60_000, 30_000)
     // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Billing/UsageRecord/UsageRecord.cs (UsageRecord) — a running VM's line; one tick
-    // costs the tier's hourly price × tick/60, not rounded (OpenViCloud/titan-ops:docs/architecture/money-and-wallet.md#round-once)
+    // costs the tier's hourly price × tick/60, not rounded (titan-ops architecture/money-and-wallet.md#round-once)
     expect(cost.breakdown.every((l: any) => l.usageType === 'RUNNING_VM')).toBe(true)
     const price = (await get('anonymous', '/v1/vm-offerings') as any[]).find((o) => o.id === smallTier).pricePerHour as number
     log(`BIL-01 first line ${JSON.stringify(cost.breakdown[0])}, price/h ${price}`)
