@@ -113,7 +113,7 @@ test.describe.serial('contract-spec', () => {
   let sshKeyId = ''
 
   // A rule whose create is still waiting refuses delete with 422 FIREWALL_RULE_NOT_READY
-  // (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/FirewallRule/FirewallRule.cs RequestDelete) — wait until it is at rest.
+  // (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/FirewallRule.cs RequestDelete) — wait until it is at rest.
   async function ruleSettled(id: string): Promise<any> {
     const read = async () => {
       const rows = await get('tenant', `/v1/tenant/networks/${networkId}/firewall-rules`) as any[]
