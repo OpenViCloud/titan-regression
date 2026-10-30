@@ -86,7 +86,7 @@ test.describe.serial('load-balancer', () => {
     ])
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Networking/Network/Network.cs BeginLoadBalancer — Incus refuses a load
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs BeginLoadBalancer — Incus refuses a load
   // balancer on a network with no uplink, and a network without public IPv6 has none
   test('LB-01 a load balancer on a network without public IPv6 is 422 LOAD_BALANCER_NEEDS_PUBLIC_IPV6', async () => {
     expectError(await call('tenant', 'POST', '/v1/tenant/load-balancers',
@@ -103,7 +103,7 @@ test.describe.serial('load-balancer', () => {
       { name: lbName, networkId: runNetworkId, listeners: [http, { ...http, targetPort: 9090 }], backends }, newKey()), 400, 'VALIDATION_ERROR')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Compute/LoadBalancer/LoadBalancerVip.cs (LoadBalancerVip) — interface id 0:0:1:n of the /64
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancerVip.cs (LoadBalancerVip) — interface id 0:0:1:n of the /64
   test('LB-03 on an IPv6 network with a VM: 202, then Exists, VIP <64>::1:1, the VM as backend', async () => {
     const { clusterId, smallTier } = await envOf()
     const clusters = await get('admin', '/v1/admin/clusters') as any[]

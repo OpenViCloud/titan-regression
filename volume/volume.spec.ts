@@ -5,7 +5,7 @@ import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, readVolume,
 
 // Cases VOL-01..10 of plan.md, plus ACT-02 for volumes and volume snapshots (VOL-11 reads the Incus host).
 
-// OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Platform/Tenant/TenantQuota.cs DefaultMaxVolumes, DefaultMaxVolumeSnapshotsPerVolume — no API reads the caps
+// OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/TenantQuota.cs DefaultMaxVolumes, DefaultMaxVolumeSnapshotsPerVolume — no API reads the caps
 const MAX_VOLUMES = 10
 const MAX_SNAPSHOTS_PER_VOLUME = 3
 
@@ -131,7 +131,7 @@ test.describe.serial('volume', () => {
     expect(countOf(actions, 'volume.detached')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Platform/Tenant/Tenant.cs EnsureCanCreateVolumeSnapshot
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/Tenant.cs EnsureCanCreateVolumeSnapshot
   test('VOL-05 snapshots Exist; the one past the cap is 422 VOLUME_SNAPSHOT_QUOTA_EXCEEDED', async () => {
     for (let i = 1; i <= MAX_SNAPSHOTS_PER_VOLUME; i++) {
       const reply = await call('tenant', 'POST', `/v1/tenant/volumes/${volumeA}/snapshots`, { name: `rg-vsnap${i}-${RUN}` }, newKey())
@@ -166,7 +166,7 @@ test.describe.serial('volume', () => {
     expect(countOf(actions, 'volume.created')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Compute/Volume/Volume.cs RequestDelete (VOLUME_HAS_SNAPSHOTS)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs RequestDelete (VOLUME_HAS_SNAPSHOTS)
   test('VOL-07 deleting a volume that still has snapshots is 422 VOLUME_HAS_SNAPSHOTS', async () => {
     expectError(await call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeA}`), 422, 'VOLUME_HAS_SNAPSHOTS')
   })
@@ -191,7 +191,7 @@ test.describe.serial('volume', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/VolumeRepository.cs CountActiveByTenantAsync ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Platform/Tenant/Tenant.cs EnsureCanCreateVolume
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/Tenant.cs EnsureCanCreateVolume
   test('VOL-10 the volume past MaxVolumes is 422 VOLUME_QUOTA_EXCEEDED', async () => {
     // The server's count (OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/VolumeRepository.cs CountActiveByTenantAsync): desired Exists and (Exists, or its create waits).
     const live = (await get('tenant', '/v1/tenant/volumes') as any[])

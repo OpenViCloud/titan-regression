@@ -42,7 +42,7 @@ test.describe.serial('api-token', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/ApiToken/CreateApiTokenEndpoint.cs (SendAsync(result, 201));
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Platform/ApiToken/ApiToken.cs (Create: Prefix = secret[..PrefixLength],
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/ApiToken/ApiToken.cs (Create: Prefix = secret[..PrefixLength],
   // ExpiresAt = now.AddDays); OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/ApiToken/Contracts/ApiTokenQueryResult.cs
   // (ApiTokenQueryResult: never the secret nor its hash) · titan-ops features/public-api/design.md#api-token
   test('TOK-01 create is 201 {apiTokenId}; the list shows prefix and a 90-day expiry, never the secret or its hash', async () => {

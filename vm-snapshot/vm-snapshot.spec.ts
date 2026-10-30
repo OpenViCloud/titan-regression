@@ -6,7 +6,7 @@ import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, getVm, runN
 
 // Cases VMS-01..08 of plan.md, plus ACT-02/ACT-03 for VM snapshots.
 
-// OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Platform/Tenant/TenantQuota.cs DefaultMaxVmSnapshotsPerVm — no API reads the cap
+// OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/TenantQuota.cs DefaultMaxVmSnapshotsPerVm — no API reads the cap
 const MAX_SNAPSHOTS_PER_VM = 3
 
 function snapshotShape(s: any): string {
@@ -90,7 +90,7 @@ test.describe.serial('vm-snapshot', () => {
     expect(countOf(actions, 'vm_snapshot.created')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Compute/Vm/Vm.cs EnsureSnapshottable — Running, Ready, Stopped or Frozen
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs EnsureSnapshottable — Running, Ready, Stopped or Frozen
   test('VMS-02 a snapshot of a stopped VM Exists too', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmId}/stop`), 202)
     await waitVm('VMS-02 stop', vmId, (v) => v.currentState === 'Stopped' && v.transition === null)
@@ -98,7 +98,7 @@ test.describe.serial('vm-snapshot', () => {
     await waitSnapshot('VMS-02', id, exists)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Platform/Tenant/Tenant.cs EnsureCanCreateVmSnapshot; a delete asked stops counting
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/Tenant.cs EnsureCanCreateVmSnapshot; a delete asked stops counting
   // (titan-ops features/vm/design.md#vm-snapshot-counting)
   test('VMS-03 the snapshot past the cap is 422 VM_SNAPSHOT_QUOTA_EXCEEDED; a delete frees the slot', async () => {
     const third = await createSnapshot('s3')

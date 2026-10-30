@@ -389,7 +389,7 @@ test.describe.serial('cli', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/OpenVmSshEndpoint.cs HandleAsync (WEBSOCKET_REQUIRED) ·
   // OpenViCloud/titan-cli:command/vm/vm.go resolve (unknown name) ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Compute/Vm/Vm.cs ShellInstanceName (not running) ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs ShellInstanceName (not running) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/RequestVmSshCommandHandler.cs HandleAsync (one activity row per attempt on a running VM, none on a VM that is not running)
   test('CLI-11 refusals: a plain GET, an unknown VM, a stopped VM; activity counts the attempts', async () => {
     expectError(await call('tenant', 'GET', `/v1/tenant/vms/${vmId}/ssh`), 400, 'WEBSOCKET_REQUIRED')

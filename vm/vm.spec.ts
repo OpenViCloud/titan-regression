@@ -81,7 +81,7 @@ test.describe.serial('vm', () => {
     expect(vms.filter((v) => v.name === name)).toEqual([])
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Networking/Network/Network.cs BeginVmDeployment (NETWORK_CLUSTER_MISMATCH)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs BeginVmDeployment (NETWORK_CLUSTER_MISMATCH)
   test('VM-12 a VM in another cluster than its network is 422 NETWORK_CLUSTER_MISMATCH', async () => {
     const clusters = await get('anonymous', '/v1/clusters') as Array<{ id: string }>
     const usable: string[] = []
@@ -141,7 +141,7 @@ test.describe.serial('vm', () => {
     expect(vm.publicIpv6Address).toBeNull()
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Compute/Vm/Vm.cs RequestStop · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/StopVmEndpoint.cs HandleAsync
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs RequestStop · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/StopVmEndpoint.cs HandleAsync
   test('VM-03 stop from Running is 202, then Stopped with desired Stopped', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/stop`), 202)
     const vm = await waitVm('VM-03', vmA, (v) => v.currentState === 'Stopped' && v.transition === null)
@@ -159,7 +159,7 @@ test.describe.serial('vm', () => {
     expect(countOf(await activityOf(nameA), 'vm.stop_requested')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Compute/Vm/Vm.cs RequestStart · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/StartVmEndpoint.cs HandleAsync
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs RequestStart · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/StartVmEndpoint.cs HandleAsync
   test('VM-05 start from Stopped is 202, then Running or Ready', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/start`), 202)
     await waitVm('VM-05', vmA, (v) => runs(v) && v.transition === null)
@@ -175,7 +175,7 @@ test.describe.serial('vm', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/StopVmCommandHandler.cs HandleAsync (stopIsWaiting: a stop repeated while it waits is
-  // sent again under its key) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Compute/Vm/Vm.cs RequestStart (start while another request waits)
+  // sent again under its key) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs RequestStart (start while another request waits)
   test('VM-07 start while a stop waits is 422 VM_INVALID_STATUS', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/stop`), 202)
     // VM-04, the other half: a stop repeated while it waits is 202 and records no second request.
@@ -195,7 +195,7 @@ test.describe.serial('vm', () => {
     expectStatus(await call('tenant', 'PATCH', `/v1/tenant/vms/${vmA}`, { name: renamed }), 204)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Compute/Vm/Vm.cs RequestDelete (RequestDelete takes over a waiting stop)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs RequestDelete (RequestDelete takes over a waiting stop)
   test('VM-17 delete while a stop waits wins: 202, then Deleted', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmB}/stop`), 202)
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/vms/${vmB}`), 202)

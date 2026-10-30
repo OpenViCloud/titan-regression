@@ -155,7 +155,7 @@ test.describe.serial('billing', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Billing/Invoice/MarkInvoicePaidCommandHandler.cs HandleAsync (alreadyMarkedPaid: repeat),
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Billing/Invoice/Invoice.cs MarkPaid (INVOICE_ALREADY_PAID: paid by the wallet already)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Invoice/Invoice.cs MarkPaid (INVOICE_ALREADY_PAID: paid by the wallet already)
   test('BIL-08 MarkPaid is 204 and touches no wallet; a repeat is 204; on a wallet-settled invoice 422 INVOICE_ALREADY_PAID', async () => {
     const before = await wallet()
     const reply = await call('admin', 'PATCH', `/v1/admin/invoices/${invoices[3333]}/pay`)
@@ -208,7 +208,7 @@ test.describe.serial('billing', () => {
 
     const cost = await pollUntil('BIL-01 compute usage', () => get('tenant', `/v1/tenant/vms/${vmId}/cost`),
       (c) => c.breakdown.length > 0, (c) => `lines=${c.breakdown.length} total=${c.totalCost}`, 2 * TICK_MS + 2 * 60_000, 30_000)
-    // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Billing/UsageRecord/UsageRecord.cs (UsageRecord) — a running VM's line; one tick
+    // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/UsageRecord/UsageRecord.cs (UsageRecord) — a running VM's line; one tick
     // costs the tier's hourly price × tick/60, not rounded (titan-ops architecture/money-and-wallet.md#round-once)
     expect(cost.breakdown.every((l: any) => l.usageType === 'RUNNING_VM')).toBe(true)
     const price = (await get('anonymous', '/v1/vm-offerings') as any[]).find((o) => o.id === smallTier).pricePerHour as number
