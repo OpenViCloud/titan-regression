@@ -129,7 +129,7 @@ test.describe.serial('vm-snapshot', () => {
     expect(countOf(actions, 'vm_snapshot.reverted')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync (AnyInProgressByVmIdAsync ⇒ VM_SNAPSHOT_IN_PROGRESS)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs RequestDelete (a snapshot the VM holds BlocksVmDelete ⇒ VM_SNAPSHOT_IN_PROGRESS; the snapshot is the VM's child entity)
   test('VMS-05 deleting the VM while a snapshot is being made is 422 VM_SNAPSHOT_IN_PROGRESS', async () => {
     expectStatus(await call('tenant', 'DELETE', `${path()}/${snapshots.s4}`), 202)
     await waitSnapshot('VMS-05 free a slot', snapshots.s4, (s) => s.currentExistence === 'Deleted')
@@ -150,13 +150,13 @@ test.describe.serial('vm-snapshot', () => {
     expect(countOf(actions, 'vm_snapshot.deleted')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/ComputeOwnership.cs RequireVmSnapshotAsync
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs RequireSnapshot (a snapshot the VM does not hold answers 404; the snapshot is the VM's child entity)
   test('VMS-08 a snapshot id the VM does not have is 404 VM_SNAPSHOT_NOT_FOUND', async () => {
     expectError(await call('tenant', 'DELETE', `${path()}/${randomUUID()}`), 404, 'VM_SNAPSHOT_NOT_FOUND')
     expectError(await call('tenant', 'POST', `${path()}/${randomUUID()}/revert`), 404, 'VM_SNAPSHOT_NOT_FOUND')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/UpdateVmStatusCommandHandler.cs HandleAsync (MarkAllDeletedByVmIdAsync) — the VM's Deleted report marks its snapshots Deleted
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/UpdateVmStatusCommandHandler.cs HandleAsync (case Deleted: vm.MarkDeleted() takes the VM's snapshots along) — the VM's Deleted report marks its snapshots Deleted
   test('VMS-07 deleting the VM takes its remaining snapshots to Deleted', async () => {
     await deleteVmAndWait(vmId)
     for (const label of ['s1', 's5']) {
