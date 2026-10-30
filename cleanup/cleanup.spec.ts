@@ -26,7 +26,7 @@ test.describe.serial('cleanup', () => {
   })
 
   // Rules go with their network (OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/UpdateNetworkStatusCommandHandler.cs
-  // HandleAsync, case Deleted: rule.MarkDeleted()), VM snapshots with their VM
+  // HandleAsync, case Deleted: network.MarkDeleted(), the rule being the network's child entity), VM snapshots with their VM
   // (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/UpdateVmStatusCommandHandler.cs HandleAsync, case Deleted:
   // MarkAllDeletedByVmIdAsync); lists hide Deleted (OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/VmRepository.cs ListByTenantAsync).
   // SSH keys and API tokens are hard deletes answered 204:
