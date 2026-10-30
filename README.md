@@ -34,8 +34,65 @@ python3 count-cases.py <work dir of each module>/runner.log ...
 ```
 
 The source tree is `git archive <sha>` of this repository, extracted, with any new specs copied in; run the
-script from a checkout so its first line names the commit. The full procedure (order, steps outside the runner, evidence) is
+script from a checkout so its first line names the commit. What the script does inside the cluster, and what some
+modules need around it, is the next section. The full procedure of a release (order, verdict, evidence) is
 `release:regression` (a skill of titan-ops, private).
+
+## Inside a module run
+
+`run-module.sh` does these five steps; they are written out so a run that stopped half-way can be finished or cleaned
+up by hand.
+
+1. **Load the specs** into a ConfigMap of the job's own, `titan-regression-specs-<job>` (`<job>` is
+   `regression-<module>-<label>`): `kubectl create configmap titan-regression-specs-<job> --from-file=lib --from-file=<module> --dry-run=client -o yaml | kubectl apply -f -`
+   in the source tree (a one-off spec: `--from-file=<its directory>`). The runner loads `/specs/*.ts` flat, so a file
+   name shared by `lib/` and the module makes `create configmap` refuse: rename it, never overwrite.
+2. **Start the job** from the lane's CronJob (`titan-regression`; lane b `titan-regression-b`):
+   `kubectl create job <job> --from=cronjob/<cronjob> --dry-run=client -o json | python3 patch-job.py titan-regression-specs-<job> | kubectl create -f -`
+   (`patch-job.py` points the job's `specs` volume at that ConfigMap).
+3. **Wait** for the job's own pod to be `Running` (`--field-selector=status.phase=Running`: a recreated job leaves its
+   old pod behind), then poll `kubectl exec <pod> -- test -f /work/results/.done`; stop as soon as the pod is `Failed` or
+   `Succeeded` (the runner exits early, for example `NO_SPECS`, without writing `.done`). Then read `REGRESSION_EXIT=`
+   from `kubectl logs <pod>` (not `-f`).
+4. **Copy the results** (`kubectl cp <pod>:/work/results …`) while the pod is still held (30 minutes by default), in
+   the same step as 3, and compare the sha256 of every file with `sha256sum` in the pod; a file that differs is copied
+   again in chunks (`dd bs=16384 skip=N count=1 | base64`) until it matches.
+5. **Delete the job and its ConfigMap** once every file matched. A mismatch (or `NO_POD`, `POD_NOT_STARTED`,
+   `BINARY_SHA_MISMATCH`) exits 1 and keeps both for a look: delete both by hand when done.
+
+The script also leaves in `<log dir>`: `control-plane.log` and `incus-worker.log` since the job was created, of the
+pods alive when the module ended (a pod replaced mid-run has none) — for diagnosis; the verdict comes from the specs —
+and the UI cases' screenshots (`results/*.png`, first level only), followed by the `SCREENSHOT_RESULT=` line of
+`check-screenshots.py`. Its stdout line `runner: … blob=<id>` names the version of the script that ran
+(`git log --all --find-object=<id>`); `head=` is the checkout's HEAD and `dirty` means `run-module.sh` in the checkout
+differs from it.
+
+Around the job, some modules need more:
+
+- `billing` and `concurrency`: before `billing`, run `billing/seed-invoices.sql` with
+  `kubectl exec -i <postgres pod> -- psql -U postgres -d titan -v ON_ERROR_STOP=1 < billing/seed-invoices.sql`; after
+  `concurrency`, run `billing/check-wallets.sql` (read only): every row it prints is a finding (BIL-14). `billing` takes
+  about 35 minutes (it waits for 10-minute meter ticks), longer than one command of an agent lasts: start it in the
+  background and wait for `.done` as in step 3.
+- `cli`: build `openvicloud` for the node's architecture (`kubectl get nodes -o json` → `status.nodeInfo.architecture`)
+  from the CLI commit the release pinned: in a clone of `OpenViCloud/titan-cli` at that commit,
+  `GOOS=linux GOARCH=<arch> CGO_ENABLED=0 go build -o <out> ./cmd/openvicloud`, and pass `<out>` as `[binary]`. When
+  the pod logs `BINARY_WAIT`, the script creates `/work/bin`, copies the file to `/work/bin/openvicloud`, compares the
+  sha256 on both ends and touches `/work/bin/openvicloud.ready`.
+- `terraform-provider`: runs after `cleanup` (`beta-user` may hold only one network). The binary is
+  `GOOS=linux GOARCH=<arch> CGO_ENABLED=0 go test -c -o <out> .` in a clone of the provider repo at the pinned commit,
+  copied like `cli`. The spec makes an API token from `beta-user`'s JWT, passes it to `-test.run TestAcc` as
+  `OPENVICLOUD_TOKEN` and deletes it in `afterAll`: the secret never leaves the pod. A red run, repeated or not, is
+  followed by one more `cleanup` job: `terraform-provider` is the last runner module, so nothing after it sweeps the
+  `tfacc-*` resources and `rg-tok-tfp-*` tokens a red run leaves. TFP-04 and TFP-08 (by hand) are NOT COVERED when
+  there is no manual path.
+
+Specs read their URLs from `PORTAL_BASE_URL`, `ADMIN_BASE_URL` and `API_BASE_URL`, credentials from `BETA_USER_*` and
+`ADMIN_TEST_*`, and write screenshots to `RESULTS_DIR` as `<ID>-<what>.png`; they never print or write a credential or
+a bearer token. An access token lives about 10 minutes, so every call goes through `headersOf()` of `lib/auth.ts`
+(it signs in again with under 2 minutes left, and on `401`), the cleanup in `finally` included. A new Playwright
+version of the runner changes the image tag in `cronjob.yaml` and `cronjob-lane-b.yaml` of titan-local-cluster's
+`base/regression-runner/` together with `@playwright/test@x.y.z` in `run.sh`.
 
 ## Run the lanes
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One regression module in the cluster, steps 1-5 of §Runner in OpenViCloud/titan-ops:.claude/commands/release/regression.md:
+# One regression module in the cluster, steps 1-5 of README.md §Inside a module run:
 # load lib + module into ConfigMap titan-regression-specs-<job>, create the job from CronJob $REGRESSION_CRONJOB
 # (default titan-regression), wait for /work/results/.done (or the pod ending), copy the results, compare sha256 file
 # by file, delete the job and its ConfigMap. A job kept for a look (the exit 1 paths below) keeps its ConfigMap: after
@@ -77,7 +77,7 @@ app_log_filter() {
 save_app_logs() {
   local app="$1" file="$logs_dir/$1.log" note=""
   if [ "$app" = "control-plane" ]; then note=" | python3 trim-cp-log.py"; fi
-  # Header line of §Evidence in OpenViCloud/titan-ops:.claude/commands/release/regression.md (OpenViCloud/titan-ops:scripts/check-evidence.py HEADER).
+  # Header line of an evidence log: `# <command> (lane <lane>) · <cluster> · <UTC>` (OpenViCloud/titan-ops:scripts/check-evidence.py HEADER and LANE).
   echo "# kubectl logs -n $app_ns <each pod of app=$app> --since-time=$since (+ --previous when restarted)$note (lane $lane) · $(k config view --minify -o 'jsonpath={.clusters[0].cluster.server}') · $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$file"
   k -n "$app_ns" get pods -l "app=$app" -o json \
     | python3 -c 'import sys,json

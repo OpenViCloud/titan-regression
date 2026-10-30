@@ -7,7 +7,9 @@ Kỳ vọng chung cho mọi case tạo tài nguyên (không nhắc lại từng 
 - Tài nguyên tạo ra mang tên `rg-<loại>-<lượt>` và được xoá trong `finally`; xoá xong `GET` list không còn nó, `GET` theo id (nếu route giữ hàng) báo existence `Deleted`.
 - Lỗi đọc ở `code`, không ở `detail` (`titan-ops architecture/http-contract.md#error-envelope`).
 
-**(host)** = đọc trên host Incus của cluster (Phase 4 của `release:regression`, lệnh `L-x`).
+**(host)** = đọc trên host Incus của cluster (Phase 4 của `release:regression`, lệnh `L-x`). **(`L-x`)** = case cần một lệnh ghi trên env của release mà release đã duyệt; không có `L-x` ⇒ report ghi **N/A — không có `L-x`**.
+
+Case đổi trạng thái mà mọi tenant của env dùng chung (giá toàn cục, hoá đơn seed ghi thẳng vào DB, lệnh ghi trên host) ghi **trên prd dừng sau khách thật đầu tiên** ngay trong cột Khi, kèm `titan-ops status/known-state.md#first-real-customer`; case chỉ chạy khi `config.json` của portal đặt một cờ (`topUpEnabled`) ghi **N/A** kèm tên cờ trong cột Kỳ vọng. Skill của release đọc hai câu đó, không đọc danh sách ID.
 
 `beta-user` trong một case là tenant test của lane đang chạy: `beta-user` ở lane a và ở lượt tuần tự, `beta-user-2` ở lane b khi chạy hai lane (`titan-ops architecture/testing.md#regression-lanes`); `smoke` và `cleanup` chạy ở cả hai lane.
 
