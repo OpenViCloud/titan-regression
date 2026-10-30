@@ -8,7 +8,7 @@ import { runNetwork } from './fixtures'
 // Cases FW-01..05 and FW-07..08 of plan.md: FW-07 reads the Incus host, FW-08 is NOT COVERED; rules of a
 // deleted network are NETL-02.
 
-// OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Platform/Tenant/TenantQuota.cs DefaultMaxFirewallRulesPerNetwork — no API reads the cap
+// OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/TenantQuota.cs DefaultMaxFirewallRulesPerNetwork — no API reads the cap
 const MAX_RULES_PER_NETWORK = 20
 
 function rulePath(networkId: string): string {
@@ -106,7 +106,7 @@ test.describe.serial('firewall', () => {
     expect(actions.filter((a) => a === 'firewall_rule.created').length).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Networking/FirewallRule/FirewallRule.cs RequestDelete (CreateIsWaiting ⇒ FIREWALL_RULE_NOT_READY)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/FirewallRule/FirewallRule.cs RequestDelete (CreateIsWaiting ⇒ FIREWALL_RULE_NOT_READY)
   test('FW-02 deleting a rule whose create still waits is 422 FIREWALL_RULE_NOT_READY', async () => {
     const id = await createRule(1)
     const rule = await readRule(id)
@@ -132,7 +132,7 @@ test.describe.serial('firewall', () => {
     expect(actions.filter((a) => a === 'firewall_rule.deleted').length).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Platform/Tenant/Tenant.cs EnsureCanCreateFirewallRule; a delete asked stops counting
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/Tenant.cs EnsureCanCreateFirewallRule; a delete asked stops counting
   // (titan-ops features/network/design.md#firewall-rule-quota-counting)
   test('FW-04 the rule past MaxFirewallRulesPerNetwork is 422 FIREWALL_QUOTA_EXCEEDED; a delete frees a slot', async () => {
     const live = (await get('tenant', rulePath(networkId)) as any[]).filter(counts).length
