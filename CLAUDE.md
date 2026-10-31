@@ -76,6 +76,7 @@ Hai lane (`lanes.json`) chạy cùng lúc, mỗi lane một tenant test; `admin-
 | `billing` | b | đo usage trên tenant của lane | ví `admin-test` (ghi, assert đúng số); danh sách topup Pending (BIL-10 tạo một cái tạm); audit log (BIL-07 ghi một dòng); giá tier và volume offering mà nó so chi phí |
 | `concurrency` | a | không | ví `admin-test` (assert đúng số, trả hoá đơn 4444 do `seed-invoices.sql` của lane b) |
 | `admin` | a | cộng 1 ₫ vào ví tenant của lane (ADM-08), đổi rồi trả `debtCeiling` | danh sách topup Pending (ADM-08 đòi nút Confirm trên mọi hàng Pending); audit log của mọi tenant; giá một tier +1 rồi trả (ADM-06, tier khác với tier của `billing`) |
+| `backup` | a | không | chỉ đọc: `GET /v1/admin/backups`, `GET /v1/admin/backup-target`, `GET /v1/tenant/wallet` của lane (BAK-07); `POST /v1/admin/backup-target/test` ghi một object thử vào bucket backup (BAK-05) |
 | `portal-ui` | a | nâng `maxNetworks` (IPv6), để lại topup Pending (UI-07, UI-18; chỉ khi portal có `topUpEnabled: true`) | lấy một /64 IPv6 từ khối của cluster |
 | `tenant-suspend` | a | treo tenant của lane rồi trả `Active` | không |
 | `network-lifecycle` | a | xoá và tạo lại network của lane | không |
