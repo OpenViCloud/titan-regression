@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Bộ spec regression **bền** của OpenViCloud: mọi hành vi còn đúng ở release sau có một case trong [`plan.md`](plan.md) và một spec ở đây. Quy trình (ai thêm case, ai viết spec, chạy thế nào) sống ở repo `OpenViCloud/titan-ops` (private): `iteration:enhance-regression-plan` thêm case của story vào `plan.md` sau mỗi lần deploy dev; `release:regression` (skill của titan-ops) viết spec cho case chưa có spec rồi chạy **hết** repo này trên env của release (prd), ở sha `release-plan.md` ghim. Bảng module và thứ tự: [README](README.md).
+Bộ spec regression **bền** của OpenViCloud: mọi hành vi còn đúng ở release sau có một case trong [`plan.md`](plan.md) và một spec ở đây. Quy trình (ai thêm case, ai viết spec, chạy thế nào) sống ở repo `OpenViCloud/titan-ops` (private): `iteration:enhance-regression-plan` thêm case của story vào `plan.md` sau mỗi lần deploy dev; `release:regression-dev` và `release:regression-prd` (skill của titan-ops) viết spec cho case chưa có spec rồi chạy **hết** repo này trên env của release (prd), ở sha `release-plan.md` ghim. Bảng module và thứ tự: [README](README.md).
 
 Repo này không có hệ thống nào để chạy: spec chạy bằng runner `titan-regression` (lane B: `titan-regression-b`) trong cụm (manifest ở `OpenViCloud/titan-local-cluster:base/regression-runner/`), không trên máy agent. CI chỉ chạy test của tooling (`selftest/`, `test_*.py`).
 
@@ -50,7 +50,7 @@ Repo này không có hệ thống nào để chạy: spec chạy bằng runner `
 - Runner nạp **phẳng** (`/specs/*.ts`): spec import helper bằng `./auth`, không `../lib/auth`. Tên file không trùng giữa `lib/` và module.
 - Mọi tài nguyên test mang tên `rg-<loại>-<lượt>` (`<lượt>` = thời điểm job bắt đầu, base36); network của lượt là `rg-net-<lượt>`, module sau tìm nó theo tiền tố. Module nào tạo thì `finally` của module đó xoá — trừ network của lượt, do `network-lifecycle` xoá; module `cleanup` quét lại.
 - Mỗi tenant test (`beta-user`, `beta-user-2`) có `MaxNetworks = 1` ⇒ mọi module của một lane cần network dùng chung **một** network của lượt (`fixtures.ts`); network sống từ trước của tài khoản test làm `NETWORK_QUOTA_EXCEEDED` ⇒ `smoke` báo đỏ ngay, không để module sau đỏ lan.
-- Mỗi test lái trình duyệt (UI case) chụp ≥ 1 ảnh `${RESULTS}/<ID>-<gì>.png` ở điểm an toàn (form đăng nhập rỗng hoặc đã qua, không token trên màn); release commit ảnh làm evidence — §Evidence (hàng **Ảnh UI**) của `release:regression`.
+- Mỗi test lái trình duyệt (UI case) chụp ≥ 1 ảnh `${RESULTS}/<ID>-<gì>.png` ở điểm an toàn (form đăng nhập rỗng hoặc đã qua, không token trên màn); release commit ảnh làm evidence — hàng **Ảnh UI** của `titan-ops architecture/evidence.md#evidence`.
 - Tiền chỉ đụng `admin-test` hoặc hoá đơn seed của chính lượt đó. Ví `beta-user` và `beta-user-2` là dữ liệu sống lâu — đọc, không ghi (trừ ADM-08: cộng 1 ₫ có chủ ý, xem bảng dưới).
 - Comment trong spec theo `titan-ops architecture/code-comments.md#what-a-comment-holds`: không mã iteration/story, không trỏ `docs/iterations/` của titan-ops.
 - Commit và PR chỉ nêu người làm: không `Co-Authored-By: Claude …`, không dòng nói code viết bằng AI (`.claude/settings.json` tắt attribution).

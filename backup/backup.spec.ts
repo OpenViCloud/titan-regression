@@ -4,7 +4,7 @@ import { bodyOf, call, expectStatus, get, log, RESULTS, startLog } from './api'
 
 // Cases BAK-01..03, BAK-05..08, BAK-11 and BAK-13 of plan.md: the admin backup target and status API and the admin
 // portal's Backups page. BAK-15..17 and BAK-19 are kubectl reads by the agent, BAK-12/14/18 read the Incus host
-// (Phase 4 of release:regression), BAK-04 is N/A, BAK-09 is NOT COVERED, BAK-10 is an L-x case of a release that restores (plan.md). Runs after `admin`, creates no
+// (Phase 4 of release:regression-prd), BAK-04 is N/A, BAK-09 is NOT COVERED, BAK-10 is an L-x case of a release that restores (plan.md). Runs after `admin`, creates no
 // rg-* resource and changes nothing: the target is the pod's configuration (titan-ops features/backup/design.md#backup-target).
 
 const STALE_HOURS = 26

@@ -7,7 +7,7 @@ Kỳ vọng chung cho mọi case tạo tài nguyên (không nhắc lại từng 
 - Tài nguyên tạo ra mang tên `rg-<loại>-<lượt>` và được xoá trong `finally`; xoá xong `GET` list không còn nó, `GET` theo id (nếu route giữ hàng) báo existence `Deleted`.
 - Lỗi đọc ở `code`, không ở `detail` (`titan-ops architecture/http-contract.md#error-envelope`).
 
-**(host)** = đọc trên host Incus của cluster (Phase 4 của `release:regression`, lệnh `L-x`). **(`L-x`)** = case cần một lệnh ghi trên env của release mà release đã duyệt; không có `L-x` ⇒ report ghi **N/A — không có `L-x`**.
+**(host)** = đọc trên host Incus của cluster (Phase 4 của `release:regression-prd`, lệnh `L-x`). **(`L-x`)** = case cần một lệnh ghi trên env của release mà release đã duyệt; không có `L-x` ⇒ report ghi **N/A — không có `L-x`**.
 
 Case đổi trạng thái mà mọi tenant của env dùng chung (giá toàn cục, hoá đơn seed ghi thẳng vào DB, lệnh ghi trên host) ghi **trên prd dừng sau khách thật đầu tiên** ngay trong cột Khi, kèm `titan-ops status/known-state.md#first-real-customer`; case chỉ chạy khi `config.json` của portal đặt một cờ (`topUpEnabled`) ghi **N/A** kèm tên cờ trong cột Kỳ vọng. Skill của release đọc hai câu đó, không đọc danh sách ID.
 
@@ -199,7 +199,7 @@ Bí mật do spec sinh như portal: `ovc_` + 32 byte ngẫu nhiên base64url (43
 
 ## cli
 
-CLI có `version`, `auth login|logout|status`, `tenant get`, `cluster|template|size list`, `vm list|get|create|rename|start|stop|delete|ssh`, `ssh-key add|list|delete` (`command/` của repo `OpenViCloud/titan-cli`); `OPENVICLOUD_TOKEN` thay phiên đăng nhập; chưa có lệnh tiền, chưa có lệnh token. Binary không nằm trong image runner: khi spec log `BINARY_WAIT`, agent chép `openvicloud` build từ commit CLI mà release đo, cho kiến trúc của pod (§Runner của `release:regression`).
+CLI có `version`, `auth login|logout|status`, `tenant get`, `cluster|template|size list`, `vm list|get|create|rename|start|stop|delete|ssh`, `ssh-key add|list|delete` (`command/` của repo `OpenViCloud/titan-cli`); `OPENVICLOUD_TOKEN` thay phiên đăng nhập; chưa có lệnh tiền, chưa có lệnh token. Binary không nằm trong image runner: khi spec log `BINARY_WAIT`, agent chép `openvicloud` build từ commit CLI mà release đo, cho kiến trúc của pod (§Runner của phần chung hai skill regression ở titan-ops).
 
 | ID | Khi | Kỳ vọng | Nguồn |
 |---|---|---|---|
@@ -459,7 +459,7 @@ Image worker do repo `OpenViCloud/titan-incus-worker` build; dev kéo tag bằng
 
 ## control-plane-image — image control plane (máy agent, chỉ env của release — không runner)
 
-Image control plane do repo `OpenViCloud/titan-control-plane` build; dev kéo tag bằng `OpenViCloud/titan-local-cluster:scripts/pull-images.py`, prd nhận tên và tag của image dev đang chạy lúc promote. `<csha>` = commit control plane mà release ghim (bảng image repo khác của `release-plan.md`); `<csha7>` = 7 ký tự đầu của nó. Pod control plane prd có hai container (`control-plane`, `incus-tunnel`); case đọc container `control-plane`. Lệnh `kubectl` chỉ đọc. Job migrate là hook PreSync tự xoá sau 5 phút (`ttlSecondsAfterFinished: 300`, `OpenViCloud/titan-local-cluster:base/control-plane/migration-job.yaml` (`ttlSecondsAfterFinished`)), nên case không đọc nó; migration đo ở Phase 4 của `release:regression` (`OpenViCloud/titan-ops:.claude/commands/release/regression.md` §Phase 4, dòng Migration).
+Image control plane do repo `OpenViCloud/titan-control-plane` build; dev kéo tag bằng `OpenViCloud/titan-local-cluster:scripts/pull-images.py`, prd nhận tên và tag của image dev đang chạy lúc promote. `<csha>` = commit control plane mà release ghim (bảng image repo khác của `release-plan.md`); `<csha7>` = 7 ký tự đầu của nó. Pod control plane prd có hai container (`control-plane`, `incus-tunnel`); case đọc container `control-plane`. Lệnh `kubectl` chỉ đọc. Job migrate là hook PreSync tự xoá sau 5 phút (`ttlSecondsAfterFinished: 300`, `OpenViCloud/titan-local-cluster:base/control-plane/migration-job.yaml` (`ttlSecondsAfterFinished`)), nên case không đọc nó; migration đo ở Phase 4 của `release:regression-prd` (`OpenViCloud/titan-ops:.claude/commands/release/regression-prd.md` §Phase 4, dòng Migration).
 
 | ID | Khi | Kỳ vọng | Nguồn |
 |---|---|---|---|
