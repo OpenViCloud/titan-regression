@@ -6,7 +6,7 @@ import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, getVm, runN
 
 // Cases VMS-01..08 of plan.md, plus ACT-02/ACT-03 for VM snapshots.
 
-// OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/TenantQuota.cs DefaultMaxVmSnapshotsPerVm — no API reads the cap
+// OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/ValueObjects/TenantQuota.cs DefaultMaxVmSnapshotsPerVm — no API reads the cap
 const MAX_SNAPSHOTS_PER_VM = 3
 
 function snapshotShape(s: any): string {

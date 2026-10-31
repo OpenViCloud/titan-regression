@@ -60,7 +60,7 @@ test.describe.serial('network-lifecycle', () => {
   // network.MarkDeleted(), which marks every live rule of the network Deleted — the rule is the network's child entity); the rule list drops Deleted rows
   // (OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/FirewallRuleRepository.cs ListByNetworkAsync).
   // No outcome row: one is recorded only for a rule whose own delete was waiting
-  // (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/FirewallRule.cs MarkDeleted returns DeleteIsWaiting).
+  // (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/ChildEntities/FirewallRule.cs MarkDeleted returns DeleteIsWaiting).
   test('NETL-02 the rule on the deleted network reaches Deleted with it', async () => {
     const rules = await get('tenant', `/v1/tenant/networks/${networkId}/firewall-rules`) as any[]
     log(`NETL-02 rules of the deleted network: ${rules.length}`)

@@ -5,7 +5,7 @@ import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, readVolume,
 
 // Cases VOL-01..10 of plan.md, plus ACT-02 for volumes and volume snapshots (VOL-11 reads the Incus host).
 
-// OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/TenantQuota.cs DefaultMaxVolumes, DefaultMaxVolumeSnapshotsPerVolume — no API reads the caps
+// OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/ValueObjects/TenantQuota.cs DefaultMaxVolumes, DefaultMaxVolumeSnapshotsPerVolume — no API reads the caps
 const MAX_VOLUMES = 10
 const MAX_SNAPSHOTS_PER_VOLUME = 3
 
