@@ -19,8 +19,8 @@ test.describe.serial('tenant roles', () => {
     return claims.realm_access?.roles ?? []
   }
 
-  // OpenViCloud/titan-ops:docs/architecture/tenancy-and-admin.md#approval-is-activation ·
-  // OpenViCloud/titan-local-cluster@ebd6a30:base/keycloak/realm-import/configmap.yaml:33 (admin-test) and :47 (beta-user) realmRoles
+  // titan-ops architecture/tenancy-and-admin.md#approval-is-activation ·
+  // OpenViCloud/titan-local-cluster@ebd6a30:base/keycloak/realm-import/configmap.yaml:33 (admin-test) and OpenViCloud/titan-local-cluster@ebd6a30:base/keycloak/realm-import/configmap.yaml:47 (beta-user) realmRoles
   test('TEN-10 the access tokens of beta-user and admin-test carry realm role auto-approve', async () => {
     const tenantRoles = realmRolesOf((await headersOf('tenant')).Authorization)
     const adminRoles = realmRolesOf((await headersOf('admin')).Authorization)

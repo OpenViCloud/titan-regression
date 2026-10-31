@@ -9,7 +9,7 @@ test.describe.serial('portal-ui wallet without top-up', () => {
     startLog('portal-wallet-no-topup')
     useBrowser(browser)
     const page = await pageOf('tenant')
-    // English formatting regardless of the runner's IP (OpenViCloud/titan-ops:docs/features/cloud-console/design.md#portal-language).
+    // English formatting regardless of the runner's IP (titan-ops features/cloud-console/design.md#portal-language).
     await page.goto(PORTAL + '/', { waitUntil: 'networkidle' })
     await page.evaluate(() => localStorage.setItem('ovc-lang', 'en'))
   })
@@ -24,7 +24,7 @@ test.describe.serial('portal-ui wallet without top-up', () => {
     return `${Math.round(amount).toLocaleString('en-US')} ₫`
   }
 
-  // OpenViCloud/titan-ops:docs/features/billing/topup/design.md#topup-portal ·
+  // titan-ops features/billing/topup/design.md#topup-portal ·
   // OpenViCloud/titan-cloud-console:portal/src/pages/WalletPage.tsx (WalletPage: Buy credit button, ReceiptsSection and BuyCreditDialog only
   // when topUpEnabled; StatementSection: statementEmptyHint only when topUpEnabled) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts (wallet)
   test('UI-28 without topUpEnabled the Wallet shows balance, Outstanding and the statement, and no Buy credit or Receipts', async () => {

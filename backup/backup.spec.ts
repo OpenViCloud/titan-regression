@@ -1,10 +1,10 @@
 import { test, expect, type Page } from '@playwright/test'
 import { ADMIN, closeSessions, pageOf, useBrowser } from './auth'
-import { bodyOf, call, expectError, expectStatus, get, log, RESULTS, startLog } from './api'
+import { bodyOf, call, expectStatus, get, log, RESULTS, startLog } from './api'
 
 // Cases BAK-01..03, BAK-05..08, BAK-11 and BAK-13 of plan.md: the admin backup target and status API and the admin
 // portal's Backups page. BAK-15..17 and BAK-19 are kubectl reads by the agent, BAK-12/14/18 read the Incus host
-// (Phase 4 of release:regression), BAK-04 is N/A, BAK-09/10 are NOT COVERED (plan.md). Runs after `admin`, creates no
+// (Phase 4 of release:regression), BAK-04 is N/A, BAK-09 is NOT COVERED, BAK-10 is an L-x case of a release that restores (plan.md). Runs after `admin`, creates no
 // rg-* resource and changes nothing: the target is the pod's configuration (titan-ops features/backup/design.md#backup-target).
 
 const STALE_HOURS = 26
@@ -66,8 +66,9 @@ test.describe.serial('backup', () => {
     expect(text).not.toContain('updatedat')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/GetBackupTargetEndpoint.cs, ListBackupsEndpoint.cs,
-  // TestBackupTargetEndpoint.cs — Roles("platform-admin"): a tenant is 403, no token is 401.
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/GetBackupTargetEndpoint.cs,
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/ListBackupsEndpoint.cs,
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/TestBackupTargetEndpoint.cs — Roles("platform-admin"): a tenant is 403, no token is 401.
   test('BAK-02 a tenant gets 403 and no token gets 401 on the three backup routes', async () => {
     const routes: Array<[string, string]> = [['GET', '/v1/admin/backup-target'], ['POST', '/v1/admin/backup-target/test'], ['GET', '/v1/admin/backups']]
     for (const [method, path] of routes) {
@@ -96,7 +97,7 @@ test.describe.serial('backup', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Backup/Contracts/BackupsQueryResult.cs,
-  // BackupHealthPolicy.cs (ForPostgres: Stale after 26 hours of the newest base; the WAL age is information only).
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Backup/BackupHealthPolicy.cs (ForPostgres: Stale after 26 hours of the newest base; the WAL age is information only).
   test('BAK-06 the newest Postgres backup is Ok, recent, sized and read within 30 minutes', async () => {
     const backups = await get('admin', '/v1/admin/backups')
     expect(backups.readAt, JSON.stringify(backups).slice(0, 300)).not.toBeNull()
@@ -124,8 +125,8 @@ test.describe.serial('backup', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Admin/Backup/ListDiskBackupsQueryHandler.cs (HandleAsync: one
-  // item per VM and volume that Exists, `name` is the resource's display name, the record is matched by its id),
-  // BackupHealthPolicy.cs (ForDisk). An environment with no VM or volume alive measures only the Postgres item: the disk
+  // item per VM and volume that Exists and has an externalId, `name` is the resource's display name, the record is matched by its id),
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Backup/BackupHealthPolicy.cs (ForDisk). An environment with no VM or volume alive measures only the Postgres item: the disk
   // part is then NOT COVERED (plan.md), logged here for the report.
   test('BAK-11 one item per VM and per volume of beta-user that Exists, with a tenant and a string health', async () => {
     const vms = (await get('admin', '/v1/admin/vms') as any[]).filter((v) => v.currentExistence === 'Exists')
@@ -163,12 +164,12 @@ test.describe.serial('backup', () => {
 
   // OpenViCloud/titan-admin-console:portal/src/admin/pages/AdminBackupsPage.tsx (AdminBackupsPage, BackupTargetBlock,
   // BackupTargetValues: plain text, no inputs; the restore section names the runbook in a <code>, no link); strings in
-  // portal/src/i18n/en.ts and vi.ts (adminBackups). The Stale/Missing banner is NOT COVERED (plan.md).
+  // OpenViCloud/titan-admin-console:portal/src/i18n/en.ts and OpenViCloud/titan-admin-console:portal/src/i18n/vi.ts (adminBackups). The Stale/Missing banner is NOT COVERED (plan.md).
   test('BAK-08 the Backups page shows the target read-only, the base age, the runbook name, in English then Vietnamese', async () => {
     const page = await pageOf('admin')
     const expected = {
-      en: { title: 'Backups', target: 'Backup target', base: 'Newest base backup', restore: 'Restoring', runbook: 'Runbook', ago: /^(\d+) (minute|minutes|hour|hours|days) ago$|^None yet$/ },
-      vi: { title: 'Sao lưu', target: 'Đích sao lưu', base: 'Bản sao lưu gốc mới nhất', restore: 'Khôi phục', runbook: 'Runbook', ago: /^(\d+) (phút|giờ|ngày) trước$|^Chưa có$/ },
+      en: { title: 'Backups', target: 'Backup target', base: 'Newest base backup', restore: 'Restoring', ago: /^(\d+) (minute|minutes|hour|hours|days) ago$|^None yet$/ },
+      vi: { title: 'Sao lưu', target: 'Đích sao lưu', base: 'Bản sao lưu gốc mới nhất', restore: 'Khôi phục', ago: /^(\d+) (phút|giờ|ngày) trước$|^Chưa có$/ },
     }
     for (const lang of ['en', 'vi'] as const) {
       await setLanguage(page, lang)

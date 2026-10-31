@@ -14,7 +14,7 @@ test.describe.serial('admin clusters', () => {
     await closeSessions()
   })
 
-  // OpenViCloud/titan-ops:docs/features/cluster/design.md#cluster-admin-routes ·
+  // titan-ops features/cluster/design.md#cluster-admin-routes ·
   // OpenViCloud/titan-control-plane:Titan.Application/Abstractions/IAdminClusterService.cs (AdminClusterDto, AdminClusterProviderSettingsDto) ·
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/ListAdminClustersEndpoint.cs (Configure: Get("v1/admin/clusters")) — no PUT or DELETE route
   test('ADM-10 the admin cluster list is the config, and PUT or DELETE of a cluster changes nothing', async () => {

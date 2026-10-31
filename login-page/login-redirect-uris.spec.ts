@@ -40,8 +40,8 @@ test.describe.serial('login redirect URIs', () => {
     expect(reply.body).not.toContain('id="username"')
   }
 
-  // OpenViCloud/titan-ops:docs/architecture/platform-infra.md#keycloak-realm-as-code ·
-  // OpenViCloud/titan-local-cluster@ebd6a30:base/keycloak/realm-import/configmap.yaml:68 (titan-portal redirectUris) and :94 (titan-admin-portal)
+  // titan-ops architecture/platform-infra.md#keycloak-realm-as-code ·
+  // OpenViCloud/titan-local-cluster@ebd6a30:base/keycloak/realm-import/configmap.yaml:68 (titan-portal redirectUris) and OpenViCloud/titan-local-cluster@ebd6a30:base/keycloak/realm-import/configmap.yaml:94 (titan-admin-portal)
   test('LOGIN-11 each client accepts its own origin of the environment and refuses a foreign one', async () => {
     expectLoginForm(await authorize('titan-portal', `${PORTAL}/`))
     expectRefused(await authorize('titan-portal', 'https://example.invalid/'))
