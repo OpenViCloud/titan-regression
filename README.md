@@ -36,7 +36,7 @@ python3 count-cases.py <work dir of each module>/runner.log ...
 The source tree is `git archive <sha>` of this repository, extracted, with any new specs copied in; run the
 script from a checkout so its first line names the commit. What the script does inside the cluster, and what some
 modules need around it, is the next section. The full procedure of a release (order, verdict, evidence) is
-`release:regression` (a skill of titan-ops, private).
+`release:regression-dev` and `release:regression-prd` (skills of titan-ops, private).
 
 ## Inside a module run
 
@@ -182,7 +182,7 @@ modules `cli` and `terraform-provider` need the agent to copy a binary into the 
 (`cli`: the CLI built for the node's architecture; `terraform-provider`: `GOOS=linux GOARCH=<node> CGO_ENABLED=0 go test -c`
 of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud`).
 
-Not run by the runner (Phase 4 of `release:regression`): `observation` — state changed on the Incus host outside
+Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — state changed on the Incus host outside
 OpenViCloud, needs an approved `L-x` command; `site` — the public site through Playwright MCP on the agent's machine;
 `worker`, `control-plane-image` — read-only `gh`/`curl`/`kubectl` on the agent's machine.
 

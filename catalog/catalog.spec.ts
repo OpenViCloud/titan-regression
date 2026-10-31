@@ -3,7 +3,7 @@ import { closeSessions, useBrowser } from './auth'
 import { call, expectError, expectStatus, get, log, pollUntil, startLog } from './api'
 import { envOf } from './fixtures'
 
-// Cases CAT-01..08 and CAT-10 of plan.md (CAT-09 reads the Incus host: Phase 4 of release:regression).
+// Cases CAT-01..08 and CAT-10 of plan.md (CAT-09 reads the Incus host: Phase 4 of release:regression-prd).
 test.describe.serial('catalog', () => {
   test.describe.configure({ timeout: 10 * 60_000 })
 

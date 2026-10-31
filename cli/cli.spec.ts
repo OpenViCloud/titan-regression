@@ -13,7 +13,7 @@ import { newSecret } from './token'
 // 'cli catalog' (CLI-05), 'cli lifecycle' (CLI-12..17), 'cli api token' (CLI-18), 'cli logout' (CLI-04). The binary is not in the image: when
 // this spec logs BINARY_WAIT the agent copies `openvicloud` built for the pod's architecture from the CLI commit the
 // release measures to /work/bin/openvicloud, checks sha256, then touches /work/bin/openvicloud.ready
-// (release:regression §Runner).
+// (OpenViCloud/titan-ops:.claude/shared/regression-suite.md §Runner).
 // Tokens stay in this process.
 //
 // Login and the binary wait are file-level (outside every describe): Playwright restarts the worker process after
