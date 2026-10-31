@@ -199,7 +199,7 @@ Bí mật do spec sinh như portal: `ovc_` + 32 byte ngẫu nhiên base64url (43
 
 ## cli
 
-CLI có `version`, `auth login|logout|status`, `tenant get`, `cluster|template|size list`, `vm list|get|create|rename|start|stop|delete|ssh`, `ssh-key add|list|delete` (`command/` của repo `OpenViCloud/titan-cli`); `OPENVICLOUD_TOKEN` thay phiên đăng nhập; chưa có lệnh tiền, chưa có lệnh token. Binary không nằm trong image runner: khi spec log `BINARY_WAIT`, agent chép `openvicloud` build từ commit CLI mà release đo, cho kiến trúc của pod (§Runner của phần chung hai skill regression ở titan-ops).
+CLI có `version`, `auth login|logout|status`, `tenant get`, `cluster|template|size list`, `vm list|get|create|rename|start|stop|delete|ssh`, `ssh-key add|list|delete` (`command/` của repo `OpenViCloud/titan-cli`); `OPENVICLOUD_TOKEN` thay phiên đăng nhập; chưa có lệnh tiền, chưa có lệnh token. Binary không nằm trong image runner: khi spec log `BINARY_WAIT`, agent chép `openvicloud` build từ commit CLI mà release đo, cho kiến trúc của pod (`OpenViCloud/titan-ops:.claude/shared/regression-suite.md` §Runner).
 
 | ID | Khi | Kỳ vọng | Nguồn |
 |---|---|---|---|
