@@ -26,6 +26,7 @@
         {"module": "concurrency"},
         {"external": "check-wallets"},
         {"module": "admin"},
+        {"module": "backup"},
         {"module": "portal-ui"},
         {"module": "tenant-suspend"},
         {"module": "network-lifecycle"},
