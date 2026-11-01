@@ -7,7 +7,7 @@ import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, getVm, runN
 
 // Cases VM-01..19, VM-21 and VM-22 of plan.md, plus ACT-01/ACT-03 for VMs. VM-14 is NOT COVERED, VM-20 reads
 // the Incus host. Create checks run in this order
-// (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync): quota inside Vm.Create, cluster,
+// (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync): quota (TenantQuotaGate), cluster,
 // name, network, offering, template — so the error cases run below the quota.
 test.describe.serial('vm', () => {
   test.describe.configure({ timeout: 15 * 60_000 })
