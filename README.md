@@ -153,7 +153,7 @@ create a network and beta-user may hold one.
 |---|---|---|---|---|---|
 | 1 | `smoke` | health, clusters, anonymous catalog, clean test account | yes | yes | yes |
 | 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes |
-| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename | yes | yes | yes |
+| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 blocks (two networks, a block given back, the IPv6 quota) | yes | yes | yes, except NET-11..NET-13 (plan only) |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes |
 | 5 | `vm` | VMs: create per tier, stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes |
 | 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes |
@@ -164,7 +164,7 @@ create a network and beta-user may hold one.
 | 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes |
 | 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes |
 | 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no | yes | yes |
-| 14 | `concurrency` | double clicks, invoice paid twice at once | no | yes | yes |
+| 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once | no | yes | yes, except CC-05 (plan only) |
 | 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API) |
 | 16 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: Keycloak's database `keycloak` as a `Database` object, ArgoCD's health checks, schema `public` for its owner only, the name CNPG archives under and `ContinuousArchiving` (`kubectl` reads) | no | yes | yes (API and admin portal screens); `(host)`, `L-x` and `kubectl` cases in Phase 4 of the release |
 | 17 | `portal-ui` | customer portal end to end, signed in | no | yes | yes |
@@ -196,7 +196,7 @@ with CC-04 (CC-03 pays the invoice the seed leaves; the serial spec then skips C
 **Spec** is `yes` when every case of the module in `plan.md` has a spec that ran green on the release environment at a release, except `(host)` cases (Phase 4
 of the release), **NOT COVERED** cases (the reason is in `plan.md`) and cases not applicable to the measured
 environment (the spec calls `test.skip` with the reason, e.g. VM-12 with a single cluster). `ACT-*` cases are measured
-in the module that owns the resource. A case with no spec yet gets one at the next release; a case no spec can be
+in the module that owns the resource. A case with no spec yet gets one at the next release, and the cell names it as `yes, except <ID> (plan only)` until then; a case no spec can be
 written for and that Phase 4 does not measure by hand is **NOT COVERED**, with the reason in its row of `plan.md`. Specs pick the first cluster with a listed template (`lib/fixtures.ts`,
 `envOf()`); prd's cluster is `singapore01`.
 
