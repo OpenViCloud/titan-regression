@@ -71,7 +71,7 @@ test.describe.serial('network', () => {
       422, 'IDEMPOTENCY_KEY_REUSED')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs HandleAsync (NetworkAggregate.Create) — quota refuses in the factory, after the name and CIDR checks
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs HandleAsync (TenantQuotaGate) — quota is asked after the name and CIDR checks
   test('NET-05 a second network (new name, free CIDR) past maxNetworks is 422 NETWORK_QUOTA_EXCEEDED', async () => {
     const { clusterId } = await envOf()
     const tenant = await get('tenant', '/v1/tenant')

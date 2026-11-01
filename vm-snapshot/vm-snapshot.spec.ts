@@ -98,7 +98,7 @@ test.describe.serial('vm-snapshot', () => {
     await waitSnapshot('VMS-02', id, exists)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/Tenant.cs EnsureHasRoom; a delete asked stops counting
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Platform/Tenant/TenantQuotaGate.cs EnsureHasRoom; a delete asked stops counting
   // (titan-ops features/vm/design.md#vm-snapshot-counting)
   test('VMS-03 the snapshot past the cap is 422 VM_SNAPSHOT_QUOTA_EXCEEDED; a delete frees the slot', async () => {
     const third = await createSnapshot('s3')
