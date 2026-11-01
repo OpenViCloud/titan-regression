@@ -84,7 +84,7 @@ Hai lane (`lanes.json`) chạy cùng lúc, mỗi lane một tenant test; `admin-
 | `cleanup` | a, b | xoá mọi `rg-*`/`tfacc-*` của tenant lane | không |
 | `terraform-provider` | a | tạo network, firewall rule, SSH key, VM, volume, LB bằng token của lane (token tạo rồi xoá) | lấy một /64 IPv6 từ khối của cluster |
 
-Luật rút ra, ghi ở `lanes.json`: `billing`↔`concurrency` (cùng ví `admin-test`) và `billing`↔`admin` (cùng danh sách topup Pending: topup tạm của BIL-10 làm ADM-08 gặp một hàng Pending lạ; cùng audit log và giá tier) không chồng nhau (`exclusive`); ba module lấy /64 IPv6 (`load-balancer`, `portal-ui`, `terraform-provider`) ở chung một lane (`same_lane`), vì hai lane cùng chọn một /64 thì tranh nhau chỉ mục unique. `contract` không đụng ví nên không bị khoá. Locator tìm hàng theo tên tenant bằng khớp chuỗi con (`hasText: 'beta-user'`) khớp cả hàng `beta-user-2`: tìm theo id, hoặc khớp có chặn đuôi `-<chữ>` như `tenantRowOf()` của `admin/admin-portal.spec.ts`.
+Luật rút ra, ghi ở `lanes.json`: `billing`↔`concurrency` (cùng ví `admin-test`) và `billing`↔`admin` (cùng danh sách topup Pending: topup tạm của BIL-10 làm ADM-08 gặp một hàng Pending lạ; cùng audit log và giá tier) không chồng nhau (`exclusive`); ba module lấy /64 IPv6 (`load-balancer`, `portal-ui`, `terraform-provider`) ở chung một lane (`same_lane`); hai create cùng lúc nay đều thành công, nên nới nhóm này chỉ cần đo lịch tách lane trước. `contract` không đụng ví nên không bị khoá. Locator tìm hàng theo tên tenant bằng khớp chuỗi con (`hasText: 'beta-user'`) khớp cả hàng `beta-user-2`: tìm theo id, hoặc khớp có chặn đuôi `-<chữ>` như `tenantRowOf()` của `admin/admin-portal.spec.ts`.
 
 ## Giả định khi chạy trên env của release (prd, dữ liệu sống lâu)
 

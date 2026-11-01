@@ -100,7 +100,7 @@ version of the runner changes the image tag in `cronjob.yaml` and `cronjob-lane-
 with a tenant of its own (`beta-user`, `beta-user-2`) and a CronJob of its own (`titan-regression`, `titan-regression-b`).
 `lanes.json` says which module runs in which lane and where a lane waits for the other (`barrier`, `signal`/`wait`,
 `external` for what the agent does outside the runner). It refuses a plan in which two modules that share a wallet or a
-shared list (`exclusive`) may run together, or in which the modules that take an IPv6 block from the cluster
+shared list (`exclusive`) may run together, or in which the modules that take an IPv6 /64 from the cluster
 (`same_lane`) are spread over lanes. Every run (`--check` stops after this) also checks `lanes.json` against the table
 below: every module the runner runs on the release environment (the Release column) is in exactly one lane, except
 `smoke` and `cleanup`, which each lane runs for its own tenant (and `cleanup` runs once more after a red
@@ -153,7 +153,7 @@ create a network and beta-user may hold one.
 |---|---|---|---|---|---|
 | 1 | `smoke` | health, clusters, anonymous catalog, clean test account | yes | yes | yes |
 | 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes |
-| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 blocks (two networks, a block given back, the IPv6 quota) | yes | yes | yes, except NET-11..NET-13 (plan only) |
+| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-11..NET-13 (plan only) |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes |
 | 5 | `vm` | VMs: create per tier, stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes |
 | 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes |
