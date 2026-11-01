@@ -430,7 +430,7 @@ class RepoPlanTest(unittest.TestCase):
     def test_contract_moves_no_wallet_and_is_in_no_exclusive_group(self):
         self.assertFalse(any("contract" in group for group in self.body["exclusive"]))
 
-    def test_the_modules_that_take_an_ipv6_block_share_a_lane(self):
+    def test_the_modules_that_take_an_ipv6_slash_64_share_a_lane(self):
         groups = [set(group) for group in self.body["same_lane"]]
         self.assertIn({"load-balancer", "portal-ui", "terraform-provider"}, groups)
         run_lanes.load_plan(self.body)

@@ -92,11 +92,11 @@ def load_plan(body):
             if [s.name for s in steps if s.kind == "barrier"].count(name) != 1:
                 raise PlanError(f"barrier {name!r} must appear exactly once in lane {lane}")
     _refuse_overlaps(plan)
-    _refuse_split_pools(plan)
+    _refuse_split_same_lane(plan)
     return plan
 
 
-def _refuse_split_pools(plan):
+def _refuse_split_same_lane(plan):
     """Modules of a same_lane group stay in one lane; spreading them is a plan error."""
     for group in plan.same_lane:
         lanes = {lane for lane, steps in plan.lanes.items() for s in steps if s.kind == "module" and s.name in group}
