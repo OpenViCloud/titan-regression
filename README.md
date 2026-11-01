@@ -196,7 +196,7 @@ with CC-04 (CC-03 pays the invoice the seed leaves; the serial spec then skips C
 **Spec** is `yes` when every case of the module in `plan.md` has a spec that ran green on the release environment at a release, except `(host)` cases (Phase 4
 of the release), **NOT COVERED** cases (the reason is in `plan.md`) and cases not applicable to the measured
 environment (the spec calls `test.skip` with the reason, e.g. VM-12 with a single cluster). `ACT-*` cases are measured
-in the module that owns the resource. A case with no spec yet gets one at the next release; a case no spec can be
+in the module that owns the resource. A case with no spec yet gets one at the next release, and the cell names it as `yes, except <ID> (plan only)` until then; a case no spec can be
 written for and that Phase 4 does not measure by hand is **NOT COVERED**, with the reason in its row of `plan.md`. Specs pick the first cluster with a listed template (`lib/fixtures.ts`,
 `envOf()`); prd's cluster is `singapore01`.
 
