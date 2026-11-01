@@ -131,7 +131,7 @@ test.describe.serial('volume', () => {
     expect(countOf(actions, 'volume.detached')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/Tenant.cs EnsureCanCreateVolumeSnapshot
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/Tenant.cs EnsureHasRoom
   test('VOL-05 snapshots Exist; the one past the cap is 422 VOLUME_SNAPSHOT_QUOTA_EXCEEDED', async () => {
     for (let i = 1; i <= MAX_SNAPSHOTS_PER_VOLUME; i++) {
       const reply = await call('tenant', 'POST', `/v1/tenant/volumes/${volumeA}/snapshots`, { name: `rg-vsnap${i}-${RUN}` }, newKey())
@@ -191,7 +191,7 @@ test.describe.serial('volume', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/VolumeRepository.cs CountActiveByTenantAsync ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/Tenant.cs EnsureCanCreateVolume
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/Tenant.cs EnsureHasRoom
   test('VOL-10 the volume past MaxVolumes is 422 VOLUME_QUOTA_EXCEEDED', async () => {
     // The server's count (OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/VolumeRepository.cs CountActiveByTenantAsync): desired Exists and (Exists, or its create waits).
     const live = (await get('tenant', '/v1/tenant/volumes') as any[])

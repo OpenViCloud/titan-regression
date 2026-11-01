@@ -132,7 +132,7 @@ test.describe.serial('firewall', () => {
     expect(actions.filter((a) => a === 'firewall_rule.deleted').length).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/Tenant.cs EnsureCanCreateFirewallRule; a delete asked stops counting
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/Tenant.cs EnsureHasRoom; a delete asked stops counting
   // (titan-ops features/network/design.md#firewall-rule-quota-counting)
   test('FW-04 the rule past MaxFirewallRulesPerNetwork is 422 FIREWALL_QUOTA_EXCEEDED; a delete frees a slot', async () => {
     const live = (await get('tenant', rulePath(networkId)) as any[]).filter(counts).length
