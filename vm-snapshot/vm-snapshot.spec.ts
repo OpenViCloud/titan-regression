@@ -98,7 +98,7 @@ test.describe.serial('vm-snapshot', () => {
     await waitSnapshot('VMS-02', id, exists)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/Tenant.cs EnsureCanCreateVmSnapshot; a delete asked stops counting
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/Tenant.cs EnsureHasRoom; a delete asked stops counting
   // (titan-ops features/vm/design.md#vm-snapshot-counting)
   test('VMS-03 the snapshot past the cap is 422 VM_SNAPSHOT_QUOTA_EXCEEDED; a delete frees the slot', async () => {
     const third = await createSnapshot('s3')
@@ -150,7 +150,7 @@ test.describe.serial('vm-snapshot', () => {
     expect(countOf(actions, 'vm_snapshot.deleted')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs RequireSnapshot (a snapshot the VM does not hold answers 404; the snapshot is the VM's child entity)
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/ComputeOwnership.cs RequireVmSnapshot (a snapshot the VM does not hold answers 404; the snapshot is the VM's child entity)
   test('VMS-08 a snapshot id the VM does not have is 404 VM_SNAPSHOT_NOT_FOUND', async () => {
     expectError(await call('tenant', 'DELETE', `${path()}/${randomUUID()}`), 404, 'VM_SNAPSHOT_NOT_FOUND')
     expectError(await call('tenant', 'POST', `${path()}/${randomUUID()}/revert`), 404, 'VM_SNAPSHOT_NOT_FOUND')
