@@ -228,7 +228,7 @@ test.describe.serial('vm', () => {
   })
 
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/DeleteNetworkCommandHandler.cs HandleAsync (NETWORK_NOT_EMPTY)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Services/NetworkDeletion.cs RequestAsync (NETWORK_NOT_EMPTY)
   test('VM-21 deleting the run network while a VM lives on it is 422 NETWORK_NOT_EMPTY', async () => {
     expectError(await call('tenant', 'DELETE', `/v1/tenant/networks/${networkId}`), 422, 'NETWORK_NOT_EMPTY')
   })
