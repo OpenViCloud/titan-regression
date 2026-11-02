@@ -146,7 +146,7 @@ test.describe.serial('load-balancer', () => {
     expect(lb.listeners).toEqual([http, dns])
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync (VM_IS_LOAD_BALANCER_BACKEND) — refused, the load balancer is not
+  // OpenViCloud/titan-control-plane:Titan.Domain/Services/VmDeletion.cs RequestAsync (VM_IS_LOAD_BALANCER_BACKEND) — refused, the load balancer is not
   // edited behind the customer's back
   test('LB-05 deleting a VM a load balancer sends to is 422 VM_IS_LOAD_BALANCER_BACKEND', async () => {
     test.skip(lbId === '', 'LB-03 did not create a load balancer')

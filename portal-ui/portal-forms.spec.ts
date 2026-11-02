@@ -18,7 +18,7 @@ import { topUpEnabledOf } from './portal-config'
 // must be 1..MaxBackends), and that VM must sit on the load balancer's own network
 // (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs BeginLoadBalancerBackend requires
 // NetworkId == networkId). While the load balancer lives, deleting that VM is refused
-// (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync, VM_IS_LOAD_BALANCER_BACKEND),
+// (OpenViCloud/titan-control-plane:Titan.Domain/Services/VmDeletion.cs RequestAsync, VM_IS_LOAD_BALANCER_BACKEND),
 // so the network always has a live VM on it too.
 // OpenViCloud/titan-cloud-console:portal/src/pages/NetworkListPage.tsx (deleteBlockedTitle) checks attachedNetworkIds before networksWithALoadBalancer, so the title shown would be
 // "Remove all VMs first" (t.networks.removeVmsFirst), never the load-balancer title the case asks for.
