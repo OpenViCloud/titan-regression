@@ -135,7 +135,7 @@ test.describe.serial('billing', () => {
     expect(await wallet()).toBe(before)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Services/Billing/Invoice/InvoiceWalletSettlement.cs SettleAsync (INVOICE_WALLET_INSUFFICIENT)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Services/InvoiceWalletPayment.cs RequestAsync (INVOICE_WALLET_INSUFFICIENT)
   test('BIL-06 an invoice larger than the wallet is 422 INVOICE_WALLET_INSUFFICIENT and the wallet is unchanged', async () => {
     const before = await wallet()
     expectError(await call('admin', 'POST', `/v1/tenant/billing/invoices/${invoices[900000000]}/pay`), 422, 'INVOICE_WALLET_INSUFFICIENT')
