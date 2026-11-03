@@ -35,8 +35,8 @@ test.describe.serial('concurrency', () => {
     await closeSessions()
   })
 
-  // titan-ops architecture/provider-and-worker.md#provider-command-key — the second writer of the same command key
-  // rolls back with 409 REQUEST_IN_PROGRESS, or arrives after the first and is answered as a repeat
+  // titan-ops architecture/resource-lifecycle.md#one-key-per-request — the row lock queues the two requests, so the
+  // second is answered as a repeat; a 409 here is what the spec still allows until a release tightens it to two 202
   test('CC-01 two deletes of one VM at once: one 202, the other 202 or 409 REQUEST_IN_PROGRESS; one delete request', async () => {
     const { smallTier } = await envOf()
     const networkId = (await runNetwork()).id
