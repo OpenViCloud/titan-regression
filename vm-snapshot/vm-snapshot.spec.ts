@@ -156,7 +156,7 @@ test.describe.serial('vm-snapshot', () => {
     expectError(await call('tenant', 'POST', `${path()}/${randomUUID()}/revert`), 404, 'VM_SNAPSHOT_NOT_FOUND')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/UpdateVmStatusCommandHandler.cs HandleAsync (case Deleted: vm.MarkDeleted() takes the VM's snapshots along) — the VM's Deleted report marks its snapshots Deleted
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs EndRequest (the delete's Done takes the VM's snapshots along) — the VM's delete report marks its snapshots Deleted
   test('VMS-07 deleting the VM takes its remaining snapshots to Deleted', async () => {
     await deleteVmAndWait(vmId)
     for (const label of ['s1', 's5']) {
