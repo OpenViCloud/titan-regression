@@ -122,7 +122,7 @@ test.describe.serial('volume', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Volume/DetachVolumeEndpoint.cs HandleAsync ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/UpdateVolumeStatusCommandHandler.cs ApplyObservationAsync (ResolveAttachmentAsync)
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VolumeReports.cs ResolveAttachmentAsync
   test('VOL-04 detach is 202, then not attached', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${volumeA}/detach`), 202)
     await waitVolume('VOL-04', volumeA, (v) => v.currentAttachedVmId === null && v.transition === null)
@@ -206,8 +206,10 @@ test.describe.serial('volume', () => {
       422, 'VOLUME_QUOTA_EXCEEDED')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync (ListAttachedToVmAsync: the volumes go as detaches),
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/UpdateVmStatusCommandHandler.cs HandleAsync (volume.MarkDetachedByVmDelete)
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync (ListAttachedToVmLockedAsync, volume.ReleaseFromVmDelete),
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs RecordEndedAsync (volume.MarkDetachedByVmDelete).
+  // The spec measures the end without desiredAttachedVmId; plan.md VOL-09 also expects no transition while the VM's delete
+  // waits, then no desired attachment and a delete that goes through, and the release that writes its spec tightens it.
   test('VOL-09 deleting a VM releases the volume attached to it, which stays', async () => {
     const id = made[made.length - 1]
     await waitVolume('VOL-09 ready', id, settled)
