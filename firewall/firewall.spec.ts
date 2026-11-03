@@ -90,8 +90,8 @@ test.describe.serial('firewall', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Network/CreateFirewallRuleEndpoint.cs (Configure: Post("v1/tenant/networks/{networkId:guid}/firewall-rules");
-  // HandleAsync: SendAsync(result, 201)); the reconciler
-  // reports the ACL line (titan-ops features/network/design.md#firewall-rule-status)
+  // HandleAsync: SendAsync(result, 201)); the create's
+  // Done carries the state of the ACL line (titan-ops features/network/design.md#firewall-rule-status)
   test('FW-01 a rule is 201 {ruleId}, then enabled and Exists', async () => {
     const id = await createRule(0)
     const rule = await pollUntil('FW-01', () => readRule(id), (r) => r.currentState === 'enabled' && r.transition === null, ruleShape)
