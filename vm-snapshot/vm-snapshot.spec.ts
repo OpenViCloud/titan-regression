@@ -112,7 +112,7 @@ test.describe.serial('vm-snapshot', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/VmSnapshots/RevertSnapshotEndpoint.cs HandleAsync ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VmSnapshot/UpdateVmSnapshotStatusCommandHandler.cs HandleAsync (snapshot.MarkReverted())
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/ChildEntities/VmSnapshot.cs EndRequest (Done of the revert)
   test('VMS-04 revert is 202, Reverting then settled, outcome reverted, desired unchanged', async () => {
     const before = await getVm(vmId)
     const reply = await call('tenant', 'POST', `${path()}/${snapshots.s1}/revert`)
