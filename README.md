@@ -153,10 +153,10 @@ create a network and beta-user may hold one.
 |---|---|---|---|---|---|
 | 1 | `smoke` | health, clusters, anonymous catalog, clean test account | yes | yes | yes |
 | 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes |
-| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-11..NET-13 (plan only) and NET-20, NET-21 (host, not covered) |
-| 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-09 to FW-12 (plan only) |
+| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-11 to NET-19 (plan only) and NET-20, NET-21 (host, not covered) |
+| 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-09 to FW-11 (plan only) |
 | 5 | `vm` | VMs: create per tier, stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes, except VM-26 (plan only) |
-| 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-12 (plan only) |
+| 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-09 to VMS-12 (plan only) |
 | 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes, except VOL-12 to VOL-17 (plan only) and VOL-18 (host, not covered) |
 | 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: negative cases only) | yes | yes | yes |
 | 9 | `tenant` | tenant, quota, terms consent, approval on sign-in, the admin status route's error order | yes | yes | yes, except TEN-14 (plan only) |
