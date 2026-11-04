@@ -193,8 +193,8 @@ test.describe.serial('billing', () => {
     expectStatus(reply, 200)
   })
 
-  // Metering, on the lane's tenant (no money moves). OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/VmRepository.cs
-  // ListBillableAsync — Running, Ready, Frozen, Error are billed; Stopped is not (titan-ops features/vm/design.md#counting-and-billing)
+  // Metering, on the lane's tenant (no money moves). OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs
+  // IsBilled — Running, Ready, Frozen, Error are billed; Stopped is not (titan-ops features/vm/design.md#counting-and-billing)
   test('BIL-01..03 a running VM gets RUNNING_VM usage at the tier price, a 10 GB volume gets storage usage, a stopped VM gets no more', async () => {
     const { smallTier, clusterId, volumeOfferingId } = await envOf()
     const networkId = (await runNetwork()).id
