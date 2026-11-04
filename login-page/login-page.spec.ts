@@ -354,7 +354,7 @@ test.describe('login-page', () => {
   // titan-ops features/cloud-console/user-stories.md#us-sl-01 · titan-ops features/cloud-console/design.md#social-login-github ·
   // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/configmap.yaml (identityProviders: alias github, no displayName ⇒ Keycloak's GitHub) ·
   // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/template.ftl (nested socialProviders: keycloak.v2's #kc-social-providers,
-  // a#social-<alias>) · OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/messages/messages_vi.properties
+  // a#social-<alias>; the label sits in the footer band just before it, inside the same .pf-v5-c-login__main-footer) · OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/messages/messages_vi.properties
   // (identity-provider-login-label); the English label is keycloak.v2's own. Nothing is clicked: signing in with GitHub needs a real GitHub account.
   test('LOGIN-12 the login page offers exactly one social sign-in, GitHub, in English and Vietnamese', async ({ browser }) => {
     const { context, page } = await open(browser, 'light', 1280)
@@ -367,7 +367,8 @@ test.describe('login-page', () => {
       }
       const section = page.locator('#kc-social-providers')
       await expect(section, `${lang}: #kc-social-providers`).toHaveCount(1)
-      const sectionText = ((await section.textContent()) || '').replace(/\s+/g, ' ').trim()
+      const footer = page.locator('.pf-v5-c-login__main-footer', { has: section })
+      const sectionText = ((await footer.textContent()) || '').replace(/\s+/g, ' ').trim()
       const links = section.locator('a[id^="social-"]')
       const ids = await links.evaluateAll((els) => els.map((el) => el.id))
       const href = await page.locator('a#social-github').getAttribute('href')
