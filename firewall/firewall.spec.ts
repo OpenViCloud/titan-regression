@@ -3,10 +3,12 @@ import { randomUUID } from 'node:crypto'
 import { closeSessions, useBrowser } from './auth'
 import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, startLog } from './api'
 import { cleanUp } from './clean-up'
-import { runNetwork } from './fixtures'
+import { RUN, envOf, listNetworks, networkUsable, runNetwork, waitNetwork } from './fixtures'
 
-// Cases FW-01..05 and FW-07..08 of plan.md: FW-07 reads the Incus host, FW-08 is NOT COVERED; rules of a
-// deleted network are NETL-02.
+// Cases FW-01..05 and FW-07..13 of plan.md: FW-07 reads the Incus host, FW-08 is NOT COVERED; rules of a
+// deleted network are NETL-02. FW-10 and FW-11 need a second network, which beta-user may not hold: they raise
+// maxNetworks (FW-11 also sets maxFirewallRulesPerNetwork to 0), give the quota back right after the case and again
+// in afterAll, and delete the network they made.
 
 // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/ValueObjects/TenantQuota.cs DefaultMaxFirewallRulesPerNetwork — no API reads the cap
 const MAX_RULES_PER_NETWORK = 20
@@ -33,6 +35,69 @@ test.describe.serial('firewall', () => {
 
   let networkId = ''
   const made: string[] = []
+  let tenantId = ''
+  // The caps this module may change, as they were before it.
+  let original: { maxVms: number, maxNetworks: number, maxFirewallRulesPerNetwork: number } | null = null
+  // Second networks of FW-10 and FW-11, deleted in the case's finally and again in afterAll.
+  const extra: string[] = []
+
+  async function quotaRow(): Promise<any> {
+    const all = await get('admin', '/v1/tenants') as any[]
+    const row = all.find((t) => t.id === tenantId)
+    expect(row, `tenant ${tenantId} in GET /v1/tenants`).toBeDefined()
+    return row
+  }
+
+  // maxVms and maxNetworks are mandatory in the body; a cap not sent keeps its value
+  // (OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Tenant/UpdateTenantQuotaEndpoint.cs UpdateQuotaValidator, UpdateQuotaRequest).
+  async function setQuota(body: Record<string, number>): Promise<void> {
+    log(`quota ← ${JSON.stringify(body)}`)
+    expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/quota`, body), 204)
+  }
+
+  async function restoreQuota(): Promise<void> {
+    if (original !== null) {
+      await setQuota(original)
+    }
+  }
+
+  // Room for one more network than the tenant holds now (desired Exists and Exists or its create waits —
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs OccupiesQuota).
+  async function maxNetworksWithRoom(): Promise<number> {
+    const counting = (await listNetworks()).filter((n) =>
+      n.desiredExistence === 'Exists' && (n.currentExistence === 'Exists' || n.transition === 'Creating')).length
+    return Math.max(original!.maxNetworks, counting + 1)
+  }
+
+  async function createSecondNetwork(kind: string, cidr: string): Promise<string> {
+    const { clusterId } = await envOf()
+    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name: `rg-${kind}-${RUN}`, clusterId, cidr }, newKey())
+    expectStatus(reply, 202)
+    const id = bodyOf(reply).networkId as string
+    extra.push(id)
+    return id
+  }
+
+  // Waits for the network's request to end, asks for its delete if it still wants to exist, waits for Deleted; its
+  // rules go with it (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs EndOperation).
+  async function deleteNetwork(id: string): Promise<void> {
+    const settled = await waitNetwork(`network ${id} at rest`, id, (n) => n.transition === null)
+    if (settled.desiredExistence === 'Exists' && settled.currentExistence !== 'Deleted') {
+      expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${id}`), 202)
+    }
+    await waitNetwork(`network ${id} deleted`, id, (n) => n.currentExistence === 'Deleted')
+  }
+
+  async function deleteExtraNetworks(): Promise<void> {
+    await cleanUp([...extra].map((id): [string, () => Promise<void>] => [`network ${id}`, async () => {
+      await deleteNetwork(id)
+      extra.splice(extra.indexOf(id), 1)
+    }]))
+  }
+
+  async function ruleIds(): Promise<string[]> {
+    return (await get('tenant', rulePath(networkId)) as any[]).map((r) => r.id as string)
+  }
 
   async function readRule(id: string): Promise<any> {
     const rows = await get('tenant', rulePath(networkId)) as any[]
@@ -66,6 +131,10 @@ test.describe.serial('firewall', () => {
     startLog('firewall')
     useBrowser(browser)
     networkId = (await runNetwork()).id
+    tenantId = (await get('tenant', '/v1/tenant')).id
+    const row = await quotaRow()
+    original = { maxVms: row.maxVms, maxNetworks: row.maxNetworks, maxFirewallRulesPerNetwork: row.maxFirewallRulesPerNetwork }
+    log(`quota before: ${JSON.stringify(original)}`)
   })
 
   test.afterAll(async () => {
@@ -73,7 +142,10 @@ test.describe.serial('firewall', () => {
     // A rule whose delete failed is not polled for Gone: each poll can take minutes, and the time limit of this hook
     // would end it before the sessions close and before cleanUp reports.
     const deleted: string[] = []
-    const steps: Array<[string, () => Promise<void>]> = []
+    const steps: Array<[string, () => Promise<void>]> = [
+      ['quota', restoreQuota],
+      ['second networks', deleteExtraNetworks],
+    ]
     for (const id of made) {
       steps.push([`delete rule ${id}`, async () => {
         await deleteWhenReady(id)
@@ -106,13 +178,30 @@ test.describe.serial('firewall', () => {
     expect(actions.filter((a) => a === 'firewall_rule.created').length).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/ChildEntities/FirewallRule.cs RequestDelete (CreateIsWaiting ⇒ FIREWALL_RULE_NOT_READY)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Entities/FirewallRule.cs Delete (CreateIsWaiting ⇒ FIREWALL_RULE_NOT_READY)
   test('FW-02 deleting a rule whose create still waits is 422 FIREWALL_RULE_NOT_READY', async () => {
     const id = await createRule(1)
     const rule = await readRule(id)
     log(`FW-02 right after create: ${ruleShape(rule)}`)
     expect(rule.transition).toBe('Creating')
     expectError(await call('tenant', 'DELETE', `${rulePath(networkId)}/${id}`), 422, 'FIREWALL_RULE_NOT_READY')
+  })
+
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Networking/Network/NetworkOwnership.cs RequireNetworkForUpdateAsync — both the
+  // create and the delete look the network up for the caller's tenant first; admin-test is another tenant;
+  // titan-ops architecture/http-contract.md#tenant-scoping
+  test("FW-13 another tenant's create and delete of a rule on the run network are 404 NETWORK_NOT_FOUND", async () => {
+    const id = made[0]
+    const before = await ruleIds()
+    expectError(await call('admin', 'POST', rulePath(networkId),
+      { direction: 'Ingress', protocol: 'TCP', startPort: 3000, endPort: 3000, cidr: cidrOf(160) }, newKey()), 404, 'NETWORK_NOT_FOUND')
+    expectError(await call('admin', 'DELETE', `${rulePath(networkId)}/${id}`), 404, 'NETWORK_NOT_FOUND')
+    const rule = await readRule(id)
+    log(`FW-13 rule of FW-01: ${ruleShape(rule)}`)
+    expect(rule.desiredExistence).toBe('Exists')
+    expect(rule.transition).toBeNull()
+    const after = await ruleIds()
+    expect(after.filter((r) => !before.includes(r))).toEqual([])
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Network/DeleteFirewallRuleEndpoint.cs (Configure: Delete("v1/tenant/networks/{networkId:guid}/firewall-rules/{ruleId:guid}");
@@ -157,5 +246,121 @@ test.describe.serial('firewall', () => {
     expectError(await call('tenant', 'DELETE', `${rulePath(networkId)}/${randomUUID()}`), 404, 'FIREWALL_RULE_NOT_FOUND')
     expectError(await call('tenant', 'DELETE', `${rulePath(randomUUID())}/${made[1]}`), 404, 'NETWORK_NOT_FOUND')
   })
-})
 
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/FirewallRule/CreateFirewallRuleCommandHandler.cs HandleAsync
+  // (RequireNetworkForUpdateAsync, then TenantQuotaGate on FirewallRuleQuotaUsage) ·
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/NetworkRepository.cs FindByIdForUpdateAsync ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs FirewallRuleQuotaUsage — the second request waits for the
+  // network's row and counts the first; titan-ops features/network/design.md#firewall-rule-quota-counting ·
+  // titan-ops architecture/code-structure.md#child-entity
+  test('FW-09 two rules at once for the last slot: one 201, one 422 FIREWALL_QUOTA_EXCEEDED', async () => {
+    // Bring the network to cap − 1 rules that count: a delete asked stops counting at once.
+    let counting = (await get('tenant', rulePath(networkId)) as any[]).filter(counts)
+    while (counting.length > MAX_RULES_PER_NETWORK - 1) {
+      const victim = [...made].reverse().find((id) => counting.some((r) => r.id === id))
+      expect(victim, 'a rule this module made counts toward the cap').toBeDefined()
+      await deleteWhenReady(victim!)
+      counting = (await get('tenant', rulePath(networkId)) as any[]).filter(counts)
+    }
+    for (let i = counting.length; i < MAX_RULES_PER_NETWORK - 1; i++) {
+      await createRule(170 + i)
+    }
+    counting = (await get('tenant', rulePath(networkId)) as any[]).filter(counts)
+    log(`FW-09 rules counting before: ${counting.length}`)
+    expect(counting.length).toBe(MAX_RULES_PER_NETWORK - 1)
+
+    const body = (i: number) => ({ direction: 'Ingress', protocol: 'TCP', startPort: 4000 + i, endPort: 4000 + i, cidr: cidrOf(190 + i) })
+    const replies = await Promise.all([
+      call('tenant', 'POST', rulePath(networkId), body(0), newKey()),
+      call('tenant', 'POST', rulePath(networkId), body(1), newKey()),
+    ])
+    log(`FW-09 replies: ${replies.map((r) => `${r.status} ${r.text.slice(0, 120)}`).join(' | ')}`)
+    for (const reply of replies) {
+      if (reply.status === 201) {
+        made.push(bodyOf(reply).ruleId)
+      }
+    }
+    const created = replies.filter((r) => r.status === 201)
+    const refused = replies.filter((r) => r.status !== 201)
+    expect(created.length).toBe(1)
+    expect(Object.keys(bodyOf(created[0]))).toEqual(['ruleId'])
+    expect(refused.length).toBe(1)
+    expectError(refused[0], 422, 'FIREWALL_QUOTA_EXCEEDED')
+    expect((await get('tenant', rulePath(networkId)) as any[]).filter(counts).length).toBe(MAX_RULES_PER_NETWORK)
+  })
+
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Network/CreateFirewallRuleValidator.cs CreateFirewallRuleValidator
+  // (InclusiveBetween(PortRange.MinPort, PortRange.MaxPort), StartIsAtOrBeforeEnd, Null() ports for ICMP/All, FirewallCidr.Parse) — the
+  // validator answers before the handler, so the full network does not matter; titan-ops features/network/user-stories.md#us-net-intent-01
+  test('FW-12 a bad port, port range, ICMP port or cidr is 400 VALIDATION_ERROR and adds no rule', async () => {
+    const before = await ruleIds()
+    const bodies: Array<[string, Record<string, unknown>]> = [
+      ['(a) port 70000', { direction: 'Ingress', protocol: 'TCP', startPort: 70000, endPort: 70000, cidr: '0.0.0.0/0' }],
+      ['(b) start after end', { direction: 'Ingress', protocol: 'TCP', startPort: 90, endPort: 80, cidr: '0.0.0.0/0' }],
+      ['(c) ICMP with ports', { direction: 'Ingress', protocol: 'ICMP', startPort: 80, endPort: 80, cidr: '0.0.0.0/0' }],
+      ['(d) cidr octet 300', { direction: 'Ingress', protocol: 'TCP', startPort: 22, endPort: 22, cidr: '10.0.0.300/24' }],
+    ]
+    for (const [label, body] of bodies) {
+      log(`FW-12 ${label}`)
+      expectError(await call('tenant', 'POST', rulePath(networkId), body, newKey()), 400, 'VALIDATION_ERROR')
+    }
+    const after = await ruleIds()
+    expect(after.filter((r) => !before.includes(r))).toEqual([])
+  })
+
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Networking/Network/NetworkOwnership.cs RequireFirewallRule — the rule is the
+  // network's child, so network A does not hold B's rule ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/FirewallRule/DeleteFirewallRuleCommandHandler.cs HandleAsync;
+  // titan-ops features/network/design.md#firewall-rule-soft-delete
+  test("FW-10 deleting network B's rule through network A is 404 FIREWALL_RULE_NOT_FOUND and leaves it", async () => {
+    test.setTimeout(20 * 60_000)
+    try {
+      await setQuota({ maxVms: original!.maxVms, maxNetworks: await maxNetworksWithRoom() })
+      const b = await createSecondNetwork('netfwb', '10.80.0.0/24')
+      await waitNetwork('FW-10 network B usable', b, networkUsable)
+      const reply = await call('tenant', 'POST', rulePath(b),
+        { direction: 'Ingress', protocol: 'TCP', startPort: 22, endPort: 22, cidr: '0.0.0.0/0' }, newKey())
+      expectStatus(reply, 201)
+      const ruleOfB = bodyOf(reply).ruleId as string
+      const readOnB = async () => (await get('tenant', rulePath(b)) as any[]).find((r) => r.id === ruleOfB) ?? { currentExistence: 'Gone' }
+      await pollUntil('FW-10 rule on B', readOnB, (r) => r.currentExistence === 'Exists' && r.transition === null, ruleShape)
+
+      expectError(await call('tenant', 'DELETE', `${rulePath(networkId)}/${ruleOfB}`), 404, 'FIREWALL_RULE_NOT_FOUND')
+      const rule = await readOnB()
+      log(`FW-10 rule on B after: ${ruleShape(rule)}`)
+      expect(rule.currentExistence).toBe('Exists')
+      expect(rule.transition).toBeNull()
+      expect(rule.desiredExistence).toBe('Exists')
+    } finally {
+      await cleanUp([
+        ['quota', restoreQuota],
+        ['second networks', deleteExtraNetworks],
+      ])
+    }
+  })
+
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/FirewallRule/CreateFirewallRuleCommandHandler.cs HandleAsync
+  // (TenantQuotaGate.EnsureHasRoom before Network.AddFirewallRule) · OpenViCloud/titan-control-plane:Titan.Application/Services/Platform/Tenant/TenantQuotaGate.cs
+  // EnsureHasRoom (count >= cap: a cap of 0 refuses the first); titan-ops architecture/code-structure.md#quota-gate
+  test('FW-11 with a cap of 0, a rule on a network still being created is FIREWALL_QUOTA_EXCEEDED, not FIREWALL_NETWORK_NOT_READY', async () => {
+    test.setTimeout(20 * 60_000)
+    try {
+      await setQuota({ maxVms: original!.maxVms, maxNetworks: await maxNetworksWithRoom(), maxFirewallRulesPerNetwork: 0 })
+      const b = await createSecondNetwork('netfwq', '10.81.0.0/24')
+      const reply = await call('tenant', 'POST', rulePath(b),
+        { direction: 'Ingress', protocol: 'TCP', startPort: 22, endPort: 22, cidr: '0.0.0.0/0' }, newKey())
+      const network = await get('tenant', `/v1/tenant/networks/${b}`)
+      log(`FW-11 network after the rule request: transition=${network.transition} state=${network.currentState}; rule ${reply.status} ${reply.text.slice(0, 200)}`)
+      // Still Creating after the reply ⇒ it was not Created when the rule was asked for.
+      expect(network.transition).toBe('Creating')
+      expectError(reply, 422, 'FIREWALL_QUOTA_EXCEEDED')
+      await restoreQuota()
+      await waitNetwork('FW-11 network created', b, networkUsable)
+    } finally {
+      await cleanUp([
+        ['quota', restoreQuota],
+        ['second networks', deleteExtraNetworks],
+      ])
+    }
+  })
+})

@@ -2,9 +2,11 @@ import { test, expect } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { closeSessions, useBrowser } from './auth'
 import { bodyOf, call, expectError, expectStatus, get, log, newKey, startLog } from './api'
+import { cleanUp } from './clean-up'
 import { RUN, activityOf, countOf, envOf, runNetwork } from './fixtures'
 
-// Cases SSH-01..05 of plan.md: tenant SSH keys through the API. The key in the guest is VM-24 (host).
+// Cases SSH-01..05 and SSH-07 of plan.md: tenant SSH keys through the API. The key in the guest is VM-24 (host);
+// SSH-08 (sessions) needs a running VM and lives in vm.spec.ts.
 // The fingerprints are what `ssh-keygen -lf` printed for these keys: the oracle is outside the code under test.
 const ED25519 =
   'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJQIuvIctzZ61SoksnjJlkCRERFjIowWaKhlaoSOsHMB alice@laptop'
@@ -13,8 +15,21 @@ const ECDSA256 =
   'ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBIMiFu3klbiZ+CGMJP2XmpmPwfA7gnGTqgAWypl/msVzDaBvj4PXhbcQ514NbHNMXWZqbOWMXMi5ew5ucFMvGpc= e256'
 const RSA1024 =
   'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQDY33MdmAGIslfV/bpc5tFTotwR7lu+jCqkdbQgiRRi5Ogh4WQpJg3Lh5V7VtOf+vHKvWBLEcZS5Mc9meSoOwlQJJYvzrFwpbXyY4mqsAe2TkJuw2O8wG95S3bebVl4QjRJm0yx5m6qjhZwktKrpqLSdjB3KnwX58efWGTdrD13/Q== rsa1024'
+// A second valid ed25519 key (its private half was discarded), for the quota case: never saved.
+const ED25519_OTHER =
+  'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPlDXpSqw+rlrqGB3BIfBTzcAxYYgHSrsZMyAZe3yS8H rg-quota'
 
 type Key = { id: string, name: string, type: string, fingerprint: string, createdAt: string }
+
+// SSH-07 changes these three caps; the PATCH body must carry maxVms and maxNetworks.
+type Caps = { maxVms: number, maxNetworks: number, maxSshKeys: number }
+
+// GET /v1/tenant does not answer maxSshKeys: the admin list of tenants does.
+async function capsOf(tenantId: string): Promise<Caps> {
+  const row = (await get('admin', '/v1/tenants') as any[]).find((t) => t.id === tenantId)
+  expect(row, `tenant ${tenantId} in GET /v1/tenants`).toBeDefined()
+  return { maxVms: row.maxVms, maxNetworks: row.maxNetworks, maxSshKeys: row.maxSshKeys }
+}
 
 async function listKeys(as: 'tenant' | 'admin'): Promise<Key[]> {
   return await get(as, '/v1/tenant/ssh-keys') as Key[]
@@ -23,6 +38,8 @@ async function listKeys(as: 'tenant' | 'admin'): Promise<Key[]> {
 test.describe.serial('ssh-key', () => {
   const name = `rg-ssh-${RUN}`
   let keyId = ''
+  let tenantId = ''
+  let originalCaps: Caps | null = null
 
   test.beforeAll(async ({ browser }) => {
     startLog('ssh-key')
@@ -37,12 +54,21 @@ test.describe.serial('ssh-key', () => {
   })
 
   test.afterAll(async () => {
-    for (const key of await listKeys('tenant')) {
-      if (key.name.startsWith('rg-ssh-')) {
-        expectStatus(await call('tenant', 'DELETE', `/v1/tenant/ssh-keys/${key.id}`), 204)
-      }
-    }
-    await closeSessions()
+    await cleanUp([
+      ['quota', async () => {
+        if (originalCaps !== null) {
+          expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/quota`, originalCaps), 204)
+        }
+      }],
+      ['keys', async () => {
+        for (const key of await listKeys('tenant')) {
+          if (key.name.startsWith('rg-ssh-')) {
+            expectStatus(await call('tenant', 'DELETE', `/v1/tenant/ssh-keys/${key.id}`), 204)
+          }
+        }
+      }],
+      ['sessions', closeSessions],
+    ])
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/SshKey/AddSshKeyEndpoint.cs (HandleAsync: SendAsync(result, 201)) ·
@@ -86,16 +112,52 @@ test.describe.serial('ssh-key', () => {
     expect((await listKeys('tenant')).length).toBe(count)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs VendorDataForKeysAsync (SSH_KEY_NOT_FOUND): checked before the VM row is added, so nothing is made.
-  test('SSH-04 creating a VM with an unknown key id is 404 SSH_KEY_NOT_FOUND and makes no VM', async () => {
+  // titan-ops features/vm/design.md#ssh-key · OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs
+  // VendorDataForKeysAsync (SSH_KEY_NOT_FOUND): checked before the VM row is added, so nothing is made ·
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/CreateVmValidator.cs CreateVmValidator (MaxSshKeysPerVm = 10 distinct ids): the
+  // validator answers before the handler looks any key up
+  test('SSH-04 an unknown key id is 404 SSH_KEY_NOT_FOUND; 11 unknown ids are 400 VALIDATION_ERROR; neither makes a VM', async () => {
     const networkId = (await runNetwork()).id
     const { clusterId, templateId, smallTier } = await envOf()
     const vmName = `rg-vmssh-${RUN}`
-    expectError(await call('tenant', 'POST', '/v1/tenant/vms',
-      { name: vmName, networkId, vmOfferingId: smallTier, templateId, clusterId, diskSizeGb: null, sshKeyIds: [randomUUID()] }, newKey()),
+    const body = { name: vmName, networkId, vmOfferingId: smallTier, templateId, clusterId, diskSizeGb: null }
+    expectError(await call('tenant', 'POST', '/v1/tenant/vms', { ...body, sshKeyIds: [randomUUID()] }, newKey()),
       404, 'SSH_KEY_NOT_FOUND')
+    const eleven = Array.from({ length: 11 }, () => randomUUID())
+    expect(new Set(eleven).size).toBe(11)
+    expectError(await call('tenant', 'POST', '/v1/tenant/vms', { ...body, sshKeyIds: eleven }, newKey()),
+      400, 'VALIDATION_ERROR')
     const vms = await get('tenant', '/v1/tenant/vms') as Array<{ name: string }>
     expect(vms.filter((v) => v.name === vmName)).toEqual([])
+  })
+
+  // titan-ops features/tenant/design.md#quota-caps · titan-ops architecture/code-structure.md#quota-gate ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/SshKey/AddSshKeyCommandHandler.cs HandleAsync (TenantQuotaGate.EnsureHasRoom before
+  // ExistsByFingerprintAsync) · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Tenant/UpdateTenantQuotaEndpoint.cs UpdateQuotaRequest (maxVms and
+  // maxNetworks required, an absent cap kept). Runs while the SSH-01 key is still saved, before SSH-05 deletes it.
+  test('SSH-07 at maxSshKeys = the keys saved, a new key and a saved one are both 422 SSH_KEY_QUOTA_EXCEEDED', async () => {
+    tenantId = (await get('tenant', '/v1/tenant')).id
+    originalCaps = await capsOf(tenantId)
+    log(`SSH-07 caps before: ${JSON.stringify(originalCaps)}`)
+    const count = (await listKeys('tenant')).length
+    expect((await listKeys('tenant')).map((k) => k.id)).toContain(keyId)
+    const newName = `rg-ssh-q-${RUN}`
+    const dupName = `rg-ssh-d-${RUN}`
+    expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/quota`,
+      { maxVms: originalCaps.maxVms, maxNetworks: originalCaps.maxNetworks, maxSshKeys: count }), 204)
+    try {
+      expectError(await call('tenant', 'POST', '/v1/tenant/ssh-keys', { name: newName, publicKey: ED25519_OTHER }, newKey()),
+        422, 'SSH_KEY_QUOTA_EXCEEDED')
+      expectError(await call('tenant', 'POST', '/v1/tenant/ssh-keys', { name: dupName, publicKey: ED25519 }, newKey()),
+        422, 'SSH_KEY_QUOTA_EXCEEDED')
+    } finally {
+      expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/quota`, originalCaps), 204)
+    }
+    expect((await capsOf(tenantId)).maxSshKeys).toBe(originalCaps.maxSshKeys)
+    expect((await listKeys('tenant')).length).toBe(count)
+    expect(countOf(await activityOf(newName), 'ssh_key.create_requested')).toBe(0)
+    expect(countOf(await activityOf(dupName), 'ssh_key.create_requested')).toBe(0)
+    expect(countOf(await activityOf(name), 'ssh_key.create_requested')).toBe(1)
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/SshKey/DeleteSshKeyCommandHandler.cs HandleAsync (another tenant's key is not found) ·

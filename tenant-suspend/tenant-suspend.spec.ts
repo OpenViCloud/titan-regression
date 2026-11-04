@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test'
-import { closeSessions, useBrowser } from './auth'
+import { PORTAL, closeSessions, pageOf, useBrowser } from './auth'
 import { cleanUp } from './clean-up'
-import { bodyOf, call, expectStatus, get, log, newKey, startLog } from './api'
-import { RUN, envOf, nameOf } from './fixtures'
+import { RESULTS, bodyOf, call, expectStatus, get, log, newKey, startLog } from './api'
+import { RUN, envOf, nameOf, waitNetwork } from './fixtures'
 import { callWithToken, newSecret } from './token'
 
-// Cases SUS-01..04 of plan.md. beta-user's tenant is Suspended for the length of this module only:
+// Cases SUS-01..05 of plan.md. beta-user's tenant is Suspended for the length of this module only:
 // afterAll puts it back to Active whatever happened.
 test.describe.serial('tenant-suspend', () => {
   let tenantId = ''
@@ -13,6 +13,9 @@ test.describe.serial('tenant-suspend', () => {
   // SUS-04: an API token made while the tenant is still Active, deleted in afterAll once it is Active again.
   const tokenSecret = newSecret()
   let tokenId = ''
+  // SUS-05: the name the portal's refused create carries; afterAll deletes it should a create ever get through.
+  const portalNetworkName = `rg-susnet2-${RUN}`
+  let portalUsed = false
 
   async function setStatus(status: string): Promise<void> {
     const reply = await call('admin', 'PATCH', `/v1/tenants/${tenantId}/status`, { status })
@@ -45,6 +48,24 @@ test.describe.serial('tenant-suspend', () => {
       steps.push([`delete token ${tokenId}`, async () => {
         const deleted = await call('tenant', 'DELETE', `/v1/tenant/api-tokens/${tokenId}`)
         expect([204, 404], `${deleted.url} → ${deleted.text.slice(0, 200)}`).toContain(deleted.status)
+      }])
+    }
+    steps.push(['SUS-05 network, should one exist', async () => {
+      const left = (await get('tenant', '/v1/tenant/networks') as any[]).filter((n) => n.name === portalNetworkName)
+      for (const network of left) {
+        if (network.desiredExistence === 'Exists') {
+          await waitNetwork('cleanup: SUS-05 network at rest', network.id, (n) => n.transition === null)
+          expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${network.id}`), 202)
+        }
+        await waitNetwork('cleanup: SUS-05 network deleted', network.id, (n) => n.currentExistence === 'Deleted')
+        log(`afterAll: deleted ${portalNetworkName} (${network.id})`)
+      }
+    }])
+    if (portalUsed) {
+      // SUS-05 switches the language; leave none picked.
+      steps.push(['language', async () => {
+        const page = await pageOf('tenant')
+        await page.evaluate(() => localStorage.removeItem('ovc-lang'))
       }])
     }
     steps.push(['close sessions', closeSessions])
@@ -86,6 +107,77 @@ test.describe.serial('tenant-suspend', () => {
     log(`SUS-04 read → ${read.status}; write → ${write.status} ${write.text.slice(0, 200)}`)
     expectStatus(write, 403)
     expect(bodyOf(write).code).toBe('TENANT_SUSPENDED')
+  })
+
+  // titan-ops features/cloud-console/user-stories.md#us-sl-01c · titan-ops features/cloud-console/design.md#portal-gate-order
+  // OpenViCloud/titan-cloud-console:portal/src/contexts/TenantContext.tsx (TenantProvider: only PendingApproval is gated, Suspended falls
+  // through; tenantError ⇒ accountGate.loadFailed) · OpenViCloud/titan-cloud-console:portal/src/pages/DashboardPage.tsx (DashboardPage:
+  // network-count = networks.length) · OpenViCloud/titan-cloud-console:portal/src/components/NetworkCreateModal.tsx (handleSubmit: 403
+  // TENANT_SUSPENDED ⇒ networkCreate.suspended as apiError, the dialog stays open) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts,
+  // OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts (dashboard.title, pendingApproval.title, accountGate.loadFailed, networks.listLabel,
+  // networkCreate) · OpenViCloud/titan-control-plane:Titan.Infrastructure/Auth/TenantResolutionMiddleware.cs InvokeAsync (isWrite ⇒ TENANT_SUSPENDED)
+  test('SUS-05 the portal of a suspended tenant shows Overview and Networks as the API reads them; Create Network says the account is suspended', async () => {
+    test.setTimeout(5 * 60_000)
+    expect((await get('tenant', '/v1/tenant')).status, 'between SUS-01 and SUS-03').toBe('Suspended')
+    const { clusterId } = await envOf()
+    const networks = await get('tenant', '/v1/tenant/networks') as any[]
+    log(`SUS-05 API networks: ${networks.map((n) => n.name).join(', ')}`)
+    portalUsed = true
+    const page = await pageOf('tenant')
+    const views = [
+      {
+        lang: 'en', overview: 'Overview', list: 'Networks', create: 'Create Network', placeholder: 'e.g. production-net',
+        pending: 'Account pending approval', loadFailed: 'Failed to load account',
+        suspended: 'Your account is suspended — contact support to create resources',
+      },
+      {
+        lang: 'vi', overview: 'Tổng quan', list: 'Mạng', create: 'Tạo mạng', placeholder: 'ví dụ: production-net',
+        pending: 'Tài khoản đang chờ duyệt', loadFailed: 'Không tải được tài khoản',
+        suspended: 'Tài khoản đang bị tạm ngưng — liên hệ hỗ trợ để tạo tài nguyên',
+      },
+    ]
+    for (const view of views) {
+      await page.goto(PORTAL + '/', { waitUntil: 'networkidle' })
+      await page.evaluate((lang) => localStorage.setItem('ovc-lang', lang), view.lang)
+      await page.reload({ waitUntil: 'networkidle' })
+      await expect(page.getByRole('heading', { level: 1, name: view.overview })).toBeVisible()
+      await expect(page.getByTestId('network-count')).toHaveText(String(networks.length))
+      await expect(page.getByText(view.pending)).toHaveCount(0)
+      await expect(page.getByText(view.loadFailed)).toHaveCount(0)
+      await page.screenshot({ path: `${RESULTS}/SUS-05-overview-${view.lang}.png` })
+
+      await page.goto(PORTAL + '/networks', { waitUntil: 'networkidle' })
+      const list = page.getByRole('list', { name: view.list })
+      await expect(list.getByRole('listitem')).toHaveCount(networks.length)
+      for (const network of networks) {
+        await expect(list.getByText(network.name, { exact: true })).toBeVisible()
+      }
+      await expect(page.getByText(view.pending)).toHaveCount(0)
+      await expect(page.getByText(view.loadFailed)).toHaveCount(0)
+
+      await page.getByRole('button', { name: view.create }).click()
+      const dialog = page.getByRole('dialog')
+      await expect(dialog.getByRole('heading', { name: view.create })).toBeVisible()
+      await dialog.getByPlaceholder(view.placeholder).fill(portalNetworkName)
+      // The Cluster <select> has a <label> without htmlFor, so no accessible name: it is the dialog's only <select>.
+      await dialog.locator('select').selectOption(clusterId)
+      const posted = page.waitForResponse((res) => res.request().method() === 'POST'
+        && new URL(res.url()).pathname === '/v1/tenant/networks')
+      await dialog.getByRole('button', { name: view.create }).click()
+      const response = await posted
+      const body = await response.json()
+      log(`SUS-05 ${view.lang} portal POST /v1/tenant/networks → ${response.status()} ${JSON.stringify(body).slice(0, 200)}`)
+      expect(response.status()).toBe(403)
+      expect(body.code).toBe('TENANT_SUSPENDED')
+      await expect(dialog.getByText(view.suspended, { exact: true })).toBeVisible()
+      await expect(dialog).toBeVisible()
+      await page.screenshot({ path: `${RESULTS}/SUS-05-create-refused-${view.lang}.png` })
+      await page.keyboard.press('Escape')
+      await expect(dialog).toHaveCount(0)
+
+      const after = await get('tenant', '/v1/tenant/networks') as any[]
+      expect(after.some((n) => n.name === portalNetworkName), `no ${portalNetworkName} listed`).toBe(false)
+    }
   })
 
   test('SUS-03 Active again is 204 and writes pass', async () => {
