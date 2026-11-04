@@ -151,26 +151,26 @@ create a network and beta-user may hold one.
 
 | # | Module | Measures | Dev | Release | Spec |
 |---|---|---|---|---|---|
-| 1 | `smoke` | health, clusters, anonymous catalog, clean test account | yes | yes | yes |
-| 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-12, CAT-13 (plan only) and CAT-14 (host, not covered) |
-| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-11 to NET-19 (plan only) and NET-20, NET-21 (host, not covered) |
-| 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-09 to FW-11 (plan only) |
-| 5 | `vm` | VMs: create per tier, stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes, except VM-26 (plan only) |
-| 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-09 to VMS-13 (plan only) and VMS-14, VMS-15 (host, not covered) |
-| 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes, except VOL-12 to VOL-17 (plan only) and VOL-18 (host, not covered) |
-| 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: negative cases only) | yes | yes | yes, except LB-10, LB-11 (plan only) and LB-12 (host, not covered) |
-| 9 | `tenant` | tenant, quota, terms consent, approval on sign-in, the admin status route's error order | yes | yes | yes, except TEN-14 (plan only) |
+| 1 | `smoke` | health, clusters, anonymous catalog, clean test account | yes | yes | yes, except SMOKE-06 (plan only) |
+| 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-12, CAT-13, CAT-15 (plan only), CAT-14 (host, not covered) and CAT-16 (host) |
+| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-11 to NET-13 and NET-22 to NET-24 (plan only), NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21 (host, not covered) and NET-25 (host) |
+| 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-09 to FW-13 (plan only) |
+| 5 | `vm` | VMs: create per tier, stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes, except VM-26, VM-27, VM-29, SSH-07, SSH-08 (plan only) and VM-28 (host, `L-x`) |
+| 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-09 to VMS-13, VMS-16 (plan only), VMS-14, VMS-15 (host, not covered) and VMS-17 (host) |
+| 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes, except VOL-12 to VOL-17, VOL-19, VOL-20 (plan only) and VOL-18 (host, not covered) |
+| 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: negative cases only) | yes | yes | yes, except LB-10, LB-11, LB-13 to LB-15 (plan only) and LB-12 (host, not covered) |
+| 9 | `tenant` | tenant, quota, terms consent, approval on sign-in, the admin status route's error order | yes | yes | yes, except TEN-14, TEN-15 (plan only) |
 | 10 | `api-token` | API tokens: create, call the API with one, duplicate name/secret, delete ⇒ `401`, unknown token | yes | yes | yes |
 | 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes |
-| 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes |
+| 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes, except BIL-09, BIL-17, BIL-19 to BIL-23 (plan only) and BIL-18 (`kubectl` read) |
 | 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no | yes | yes |
 | 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once | no | yes | yes, except CC-05 to CC-12 (plan only) |
-| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API), except ADM-12 to ADM-15 (plan only) |
+| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API), except ADM-12 to ADM-16 (plan only) |
 | 16 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: Keycloak's database `keycloak` as a `Database` object, ArgoCD's health checks, schema `public` for its owner only, the name CNPG archives under and `ContinuousArchiving` (`kubectl` reads) | no | yes | yes (API and admin portal screens); `(host)`, `L-x` and `kubectl` cases in Phase 4 of the release |
-| 17 | `portal-ui` | customer portal end to end, signed in | no | yes | yes |
-| 18 | `tenant-suspend` | suspended ⇒ writes refused, reads allowed; reactivated | no | yes | yes |
+| 17 | `portal-ui` | customer portal end to end, signed in | no | yes | yes, except UI-29 to UI-32 (plan only) |
+| 18 | `tenant-suspend` | suspended ⇒ writes refused, reads allowed; reactivated | no | yes | yes, except SUS-05 (plan only) |
 | 19 | `network-lifecycle` | deletes the run's network (with its rules), recreates the same name | yes | yes | yes |
-| 20 | `login-page` | Keycloak sign-in page: layout, colours, font, brand, sign-up form, language, redirect URIs per client (no sign-in) | yes | yes | yes |
+| 20 | `login-page` | Keycloak sign-in page: layout, colours, font, brand, sign-up form, language, redirect URIs per client (no sign-in) | yes | yes | yes, except LOGIN-12 (plan only) |
 | 21 | `cleanup` | sweeps `rg-*` (and the `tfacc-*` a red `terraform-provider` run left) through the API, asserts 0 (on Incus: CLN-02, host) | yes | yes | yes |
 | 22 | `terraform-provider` | the public provider: catalog, network + firewall rule, SSH key + VM + volume + attachment, load balancer (create, import, update in place, delete), plan-time validation — `go test -c` of the provider repo, run in the pod with an API token the spec makes there; after `cleanup`, because the tests create networks | no | yes | yes — `terraform-provider.spec.ts` runs `acceptance_*test.go` of the provider repo (TFP-04, TFP-08 by hand) |
 | 23 | `worker` | the worker image the release environment runs comes from `OpenViCloud/titan-incus-worker`, pulls anonymously; the worker's command kinds match the control plane's — `gh`/`curl`/`kubectl` reads on the agent's machine | no | yes | no |
