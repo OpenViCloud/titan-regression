@@ -151,21 +151,21 @@ create a network and beta-user may hold one.
 
 | # | Module | Measures | Dev | Release | Spec |
 |---|---|---|---|---|---|
-| 1 | `smoke` | health, clusters, anonymous catalog, clean test account | yes | yes | yes, except SMOKE-06 (plan only) |
-| 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-12, CAT-13, CAT-15 (plan only), CAT-14 (host, not covered) and CAT-16 (host) |
-| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-11 to NET-13 and NET-22 to NET-24 (plan only), NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21 (host, not covered) and NET-25 (host) |
+| 1 | `smoke` | health, clusters, anonymous catalog, clean test account | yes | yes | yes, except SMOKE-06 (plan only); SMOKE-04 (extended) |
+| 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-12, CAT-13, CAT-15 (plan only), CAT-14 (host, not covered) and CAT-16 (host); CAT-04 (extended) |
+| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-11 to NET-13 and NET-22 to NET-24 (plan only), NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21 (host, not covered) and NET-25 (host); NET-02, NET-09 (extended) |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-09 to FW-13 (plan only) |
-| 5 | `vm` | VMs: create per tier, stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes, except VM-26, VM-27, VM-29, SSH-07, SSH-08 (plan only) and VM-28 (host, `L-x`) |
+| 5 | `vm` | VMs: create per tier, stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes, except VM-26, VM-27, VM-29, SSH-07, SSH-08, ACT-04 (plan only) and VM-28 (host, `L-x`); VM-01, VM-08, VM-16, VM-19, SSH-04 (extended) |
 | 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-09 to VMS-13, VMS-16 (plan only), VMS-14, VMS-15 (host, not covered) and VMS-17 (host) |
-| 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes, except VOL-12 to VOL-17, VOL-19, VOL-20 (plan only) and VOL-18 (host, not covered) |
-| 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: negative cases only) | yes | yes | yes, except LB-10, LB-11, LB-13 to LB-15 (plan only) and LB-12 (host, not covered) |
+| 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes, except VOL-12 to VOL-17, VOL-19, VOL-20 (plan only) and VOL-18 (host, not covered); VOL-03, VOL-04, VOL-06, VOL-08 (extended) |
+| 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: only the negative cases that need no IPv6 network) | yes | yes | yes, except LB-10, LB-11, LB-13 to LB-15 (plan only) and LB-12 (host, not covered); LB-02, LB-03, LB-06, LB-09 (extended) |
 | 9 | `tenant` | tenant, quota, terms consent, approval on sign-in, the admin status route's error order | yes | yes | yes, except TEN-14, TEN-15 (plan only) |
 | 10 | `api-token` | API tokens: create, call the API with one, duplicate name/secret, delete ⇒ `401`, unknown token | yes | yes | yes |
 | 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes |
-| 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes, except BIL-09, BIL-17, BIL-19 to BIL-23 (plan only) and BIL-18 (`kubectl` read) |
-| 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no | yes | yes |
+| 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes, except BIL-09, BIL-17, BIL-19 to BIL-23 (plan only) and BIL-18 (not covered); BIL-03, BIL-08, BIL-10, BIL-12 (extended) |
+| 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no | yes | yes, except CON-06 (extended) |
 | 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once | no | yes | yes, except CC-05 to CC-12 (plan only) |
-| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API), except ADM-12 to ADM-16 (plan only) |
+| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API), except ADM-12 to ADM-16 (plan only); ADM-05, ADM-06 (extended) |
 | 16 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: Keycloak's database `keycloak` as a `Database` object, ArgoCD's health checks, schema `public` for its owner only, the name CNPG archives under and `ContinuousArchiving` (`kubectl` reads) | no | yes | yes (API and admin portal screens); `(host)`, `L-x` and `kubectl` cases in Phase 4 of the release |
 | 17 | `portal-ui` | customer portal end to end, signed in | no | yes | yes, except UI-29 to UI-32 (plan only) |
 | 18 | `tenant-suspend` | suspended ⇒ writes refused, reads allowed; reactivated | no | yes | yes, except SUS-05 (plan only) |
@@ -196,7 +196,7 @@ with CC-04 (CC-03 pays the invoice the seed leaves; the serial spec then skips C
 **Spec** is `yes` when every case of the module in `plan.md` has a spec that ran green on the release environment at a release, except `(host)` cases (Phase 4
 of the release), **NOT COVERED** cases (the reason is in `plan.md`) and cases not applicable to the measured
 environment (the spec calls `test.skip` with the reason, e.g. VM-12 with a single cluster). `ACT-*` cases are measured
-in the module that owns the resource. A case with no spec yet gets one at the next release, and the cell names it as `yes, except <ID> (plan only)` until then; a case no spec can be
+in the module that owns the resource. A case with no spec yet gets one at the next release, and the cell names it as `yes, except <ID> (plan only)` until then; a case whose row gained checks its spec does not make yet is named `<ID> (extended)` until the spec catches up; a case no spec can be
 written for and that Phase 4 does not measure by hand is **NOT COVERED**, with the reason in its row of `plan.md`. Specs pick the first cluster with a listed template (`lib/fixtures.ts`,
 `envOf()`); prd's cluster is `singapore01`.
 
