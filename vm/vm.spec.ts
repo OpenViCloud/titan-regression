@@ -49,7 +49,7 @@ test.describe.serial('vm', () => {
     await cleanUp(steps)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/CreateVmValidator.cs CreateVmValidator (Name MaximumLength(64))
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/CreateVmValidator.cs CreateVmValidator (Name MaximumLength(Vm.NameMaxLength), 64, from OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs)
   test('VM-09 a 65-character name is 400 VALIDATION_ERROR', async () => {
     const { clusterId, templateId, smallTier } = await envOf()
     expectError(await call('tenant', 'POST', '/v1/tenant/vms',
