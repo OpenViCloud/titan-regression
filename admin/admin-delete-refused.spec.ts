@@ -117,10 +117,15 @@ test.describe.serial('admin-delete-refused', () => {
     await waitVm('ADM-12 vm running', snapshotVmId, (v) => runs(v) && v.transition === null)
 
     // The window is from the 202 to the worker's report (lease poll 2 s plus Incus's snapshot): the delete goes at once,
-    // as VMS-05's does.
+    // as VMS-05's does. The admin session is opened first, so its sign-in does not eat the window; a snapshot already
+    // at rest before the delete is a lap the race lost, not a measure of the rule.
+    await get('admin', '/v1/admin/clusters')
     const created = await call('tenant', 'POST', `/v1/tenant/vms/${snapshotVmId}/snapshots`, { name: `rg-admsnap-${RUN}` }, newKey())
     expectStatus(created, 202)
     snapshotId = bodyOf(created).snapshotId
+    const before = await readSnapshot(snapshotVmId, snapshotId)
+    log(`ADM-12 snapshot before the delete: ${snapshotShape(before)}`)
+    test.skip(before.transition === null, 'ADM-12: the snapshot came to rest before the admin delete; the race window was missed')
     const refused = await call('admin', 'DELETE', `/v1/admin/vms/${snapshotVmId}`)
     log(`ADM-12 admin delete: ${refused.status} ${refused.text.slice(0, 300)}`)
     expectError(refused, 422, 'VM_SNAPSHOT_IN_PROGRESS')
