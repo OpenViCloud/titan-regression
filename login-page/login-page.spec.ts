@@ -3,7 +3,7 @@ import { PORTAL } from './auth'
 import { RESULTS, log, startLog } from './api'
 import { startLocalProxyIfNeeded } from './local-proxy'
 
-// Cases LOGIN-01..10 of plan.md: the Keycloak login theme `openvicloud`, read without signing in.
+// Cases LOGIN-01..10 and LOGIN-12 of plan.md: the Keycloak login theme `openvicloud`, read without signing in.
 // Theme: OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/.
 // Nothing is submitted: register is opened, never sent.
 // Every case leaves ${RESULTS}/<ID>-<what>.png; the form is empty when it is taken.
@@ -349,6 +349,37 @@ test.describe('login-page', () => {
     await expect(browserVi.page).toHaveTitle(`Đăng nhập vào ${BRAND}`)
     await browserVi.page.screenshot({ path: `${RESULTS}/LOGIN-10-none-browser-vi.png` })
     await browserVi.context.close()
+  })
+
+  // titan-ops features/cloud-console/user-stories.md#us-sl-01 · titan-ops features/cloud-console/design.md#social-login-github ·
+  // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/configmap.yaml (identityProviders: alias github, no displayName ⇒ Keycloak's GitHub) ·
+  // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/template.ftl (nested socialProviders: keycloak.v2's #kc-social-providers,
+  // a#social-<alias>) · OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/messages/messages_vi.properties
+  // (identity-provider-login-label); the English label is keycloak.v2's own. Nothing is clicked: signing in with GitHub needs a real GitHub account.
+  test('LOGIN-12 the login page offers exactly one social sign-in, GitHub, in English and Vietnamese', async ({ browser }) => {
+    const { context, page } = await open(browser, 'light', 1280)
+    const url = await authorizeUrl(page)
+    const pages: Array<[string, string]> = [['en', 'Or sign in with'], ['vi', 'Hoặc đăng nhập bằng']]
+    for (const [lang, label] of pages) {
+      if (lang === 'vi') {
+        await page.goto(withLocale(url, 'vi'), { waitUntil: 'domcontentloaded' })
+        await page.locator('#username').waitFor({ state: 'visible', timeout: 45_000 })
+      }
+      const section = page.locator('#kc-social-providers')
+      await expect(section, `${lang}: #kc-social-providers`).toHaveCount(1)
+      const sectionText = ((await section.textContent()) || '').replace(/\s+/g, ' ').trim()
+      const links = section.locator('a[id^="social-"]')
+      const ids = await links.evaluateAll((els) => els.map((el) => el.id))
+      const href = await page.locator('a#social-github').getAttribute('href')
+      log(`LOGIN-12 ${lang} lang=${await page.evaluate(() => document.documentElement.lang)} section="${sectionText}" links=${JSON.stringify(ids)} href=${href === null ? null : new URL(href, page.url()).pathname}`)
+      expect(sectionText, `${lang}: the section's heading`).toContain(label)
+      expect(ids, `${lang}: exactly one social link`).toEqual(['social-github'])
+      await expect(page.locator('a#social-github')).toHaveText(/^\s*GitHub\s*$/)
+      expect(href, `${lang}: GitHub link`).toContain('/realms/titan/broker/github/login')
+      await expect(page.locator('#social-google')).toHaveCount(0)
+      await page.screenshot({ path: `${RESULTS}/LOGIN-12-${lang}.png` })
+    }
+    await context.close()
   })
 
   // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/template.ftl #login-select-toggle:

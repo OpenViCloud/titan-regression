@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test'
 import { closeSessions, useBrowser } from './auth'
+import { randomUUID } from 'node:crypto'
 import { call, expectError, expectStatus, get, log, startLog } from './api'
+import { RUN } from './fixtures'
 
-// Cases TEN-01..06 of plan.md. Quota and status are put back as they were in afterAll.
+// Cases TEN-01..07, TEN-14 and TEN-15 of plan.md. Quota and status are put back as they were in afterAll.
 test.describe.serial('tenant', () => {
   test.describe.configure({ timeout: 5 * 60_000 })
 
@@ -64,6 +66,43 @@ test.describe.serial('tenant', () => {
   test('TEN-04 Active on an Active tenant is 204 and it stays Active', async () => {
     expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/status`, { status: 'Active' }), 204)
     expect((await get('tenant', '/v1/tenant')).status).toBe('Active')
+  })
+
+  // titan-ops features/tenant/design.md#tenant-status-repeats ·
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Tenant/UpdateTenantStatusEndpoint.cs (HandleAsync: ParseTarget before either handler;
+  // Active to ActivateTenantCommandHandler) · OpenViCloud/titan-control-plane:Titan.Application/Commands/Platform/Tenant/UpdateTenantStatusCommandHandler.cs
+  // (ParseTarget: enum names only, so "1" is INVALID_STATUS; HandleAsync: the tenant is found first, then anything but Suspended is INVALID_STATUS) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Billing/TenantActivation/ActivateTenantCommandHandler.cs (HandleAsync: FindByIdForUpdateAsync
+  // finds nothing ⇒ TENANT_NOT_FOUND)
+  test('TEN-14 the status is read before the tenant is looked up; PendingApproval is never a target', async () => {
+    const own = await get('tenant', '/v1/tenant')
+    const stranger = randomUUID()
+    log(`TEN-14 random tenant id ${stranger}`)
+    expectError(await call('admin', 'PATCH', `/v1/tenants/${stranger}/status`, { status: '1' }), 400, 'INVALID_STATUS')
+    expectError(await call('admin', 'PATCH', `/v1/tenants/${stranger}/status`, { status: 'Active' }), 404, 'TENANT_NOT_FOUND')
+    expectError(await call('admin', 'PATCH', `/v1/tenants/${stranger}/status`, { status: 'PendingApproval' }), 404, 'TENANT_NOT_FOUND')
+    try {
+      expectError(await call('admin', 'PATCH', `/v1/tenants/${own.id}/status`, { status: 'PendingApproval' }), 400, 'INVALID_STATUS')
+      expect((await get('tenant', '/v1/tenant')).status).toBe('Active')
+    } finally {
+      // Only a refusal that did not hold changes the status; the lane's later modules need the tenant Active.
+      const status = (await get('admin', '/v1/tenants') as any[]).find((t) => t.id === own.id).status
+      if (status !== 'Active') {
+        log(`TEN-14 tenant was left ${status}: set back to Active`)
+        expectStatus(await call('admin', 'PATCH', `/v1/tenants/${own.id}/status`, { status: 'Active' }), 204)
+      }
+    }
+  })
+
+  // titan-ops features/tenant/user-stories.md#us-t07 · OpenViCloud/titan-control-plane:Titan.Host/Program.cs (AddAuthorizationBuilder: no fallback policy,
+  // no MapFallback — a path no endpoint maps is 404 before any auth)
+  test('TEN-15 the old anonymous user webhook is gone: 404, and it makes no tenant', async () => {
+    const name = `rg-t07-${RUN}`
+    const reply = await call('anonymous', 'POST', '/v1/internal/users', { username: name, email: `${name}@example.invalid` })
+    log(`TEN-15 POST /v1/internal/users ${reply.status} ${reply.text.slice(0, 200)}`)
+    expectStatus(reply, 404)
+    const tenants = await get('admin', '/v1/tenants') as Array<{ name: string }>
+    expect(tenants.map((t) => t.name)).not.toContain(name)
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Legal/GetLegalDocumentEndpoint.cs (Configure: Get("v1/legal/document"), AllowAnonymous),

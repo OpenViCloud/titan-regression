@@ -3,7 +3,7 @@ import { closeSessions, useBrowser } from './auth'
 import { call, expectStatus, get, log, startLog } from './api'
 import { RUN_NETWORK_PREFIX } from './fixtures'
 
-// Cases SMOKE-01..05 of plan.md. Runs first: a red here means the env, not a feature.
+// Cases SMOKE-01..06 of plan.md. Runs first: a red here means the env, not a feature.
 test.describe.serial('smoke', () => {
   test.beforeAll(async ({ browser }) => {
     startLog('smoke')
@@ -46,11 +46,28 @@ test.describe.serial('smoke', () => {
     }
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Tenant/Contracts/TenantQueryResult.cs (TenantQueryResult: Status, no provider account)
-  test('SMOKE-04 beta-user signs in and its tenant is Active', async () => {
+  // titan-ops features/tenant/design.md#tenant-states · titan-ops architecture/tenancy-and-admin.md#approval-is-activation (Active: the realm gives
+  // the test accounts role auto-approve) · OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Tenant/Contracts/TenantQueryResult.cs
+  // (TenantQueryResult: Status, no provider account) · OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Tenant/Contracts/AdminTenantQueryResult.cs
+  // (AdminTenantQueryResult: the nine caps, MaxSshKeys and MaxLoadBalancers only here) — the quota at the start of the run is logged so a pod killed
+  // half-way through a module that raises a cap shows up at the next run
+  test('SMOKE-04 beta-user signs in and its tenant is Active; the quota at the start of the run is logged', async () => {
     const tenant = await get('tenant', '/v1/tenant')
     log(`SMOKE-04 tenant status=${tenant.status} maxVms=${tenant.maxVms} maxNetworks=${tenant.maxNetworks}`)
     expect(tenant.status).toBe('Active')
+    const all = await get('admin', '/v1/tenants') as any[]
+    const row = all.find((t) => t.id === tenant.id)
+    expect(row, `tenant ${tenant.id} in GET /v1/tenants`).toBeDefined()
+    const caps = [
+      'maxVms', 'maxNetworks', 'maxVolumes', 'maxVmSnapshotsPerVm', 'maxVolumeSnapshotsPerVolume',
+      'maxFirewallRulesPerNetwork', 'maxPublicIpv6', 'maxSshKeys', 'maxLoadBalancers',
+    ]
+    const quota = Object.fromEntries(caps.map((cap) => [cap, row[cap]]))
+    log(`SMOKE-04 quota at start ${JSON.stringify(quota)} debtCeiling=${row.debtCeiling}`)
+    expect(row.status).toBe('Active')
+    for (const cap of caps) {
+      expect(typeof row[cap], `${cap} in GET /v1/tenants`).toBe('number')
+    }
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/VmRepository.cs ListByTenantAsync,
@@ -66,5 +83,15 @@ test.describe.serial('smoke', () => {
     expect(leftOver).toEqual([])
     const otherNetworks = networks.filter((n) => !n.name.startsWith(RUN_NETWORK_PREFIX))
     expect(otherNetworks.length, 'networks that are not the run network').toBeLessThan(tenant.maxNetworks)
+  })
+
+  // titan-ops features/billing/metering/design.md#meter-liveness · OpenViCloud/titan-control-plane:Titan.Host/Program.cs (MapHealthChecks("/healthz/meters"), AllowAnonymous)
+  // · OpenViCloud/titan-control-plane:Titan.Infrastructure/Hosting/MeterLivenessHealthCheck.cs (Evaluate: stale after IntervalMinutes × MeterStaleFactor) —
+  // the default writer answers the status word only, no meter name. The stale branch (503 Unhealthy) cannot be made from here: a healthy env shows 200.
+  test('SMOKE-06 /healthz/meters answers 200 Healthy without a token', async () => {
+    const meters = await call('anonymous', 'GET', '/healthz/meters')
+    log(`SMOKE-06 /healthz/meters ${meters.status} ${meters.text.slice(0, 300)}`)
+    expectStatus(meters, 200)
+    expect(meters.text.trim()).toBe('Healthy')
   })
 })
