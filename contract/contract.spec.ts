@@ -4,7 +4,7 @@ import * as http from 'node:http'
 import * as https from 'node:https'
 import * as tls from 'node:tls'
 import { ADMIN, PORTAL, closeSessions, headersOf, useBrowser } from './auth'
-import { API, bodyOf, call, expectError, expectStatus, log, startLog } from './api'
+import { API, bodyOf, call, expectError, expectStatus, get, log, startLog } from './api'
 import { startLocalProxyIfNeeded } from './local-proxy'
 
 // Cases CON-03..09 and CON-12 of plan.md. CON-01 (PUT/PATCH answer 204 with no body) and CON-02 (async POST
@@ -107,13 +107,38 @@ test.describe.serial('contract', () => {
   })
 
   // Roles("platform-admin") on every admin endpoint (OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/*,
-  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Tenant/ListTenantsEndpoint.cs)
-  test('CON-06 beta-user on admin routes is 403', async () => {
-    for (const path of ['/v1/admin/vms', '/v1/admin/networks', '/v1/admin/audit-log', '/v1/tenants', '/v1/admin/billing/receivables']) {
-      const reply = await call('tenant', 'GET', path)
-      log(`CON-06 ${path} → ${reply.status}`)
-      expectStatus(reply, 403)
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Tenant/ListTenantsEndpoint.cs) · titan-ops features/admin-portal/design.md#admin-auth-gate
+  // · titan-ops features/cluster/design.md#cluster-admin-routes · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/ListAdminTemplatesEndpoint.cs,
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/SyncTemplatesEndpoint.cs,
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/ListAdminClustersEndpoint.cs,
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/GetProviderClientCertificateEndpoint.cs,
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/TestAdminClusterEndpoint.cs (Configure: Roles("platform-admin"))
+  // · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/UpdateVmOfferingPriceEndpoint.cs (Configure: Roles("platform-admin");
+  // UpdateVmOfferingPriceValidator: pricePerHour > 0, so the body sent here could not change a price even past a broken role gate)
+  // · OpenViCloud/titan-control-plane:Titan.Infrastructure/Auth/TenantResolutionMiddleware.cs InvokeAsync (no user ⇒ next: the 401 is the bearer scheme's)
+  test('CON-06 beta-user on admin routes is 403, and 401 with no token; the tier prices stay as they were', async () => {
+    const offeringsBefore = await get('anonymous', '/v1/vm-offerings')
+    const routes: Array<{ method: string, path: string, body?: unknown }> = [
+      { method: 'GET', path: '/v1/admin/vms' },
+      { method: 'GET', path: '/v1/admin/networks' },
+      { method: 'GET', path: '/v1/admin/audit-log' },
+      { method: 'GET', path: '/v1/tenants' },
+      { method: 'GET', path: '/v1/admin/billing/receivables' },
+      { method: 'GET', path: '/v1/admin/templates' },
+      { method: 'POST', path: '/v1/admin/templates/sync' },
+      { method: 'PATCH', path: '/v1/admin/vm-offerings/s/price', body: { pricePerHour: 0 } },
+      { method: 'GET', path: '/v1/admin/clusters' },
+      { method: 'GET', path: '/v1/admin/clusters/client-certificate' },
+      { method: 'POST', path: '/v1/admin/clusters/test', body: { endpoint: 'https://rg.invalid:8443', serverFingerprint: '0'.repeat(64) } },
+    ]
+    for (const route of routes) {
+      const asTenant = await call('tenant', route.method, route.path, route.body)
+      const anonymous = await call('anonymous', route.method, route.path, route.body)
+      log(`CON-06 ${route.method} ${route.path} → beta-user ${asTenant.status}, no token ${anonymous.status}`)
+      expectStatus(asTenant, 403)
+      expectStatus(anonymous, 401)
     }
+    expect(await get('anonymous', '/v1/vm-offerings'), 'GET /v1/vm-offerings unchanged').toEqual(offeringsBefore)
   })
 
   // titan-ops architecture/provider-and-worker.md#provider-command-lease — /internal/* needs X-Internal-Token

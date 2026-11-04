@@ -3,11 +3,23 @@ import { closeSessions, useBrowser } from './auth'
 import { type Reply, bodyOf, call, get, log, newKey, pollUntil, sleep, startLog } from './api'
 import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, runNetwork, waitVm, waitVolume } from './fixtures'
 
-// Cases CC-01..04 of plan.md: two identical requests at the same moment. CC-03 pays the 4444 invoice
-// seed-invoices.sql left on admin-test (run it before this module, as for billing).
+// Cases CC-01..04 of plan.md: two identical requests at the same moment (CC-05..12: concurrency-requests.spec.ts). CC-03
+// pays the 4444 invoice seed-invoices.sql left on admin-test (run it before this module, as for billing). "One delete
+// command" is read through its activity: no API lists core.provider_commands.
 
 function statusOf(reply: Reply): string {
   return `${reply.status} ${bodyOf(reply).code || ''}`.trim()
+}
+
+// Waits for the outcome row, then a little longer: a second outcome (the bug) would come right after the first.
+async function expectOneRequestOneOutcome(label: string, name: string, requested: string, outcome: string): Promise<void> {
+  await pollUntil(`${label} outcome recorded`, () => activityOf(name), (actions) => actions.includes(outcome),
+    (actions) => actions.join(','), 2 * 60_000, 3_000)
+  await sleep(10_000)
+  const actions = await activityOf(name)
+  log(`${label} activity ${name}: ${actions.join(', ')}`)
+  expect(countOf(actions, requested), `${label} ${requested}`).toBe(1)
+  expect(countOf(actions, outcome), `${label} ${outcome}`).toBe(1)
 }
 
 test.describe.serial('concurrency', () => {
@@ -35,26 +47,25 @@ test.describe.serial('concurrency', () => {
     await closeSessions()
   })
 
-  // titan-ops architecture/resource-lifecycle.md#one-key-per-request — the row lock queues the two requests, so the
-  // second is answered as a repeat; a 409 here is what the spec still allows until a release tightens it to two 202
-  test('CC-01 two deletes of one VM at once: one 202, the other 202 or 409 REQUEST_IN_PROGRESS; one delete request', async () => {
+  // titan-ops architecture/resource-lifecycle.md#one-key-per-request · titan-ops architecture/resource-lifecycle.md#repeat —
+  // the row lock queues the two requests, so the second is answered as a repeat
+  // (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync: RequireVmForUpdateAsync,
+  // IsDeletedOrDeleting)
+  test('CC-01 two deletes of one VM at once: two 202, one vm.delete_requested, Deleted, one vm.deleted', async () => {
     const { smallTier } = await envOf()
     const networkId = (await runNetwork()).id
     const name = `rg-ccvm-${RUN}`
     vmId = await createVm(name, smallTier, networkId)
-    await waitVm('CC-01 has an instance', vmId, (v) => v.currentExistence === 'Exists')
+    await waitVm('CC-01 has an instance', vmId, (v) => v.currentExistence === 'Exists' && v.transition === null)
     const replies = await Promise.all([
       call('tenant', 'DELETE', `/v1/tenant/vms/${vmId}`),
       call('tenant', 'DELETE', `/v1/tenant/vms/${vmId}`),
     ])
     const answers = replies.map(statusOf)
     log(`CC-01 answers: ${answers.join(' | ')}`)
-    expect(answers).toContain('202')
-    for (const answer of answers) {
-      expect(['202', '409 REQUEST_IN_PROGRESS']).toContain(answer)
-    }
+    expect(answers).toEqual(['202', '202'])
     await waitVm('CC-01 deleted', vmId, (v) => v.currentExistence === 'Deleted')
-    expect(countOf(await activityOf(name), 'vm.delete_requested')).toBe(1)
+    await expectOneRequestOneOutcome('CC-01', name, 'vm.delete_requested', 'vm.deleted')
   })
 
   // titan-ops architecture/http-contract.md#idempotency-key — the second request under a key in flight is 409
@@ -105,25 +116,23 @@ test.describe.serial('concurrency', () => {
     expect(before - after).toBe(4444)
   })
 
-  // titan-ops architecture/resource-lifecycle.md#one-key-per-request — the second delete waits on the volume's row lock,
-  // then finds the first waiting: a repeat
-  // (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DeleteVolumeCommandHandler.cs HandleAsync, RequireVolumeForUpdateAsync, IsDeletedOrDeleting) answered like the first, with nothing recorded.
-  // The assertion still allows the 409 of before; plan.md CC-04 expects two 202, and the release that writes its spec tightens it
-  test('CC-04 two deletes of one volume at once: one 202, the other 202 or 409 REQUEST_IN_PROGRESS; one delete request', async () => {
+  // titan-ops architecture/resource-lifecycle.md#one-key-per-request · titan-ops architecture/resource-lifecycle.md#repeat — the
+  // second delete waits on the volume's row lock, then finds the first waiting: a repeat, answered like the first with
+  // nothing recorded (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DeleteVolumeCommandHandler.cs HandleAsync:
+  // RequireVolumeForUpdateAsync, IsDeletedOrDeleting)
+  test('CC-04 two deletes of one volume at once: two 202, one volume.delete_requested, Deleted, one volume.deleted', async () => {
     test.skip(volumeId === '', 'needs the volume of CC-02')
     const name = `rg-ccvol-${RUN}`
-    await waitVolume('CC-04 volume exists at rest', volumeId, (v) => v.currentExistence === 'Exists' && v.transition === null)
+    await waitVolume('CC-04 volume exists at rest', volumeId, (v) => v.currentExistence === 'Exists' && v.transition === null
+      && v.currentAttachedVmId === null)
     const replies = await Promise.all([
       call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeId}`),
       call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeId}`),
     ])
     const answers = replies.map(statusOf)
     log(`CC-04 answers: ${answers.join(' | ')}`)
-    expect(answers).toContain('202')
-    for (const answer of answers) {
-      expect(['202', '409 REQUEST_IN_PROGRESS']).toContain(answer)
-    }
+    expect(answers).toEqual(['202', '202'])
     await waitVolume('CC-04 deleted', volumeId, (v) => v.currentExistence === 'Deleted')
-    expect(countOf(await activityOf(name), 'volume.delete_requested')).toBe(1)
+    await expectOneRequestOneOutcome('CC-04', name, 'volume.delete_requested', 'volume.deleted')
   })
 })
