@@ -107,7 +107,7 @@ test.describe.serial('concurrency', () => {
 
   // titan-ops architecture/resource-lifecycle.md#one-key-per-request — the second delete waits on the volume's row lock,
   // then finds the first waiting: a repeat
-  // (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DeleteVolumeCommandHandler.cs HandleAsync, RequireVolumeForUpdateAsync, alreadyRequestedOrDone) answered like the first, with nothing recorded.
+  // (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DeleteVolumeCommandHandler.cs HandleAsync, RequireVolumeForUpdateAsync, IsDeletedOrDeleting) answered like the first, with nothing recorded.
   // The assertion still allows the 409 of before; plan.md CC-04 expects two 202, and the release that writes its spec tightens it
   test('CC-04 two deletes of one volume at once: one 202, the other 202 or 409 REQUEST_IN_PROGRESS; one delete request', async () => {
     test.skip(volumeId === '', 'needs the volume of CC-02')

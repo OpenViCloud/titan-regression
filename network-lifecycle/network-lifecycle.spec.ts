@@ -41,7 +41,7 @@ test.describe.serial('network-lifecycle', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Network/DeleteNetworkEndpoint.cs HandleAsync ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/DeleteNetworkCommandHandler.cs HandleAsync (alreadyRequestedOrDone)
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/DeleteNetworkCommandHandler.cs HandleAsync (IsDeletedOrDeleting)
   test('NETL-01 deleting the run network is 202, then Deleted; a repeat is 202 and records nothing', async () => {
     const vms = (await get('tenant', '/v1/tenant/vms') as any[]).filter((v) => v.networkId === networkId)
     expect(vms, 'every VM on the run network is gone before this module').toEqual([])
