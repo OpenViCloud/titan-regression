@@ -193,7 +193,7 @@ test.describe.serial('volume', () => {
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs OccupiesQuota ·
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Platform/Tenant/TenantQuotaGate.cs EnsureHasRoom
   test('VOL-10 the volume past MaxVolumes is 422 VOLUME_QUOTA_EXCEEDED', async () => {
-    // The server's count (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs OccupiesQuota, applied by VolumeRepository.CountActiveByTenantAsync): desired Exists and (Exists, or its create waits).
+    // The server's count (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs OccupiesQuota; VolumeRepository.CountActiveByTenantAsync writes the same condition in SQL): desired Exists and (Exists, or its create waits).
     const live = (await get('tenant', '/v1/tenant/volumes') as any[])
       .filter((v) => v.desiredExistence === 'Exists' && (v.currentExistence === 'Exists' || v.transition === 'Creating')).length
     log(`VOL-10 live volumes before: ${live}`)

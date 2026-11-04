@@ -202,7 +202,7 @@ test.describe.serial('vm', () => {
     await waitVm('VM-17', vmB, (v) => v.currentExistence === 'Deleted')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs OccupiesQuota (applied by VmRepository.CountActiveByTenantAsync) — counted: desired Exists and (Exists, or NotCreated with a request waiting)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs OccupiesQuota (VmRepository.CountActiveByTenantAsync writes the same condition in SQL) — counted: desired Exists and (Exists, or NotCreated with a request waiting)
   test('VM-15 a create that gave up does not count: one more VM fits, the next is 422 VM_QUOTA_EXCEEDED', async () => {
     const vms = await get('tenant', '/v1/tenant/vms') as any[]
     const counted = vms.filter((v) => v.desiredExistence === 'Exists' && v.currentExistence === 'Exists').length
