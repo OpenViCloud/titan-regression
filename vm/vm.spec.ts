@@ -81,7 +81,7 @@ test.describe.serial('vm', () => {
     expect(vms.filter((v) => v.name === name)).toEqual([])
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs BeginVmDeployment (NETWORK_CLUSTER_MISMATCH)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs ProviderIdForVm (NETWORK_CLUSTER_MISMATCH)
   test('VM-12 a VM in another cluster than its network is 422 NETWORK_CLUSTER_MISMATCH', async () => {
     const clusters = await get('anonymous', '/v1/clusters') as Array<{ id: string }>
     const usable: string[] = []

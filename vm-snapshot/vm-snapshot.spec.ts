@@ -139,7 +139,7 @@ test.describe.serial('vm-snapshot', () => {
     expect((await getVm(vmId)).desiredExistence).toBe('Exists')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VmSnapshot/DeleteVmSnapshotCommandHandler.cs HandleAsync (alreadyRequestedOrDone) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VmSnapshot/DeleteVmSnapshotCommandHandler.cs HandleAsync (IsDeletedOrDeleting) ·
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/VmSnapshots/DeleteSnapshotEndpoint.cs HandleAsync
   test('VMS-06 delete a snapshot is 202, then Deleted; a repeat is 202 and records nothing', async () => {
     expectStatus(await call('tenant', 'DELETE', `${path()}/${snapshots.s2}`), 202)
