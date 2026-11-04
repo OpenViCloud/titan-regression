@@ -218,7 +218,7 @@ test.describe.serial('network', () => {
       422, 'NETWORK_CIDR_OVERLAP')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs FreePublicIpv6Async — a
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs Block56Of — a
   // cluster that names no IPv6 block refuses; a cluster with one is skipped here
   test('NET-10 a network asking for public IPv6 in a cluster without an IPv6 block is 422 IPV6_NOT_AVAILABLE', async () => {
     const { clusterId } = await envOf()
@@ -285,7 +285,7 @@ test.describe.serial('network', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/NetworkRepository.cs HasCidrOverlapAsync (a create that waits holds
   // RequestedCidr) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs AddFirewallRule (IsUsable ⇒
-  // FIREWALL_NETWORK_NOT_READY), RequestDelete (CreateIsWaiting ⇒ NETWORK_INVALID_STATE), Rename (Deleted ⇒ NETWORK_INVALID_STATE) ·
+  // FIREWALL_NETWORK_NOT_READY), Delete (CreateIsWaiting ⇒ NETWORK_INVALID_STATE), Rename (Deleted ⇒ NETWORK_INVALID_STATE) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/RenameNetworkCommandHandler.cs HandleAsync (ExistsByNameAsync
   // ⇒ NETWORK_NAME_TAKEN) · OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/Contracts/CreateNetworkCommand.cs
   // (FirewallPolicy is a number on /v1: Allow = 0, Deny = 1); titan-ops features/network/user-stories.md#us-net-intent-02 ·

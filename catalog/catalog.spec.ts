@@ -180,7 +180,7 @@ test.describe.serial('catalog', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/SyncTemplatesEndpoint.cs HandleAsync (202);
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs HandleAsync (NeedsASyncRequest, RequestSyncIn)
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs HandleAsync (NeedsASyncRequest, SyncIn)
   // a template with no image for the cluster architecture gives up (titan-ops features/catalog/design.md#template-architecture)
   test('CAT-06 sync: every template ends Exists or gives up in the cluster, none stays Syncing', async () => {
     const { clusterId } = await envOf()

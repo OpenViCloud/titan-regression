@@ -22,7 +22,7 @@ function settled(v: any): boolean {
   return v.currentExistence === 'Exists' && v.transition === null
 }
 
-// Counts toward MaxVolumeSnapshotsPerVolume as the server counts (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/ChildEntities/VolumeSnapshot.cs
+// Counts toward MaxVolumeSnapshotsPerVolume as the server counts (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Entities/VolumeSnapshot.cs
 // CountsTowardQuota): desired Exists and (Exists, or its create waits).
 function countsTowardQuota(s: any): boolean {
   return s.desiredExistence === 'Exists' && (s.currentExistence === 'Exists' || s.transition === 'Creating')
@@ -205,7 +205,7 @@ test.describe.serial('volume', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Volume/AttachVolumeEndpoint.cs HandleAsync — 202, no body;
   // attachment is read from used_by (titan-ops features/volume/design.md#attachment-from-used-by) ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs RequestDelete (IsInUse ⇒ VOLUME_INVALID_STATE) ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs Delete (IsInUse ⇒ VOLUME_INVALID_STATE) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DeleteVolumeCommandHandler.cs HandleAsync (the refusal stages nothing)
   test('VOL-03 attach to a running VM is 202 with no body, then attached; deleting it attached is 422 VOLUME_INVALID_STATE', async () => {
     const reply = await call('tenant', 'POST', `/v1/tenant/volumes/${volumeA}/attach`, { vmId })
@@ -293,7 +293,7 @@ test.describe.serial('volume', () => {
     expect(countOf(actions, 'volume.created')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs RequestDelete (VOLUME_HAS_SNAPSHOTS)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs Delete (VOLUME_HAS_SNAPSHOTS)
   test('VOL-07 deleting a volume that still has snapshots is 422 VOLUME_HAS_SNAPSHOTS', async () => {
     expectError(await call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeA}`), 422, 'VOLUME_HAS_SNAPSHOTS')
   })
@@ -357,7 +357,7 @@ test.describe.serial('volume', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/ComputeOwnership.cs RequireVolumeSnapshot (the snapshot is the volume's
   // child entity: one of another volume answers like a missing one) · OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VolumeSnapshot/DeleteVolumeSnapshotCommandHandler.cs
-  // and RestoreVolumeSnapshotCommandHandler.cs HandleAsync — titan-ops architecture/code-structure.md#child-entity
+  // and OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VolumeSnapshot/RestoreVolumeSnapshotCommandHandler.cs HandleAsync — titan-ops architecture/code-structure.md#child-entity
   test("VOL-13 another volume's snapshot through this volume's route is 404 VOLUME_SNAPSHOT_NOT_FOUND on delete and restore", async () => {
     const snapshotOfB = (await snapshotsOf(volumeB)).find((s) => s.currentExistence === 'Exists' && s.transition === null)
     expect(snapshotOfB, 'VOL-12 leaves snapshots on volume B').toBeDefined()
@@ -374,10 +374,10 @@ test.describe.serial('volume', () => {
     expect(rows.some((v) => v.name === name)).toBe(false)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs RequestDelete (SnapshotQuotaUsage: a snapshot being deleted
-  // no longer counts), EndRequest · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Results/VolumeRequestEnded.cs SnapshotsWhoseDeleteEnded ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs Delete (SnapshotQuotaUsage: a snapshot being deleted
+  // no longer counts), EndOperation · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Results/VolumeOperationEnded.cs SnapshotsWhoseDeleteEnded ·
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VolumeReports.cs RecordEnded ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/ChildEntities/VolumeSnapshot.cs EndWithItsVolume, EndRequest (IsTerminal)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Entities/VolumeSnapshot.cs EndWithItsVolume, EndOperation (IsTerminal)
   // — titan-ops architecture/intent-and-observation.md#terminal-state-absorbs
   test('VOL-14 a volume deleted while its only snapshot is being deleted: 202, both Deleted, one volume_snapshot.deleted', async () => {
     const name = `rg-vrs-${RUN}`
@@ -428,7 +428,7 @@ test.describe.serial('volume', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VolumeSnapshot/RestoreVolumeSnapshotCommandHandler.cs HandleAsync
   // (ProviderIdForSnapshotRestore before TenantQuotaGate: a snapshot that cannot be restored answers that first) ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/ChildEntities/VolumeSnapshot.cs EnsureRestorable (VOLUME_SNAPSHOT_INVALID_STATE)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Entities/VolumeSnapshot.cs EnsureRestorable (VOLUME_SNAPSHOT_INVALID_STATE)
   // — titan-ops architecture/code-structure.md#quota-gate
   test('VOL-16 with maxVolumes 0, restoring a snapshot not yet Exists is 422 VOLUME_SNAPSHOT_INVALID_STATE, not VOLUME_QUOTA_EXCEEDED', async () => {
     const original = (await adminRow()).maxVolumes as number
@@ -457,7 +457,7 @@ test.describe.serial('volume', () => {
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/ComputeOwnership.cs RequireVolumeForUpdateAsync, RequireVolumeAsync ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/AttachVolumeCommandHandler.cs HandleAsync (the volume is looked up
   // before the VM) · OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VolumeSnapshot/CreateVolumeSnapshotCommandHandler.cs and
-  // RestoreVolumeSnapshotCommandHandler.cs HandleAsync (VOLUME_NOT_FOUND for another tenant's volume) — titan-ops architecture/tenancy-and-admin.md#tenant-isolation
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VolumeSnapshot/RestoreVolumeSnapshotCommandHandler.cs HandleAsync (VOLUME_NOT_FOUND for another tenant's volume) — titan-ops architecture/tenancy-and-admin.md#tenant-isolation
   test("VOL-19 another tenant's volume is not listed and every route on it is 404 VOLUME_NOT_FOUND; nothing changes", async () => {
     const volumeName = `rg-volc-${RUN}`
     const snapshotName = `rg-vcs-${RUN}`

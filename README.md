@@ -165,7 +165,7 @@ create a network and beta-user may hold one.
 | 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes, except BIL-18 (not covered) |
 | 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no | yes | yes |
 | 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once | no | yes | yes |
-| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API) |
+| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API), except ADM-15 (`L-x`, a job of its own: `run-module.sh` on `admin/stuck-requests`) |
 | 16 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: Keycloak's database `keycloak` as a `Database` object, ArgoCD's health checks, schema `public` for its owner only, the name CNPG archives under and `ContinuousArchiving` (`kubectl` reads) | no | yes | yes (API and admin portal screens); `(host)`, `L-x` and `kubectl` cases in Phase 4 of the release |
 | 17 | `portal-ui` | customer portal end to end, signed in | no | yes | yes |
 | 18 | `tenant-suspend` | suspended ⇒ writes refused, reads allowed; reactivated | no | yes | yes |
@@ -186,9 +186,10 @@ Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — s
 OpenViCloud, needs an approved `L-x` command; `site` — the public site through Playwright MCP on the agent's machine;
 `worker`, `control-plane-image` — read-only `gh`/`curl`/`kubectl` on the agent's machine.
 
-Three things change state every tenant of the environment shares: ADM-06 (a global price), `billing/seed-invoices.sql`
-(written straight into the database) and the `L-x` writes on the Incus host. On prd they run only until the first real
-customer is approved (`titan-ops status/known-state.md#first-real-customer`).
+Four things change state every tenant of the environment shares: ADM-06 (a global price), ADM-15 (the cluster's
+`incus-worker` stopped), `billing/seed-invoices.sql` (written straight into the database) and the `L-x` writes on the
+Incus host. On prd they run only until the first real customer is approved
+(`titan-ops status/known-state.md#first-real-customer`).
 Until the specs are split or skip themselves, that stops the whole `admin` module (ADM-03 shares the serial
 `admin/admin.spec.ts` with ADM-06, and `run-module.sh` runs the whole directory, ADM-08 and ADM-09 included) and CC-03
 with CC-04 (CC-03 pays the invoice the seed leaves; the serial spec then skips CC-04).

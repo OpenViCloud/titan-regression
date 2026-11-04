@@ -241,7 +241,7 @@ test.describe.serial('billing', () => {
     expect(await wallet()).toBe(before)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Services/InvoiceWalletPayment.cs RequestAsync (INVOICE_WALLET_INSUFFICIENT)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Services/InvoiceWalletPayment.cs PayAsync (INVOICE_WALLET_INSUFFICIENT)
   test('BIL-06 an invoice larger than the wallet is 422 INVOICE_WALLET_INSUFFICIENT and the wallet is unchanged', async () => {
     const before = await wallet()
     expectError(await call('admin', 'POST', `/v1/tenant/billing/invoices/${invoices[900000000]}/pay`), 422, 'INVOICE_WALLET_INSUFFICIENT')
@@ -291,7 +291,7 @@ test.describe.serial('billing', () => {
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Invoice/Invoice.cs MarkPaid (INVOICE_ALREADY_PAID: paid by the wallet already);
   // the tenant's pay on a marked-paid invoice: OpenViCloud/titan-control-plane:Titan.Application/Services/Billing/Invoice/InvoiceWalletSettlement.cs
   // (IsAlreadyPaidFromWalletAsync: Paid is not a repeat) ⇒ OpenViCloud/titan-control-plane:Titan.Domain/Services/InvoiceWalletPayment.cs
-  // (RequestAsync: Status ≠ New ⇒ INVOICE_INVALID_STATE, before any debit row) · titan-ops architecture/money-and-wallet.md#human-confirmed-debit
+  // (PayAsync: Status ≠ New ⇒ INVOICE_INVALID_STATE, before any debit row) · titan-ops architecture/money-and-wallet.md#human-confirmed-debit
   test('BIL-08 MarkPaid is 204 and touches no wallet; a repeat is 204; on a wallet-settled invoice 422 INVOICE_ALREADY_PAID; the tenant paying it is 422 INVOICE_INVALID_STATE', async () => {
     const before = await wallet()
     const reply = await call('admin', 'PATCH', `/v1/admin/invoices/${invoices[3333]}/pay`)

@@ -101,7 +101,7 @@ test.describe.serial('admin-worker-down', () => {
   // titan-ops architecture/resource-lifecycle.md#lost-and-stale · OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/PendingRequestReader.cs
   // (ListStuckAsync: core.pending_requests joined to the command row by key; resource 'vm' / 'volume', kind the request kind) ·
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/ProviderCommands/ProviderCommandQueue.cs (VmStopKey, VolumeDetachKey) ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Enums/VmRequestKind.cs (Stop) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Enums/VolumeRequestKind.cs
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Enums/VmOperationKind.cs (Stop) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Enums/VolumeOperationKind.cs
   // (Detach) · OpenViCloud/titan-control-plane:Titan.Infrastructure/Hosting/StuckRequestHealthCheck.cs (Evaluate: Degraded while the command is open) ·
   // OpenViCloud/titan-control-plane:Titan.Host/Program.cs (AddCheck<StuckRequestHealthCheck>, MapHealthChecks("/healthz/reconcilers"))
   test('ADM-15 with the worker stopped, a VM stop and a volume detach are listed stuck with their command Pending; the worker back clears both', async () => {

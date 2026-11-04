@@ -106,9 +106,9 @@ test.describe.serial('admin-delete-refused', () => {
   })
 
   // titan-ops features/vm/design.md#vm-snapshot-counting · titan-ops features/vm/design.md#admin-delete-audit ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Admin/Vm/DeleteAdminVmCommandHandler.cs (HandleAsync: deletion.RequestAsync before
-  // auditLog.Add) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs (RequestDelete: ASnapshotCommandIsRunning ⇒ VM_SNAPSHOT_IN_PROGRESS) ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/ChildEntities/VmSnapshot.cs (BlocksVmDelete: create or revert waiting) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Admin/Vm/DeleteAdminVmCommandHandler.cs (HandleAsync: deletion.DeleteAsync before
+  // auditLog.Add) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs (Delete: ASnapshotCommandIsRunning ⇒ VM_SNAPSHOT_IN_PROGRESS) ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.cs (BlocksVmDelete: create or revert waiting) ·
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/ErrorStatus.cs (BusinessException ⇒ 422)
   test('ADM-12 admin delete of a VM whose snapshot is being made is 422 VM_SNAPSHOT_IN_PROGRESS; the VM stays, no audit row', async () => {
     const network = await runNetwork()
@@ -116,9 +116,9 @@ test.describe.serial('admin-delete-refused', () => {
     snapshotVmId = await createVm(`rg-admsnapvm-${RUN}`, smallTier, network.id)
     await waitVm('ADM-12 vm running', snapshotVmId, (v) => runs(v) && v.transition === null)
 
-    // The window is from the 202 to the worker's report (lease poll 2 s plus Incus's snapshot): the delete goes at once,
-    // as VMS-05's does. The admin session is opened first, so its sign-in does not eat the window; a snapshot already
-    // at rest before the delete is a lap the race lost, not a measure of the rule.
+    // The window is from the 202 to the worker's report (lease poll 2 s plus Incus's snapshot): the delete goes
+    // right after one read of the snapshot. The admin session is opened first, so its sign-in does not eat the
+    // window; a snapshot already at rest at that read is a lap the race lost, not a measure of the rule.
     await get('admin', '/v1/admin/clusters')
     const created = await call('tenant', 'POST', `/v1/tenant/vms/${snapshotVmId}/snapshots`, { name: `rg-admsnap-${RUN}` }, newKey())
     expectStatus(created, 202)
@@ -139,10 +139,10 @@ test.describe.serial('admin-delete-refused', () => {
   })
 
   // titan-ops features/vm/design.md#admin-delete-audit · titan-ops features/load-balancer/design.md#lb-and-vm-network ·
-  // titan-ops architecture/domain-services.md#domain-service · OpenViCloud/titan-control-plane:Titan.Domain/Services/VmDeletion.cs (RequestAsync:
+  // titan-ops architecture/domain-services.md#domain-service · OpenViCloud/titan-control-plane:Titan.Domain/Services/VmDeletion.cs (DeleteAsync:
   // IsBackendAsync ⇒ VM_IS_LOAD_BALANCER_BACKEND, thrown before anything is saved) · OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/LoadBalancerRepository.cs
   // (IsBackendAsync: any load balancer not current Deleted, its create still waiting included) ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Admin/Vm/DeleteAdminVmCommandHandler.cs (HandleAsync: deletion.RequestAsync before auditLog.Add)
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Admin/Vm/DeleteAdminVmCommandHandler.cs (HandleAsync: deletion.DeleteAsync before auditLog.Add)
   test('ADM-13 admin delete of a load balancer backend VM is 422 VM_IS_LOAD_BALANCER_BACKEND; the VM stays, no audit row', async () => {
     const { clusterId, smallTier } = await envOf()
     const clusters = await get('admin', '/v1/admin/clusters') as any[]

@@ -315,7 +315,7 @@ test.describe.serial('vm', () => {
     expect(again.status).toBe(101)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs RequestStop · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/StopVmEndpoint.cs HandleAsync
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs Stop · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/StopVmEndpoint.cs HandleAsync
   test('VM-03 stop from Running is 202, then Stopped with desired Stopped', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/stop`), 202)
     const vm = await waitVm('VM-03', vmA, (v) => v.currentState === 'Stopped' && v.transition === null)
@@ -333,7 +333,7 @@ test.describe.serial('vm', () => {
     expect(countOf(await activityOf(nameA), 'vm.stop_requested')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs RequestStart · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/StartVmEndpoint.cs HandleAsync
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs Start · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/StartVmEndpoint.cs HandleAsync
   test('VM-05 start from Stopped is 202, then Running or Ready', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/start`), 202)
     await waitVm('VM-05', vmA, (v) => runs(v) && v.transition === null)
@@ -349,7 +349,7 @@ test.describe.serial('vm', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/StopVmCommandHandler.cs HandleAsync (stopIsWaiting: a stop repeated while it waits
-  // sends nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs RequestStart (start while another request waits)
+  // sends nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs Start (start while another request waits)
   test('VM-07 start while a stop waits is 422 VM_INVALID_STATUS', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/stop`), 202)
     // VM-04, the other half: a stop repeated while it waits is 202 and records no second request.
@@ -374,7 +374,7 @@ test.describe.serial('vm', () => {
     expect((await getVm(vmA)).name).toBe(renamed)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs RequestDelete (RequestDelete takes over a waiting stop)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs Delete (Delete takes over a waiting stop)
   test('VM-17 delete while a stop waits wins: 202, then Deleted', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmB}/stop`), 202)
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/vms/${vmB}`), 202)
@@ -428,14 +428,14 @@ test.describe.serial('vm', () => {
   })
 
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Services/NetworkDeletion.cs RequestAsync (NETWORK_NOT_EMPTY)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Services/NetworkDeletion.cs DeleteAsync (NETWORK_NOT_EMPTY)
   test('VM-21 deleting the run network while a VM lives on it is 422 NETWORK_NOT_EMPTY', async () => {
     expectError(await call('tenant', 'DELETE', `/v1/tenant/networks/${networkId}`), 422, 'NETWORK_NOT_EMPTY')
   })
 
   // titan-ops features/vm/design.md#vm-delete-observes-done · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/DeleteVmEndpoint.cs HandleAsync ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync (vm.IsTerminal: a Deleted VM answers 202) ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs EndRequest (Done of the delete: Deleted)
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync (vm.IsDeletedOrDeleting: a Deleted VM answers 202) ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs EndOperation (Done of the delete: Deleted)
   test('VM-16 delete is 202, then Deleted; a repeat is 202; renaming the Deleted VM is 422 VM_INVALID_STATUS', async () => {
     const reply = await call('tenant', 'DELETE', `/v1/tenant/vms/${vmA}`)
     expectStatus(reply, 202)

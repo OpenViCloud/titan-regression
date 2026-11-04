@@ -79,7 +79,7 @@ test.describe.serial('firewall', () => {
   }
 
   // Waits for the network's request to end, asks for its delete if it still wants to exist, waits for Deleted; its
-  // rules go with it (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs EndRequest).
+  // rules go with it (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs EndOperation).
   async function deleteNetwork(id: string): Promise<void> {
     const settled = await waitNetwork(`network ${id} at rest`, id, (n) => n.transition === null)
     if (settled.desiredExistence === 'Exists' && settled.currentExistence !== 'Deleted') {
@@ -178,7 +178,7 @@ test.describe.serial('firewall', () => {
     expect(actions.filter((a) => a === 'firewall_rule.created').length).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/ChildEntities/FirewallRule.cs RequestDelete (CreateIsWaiting ⇒ FIREWALL_RULE_NOT_READY)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Entities/FirewallRule.cs Delete (CreateIsWaiting ⇒ FIREWALL_RULE_NOT_READY)
   test('FW-02 deleting a rule whose create still waits is 422 FIREWALL_RULE_NOT_READY', async () => {
     const id = await createRule(1)
     const rule = await readRule(id)

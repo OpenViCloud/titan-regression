@@ -195,7 +195,7 @@ test.describe.serial('load-balancer', () => {
     expect(lb.listeners).toEqual([http, dns])
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Services/VmDeletion.cs RequestAsync (VM_IS_LOAD_BALANCER_BACKEND) — refused, the load balancer is not
+  // OpenViCloud/titan-control-plane:Titan.Domain/Services/VmDeletion.cs DeleteAsync (VM_IS_LOAD_BALANCER_BACKEND) — refused, the load balancer is not
   // edited behind the customer's back
   test('LB-05 deleting a VM a load balancer sends to is 422 VM_IS_LOAD_BALANCER_BACKEND', async () => {
     test.skip(lbId === '', 'LB-03 did not create a load balancer')
@@ -227,7 +227,7 @@ test.describe.serial('load-balancer', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/LoadBalancer/UpdateLoadBalancerCommandHandler.cs (HandleAsync: HasDesiredSpec —
-  // a repeat records nothing and sends nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs (RequestUpdate:
+  // a repeat records nothing and sends nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs (Update:
   // RestsOnIncus — another configuration while one waits is LOAD_BALANCER_INVALID_STATE) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/LoadBalancer/DeleteLoadBalancerCommandHandler.cs (HandleAsync: IsDeletedOrDeleting)
   // · titan-ops architecture/resource-lifecycle.md#repeat · titan-ops architecture/resource-lifecycle.md#one-key-per-request
@@ -274,8 +274,8 @@ test.describe.serial('load-balancer', () => {
     expect(countOf(actions, 'load_balancer.deleted'), 'deleted').toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs (RequestDelete: a delete replaces a waiting update;
-  // EndRequest: a report for a request no longer waiting ends nothing) ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs (Delete: a delete replaces a waiting update;
+  // EndOperation: a report for a request no longer waiting ends nothing) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/LoadBalancer/EndLoadBalancerRequestCommandHandler.cs (HandleAsync: an ignored
   // report records no outcome) · titan-ops architecture/resource-lifecycle.md#repeat · titan-ops features/load-balancer/design.md#lb-lifecycle
   test('LB-11 a DELETE while an update waits replaces it: Deleting, then Deleted, and no load_balancer.updated', async () => {
@@ -306,7 +306,7 @@ test.describe.serial('load-balancer', () => {
     expect(countOf(timeline, 'load_balancer.updated'), 'updated').toBe(0)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs (RequestDelete: CreateIsWaiting ⇒ LOAD_BALANCER_INVALID_STATE)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs (Delete: CreateIsWaiting ⇒ LOAD_BALANCER_INVALID_STATE)
   // · titan-ops features/load-balancer/design.md#lb-lifecycle
   test('LB-13 a DELETE while the create waits is 422 LOAD_BALANCER_INVALID_STATE; after Exists it is 202, then Deleted', async () => {
     test.skip(lbId === '', 'LB-03 did not create a load balancer')
