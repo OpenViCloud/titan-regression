@@ -162,7 +162,7 @@ create a network and beta-user may hold one.
 | 9 | `tenant` | tenant, quota, terms consent, approval on sign-in, the admin status route's error order | yes | yes | yes, except TEN-14, TEN-15 (plan only) |
 | 10 | `api-token` | API tokens: create, call the API with one, duplicate name/secret, delete ⇒ `401`, unknown token | yes | yes | yes |
 | 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes |
-| 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes, except BIL-09, BIL-17, BIL-19 to BIL-23 (plan only), BIL-18 (`kubectl` read by the agent, not the runner); BIL-03, BIL-08, BIL-10, BIL-12 (extended) |
+| 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes, except BIL-09, BIL-17, BIL-19 to BIL-23 (plan only), BIL-18 (`kubectl` read by the agent, next to `check-wallets`); BIL-03, BIL-08, BIL-10, BIL-12 (extended) |
 | 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no | yes | yes, except CON-06 (extended) |
 | 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once | no | yes | yes, except CC-05 to CC-12 (plan only) |
 | 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API), except ADM-12 to ADM-16 (plan only); ADM-05, ADM-06 (extended) |
@@ -177,7 +177,7 @@ create a network and beta-user may hold one.
 | 24 | `control-plane-image` | the control plane image the release environment runs comes from `OpenViCloud/titan-control-plane`, pulls anonymously, digest matches the pod — `gh`/`curl`/`kubectl` reads on the agent's machine | no | yes | no |
 
 Steps outside the runner: before `billing` the agent runs `billing/seed-invoices.sql` (psql on the environment's
-database; on the release environment an approved `L-x`), after `concurrency` it runs `billing/check-wallets.sql` (read only, BIL-14);
+database; on the release environment an approved `L-x`), after `concurrency` it runs `billing/check-wallets.sql` (read only, BIL-14) and BIL-18's read-only `SELECT` on `core.usage_records`;
 modules `cli` and `terraform-provider` need the agent to copy a binary into the pod when the spec logs `BINARY_WAIT`
 (`cli`: the CLI built for the node's architecture; `terraform-provider`: `GOOS=linux GOARCH=<node> CGO_ENABLED=0 go test -c`
 of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud`).
