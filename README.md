@@ -162,7 +162,7 @@ create a network and beta-user may hold one.
 | 9 | `tenant` | tenant, quota, terms consent, approval on sign-in, the admin status route's error order | yes | yes | yes, except TEN-14, TEN-15 (plan only) |
 | 10 | `api-token` | API tokens: create, call the API with one, duplicate name/secret, delete ⇒ `401`, unknown token | yes | yes | yes |
 | 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes |
-| 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes, except BIL-09, BIL-17, BIL-18, BIL-19 to BIL-23 (plan only); BIL-03, BIL-08, BIL-10, BIL-12 (extended) |
+| 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes, except BIL-09, BIL-17, BIL-19 to BIL-23 (plan only), BIL-18 (`kubectl` read by the agent, not the runner); BIL-03, BIL-08, BIL-10, BIL-12 (extended) |
 | 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no | yes | yes, except CON-06 (extended) |
 | 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once | no | yes | yes, except CC-05 to CC-12 (plan only) |
 | 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API), except ADM-12 to ADM-16 (plan only); ADM-05, ADM-06 (extended) |
@@ -196,7 +196,7 @@ with CC-04 (CC-03 pays the invoice the seed leaves; the serial spec then skips C
 **Spec** is `yes` when every case of the module in `plan.md` has a spec that ran green on the release environment at a release, except `(host)` cases (Phase 4
 of the release), **NOT COVERED** cases (the reason is in `plan.md`) and cases not applicable to the measured
 environment (the spec calls `test.skip` with the reason, e.g. VM-12 with a single cluster). `ACT-*` cases are measured
-in the module that owns the resource. A case with no spec yet gets one at the next release, and the cell names it as `yes, except <ID> (plan only)` until then; a case whose row gained checks its spec does not make yet is named `<ID> (extended)` until the spec catches up; a case no spec can be
+in the module that owns the resource. A case with no spec yet gets one at the next release, and the cell names it as `yes, except <ID> (plan only)` until then; a case whose row changed (more checks, or an expectation changed) in a way its spec does not check yet is named `<ID> (extended)` until the spec catches up; a case no spec can be
 written for and that Phase 4 does not measure by hand is **NOT COVERED**, with the reason in its row of `plan.md`. Specs pick the first cluster with a listed template (`lib/fixtures.ts`,
 `envOf()`); prd's cluster is `singapore01`.
 
