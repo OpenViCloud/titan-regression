@@ -99,8 +99,8 @@ for p in json.load(sys.stdin)["items"]:
 
 # ADM-15 (admin/stuck-requests) asks for the cluster's incus-worker stopped, then started again, by two log lines. With
 # REGRESSION_WORKER_APPS, the ArgoCD Applications whose auto-sync would bring the worker back, root first (dev:
-# root-local,incus-worker-local · prd: incus-worker-prd), the runner answers both; unset, the agent may answer by hand on dev only (on the release environment nobody does:
-# the spec skips as N/A after 10 minutes).
+# root-local,incus-worker-local · prd: incus-worker-prd), the runner answers both; unset, the agent may answer by hand
+# on dev only (on the release environment nobody does: the spec skips as N/A after 10 minutes).
 # Auto-sync and replicas go back as they were: on WORKER_START_WAIT or ADM15_GAVE_UP, on a stop that fails, and on any
 # exit while the worker is down.
 worker_apps="${REGRESSION_WORKER_APPS:-}"
