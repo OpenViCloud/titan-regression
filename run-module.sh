@@ -99,7 +99,8 @@ for p in json.load(sys.stdin)["items"]:
 
 # ADM-15 (admin/stuck-requests) asks for the cluster's incus-worker stopped, then started again, by two log lines. With
 # REGRESSION_WORKER_APPS, the ArgoCD Applications whose auto-sync would bring the worker back, root first (dev:
-# root-local,incus-worker-local · prd: incus-worker-prd), the runner answers both; unset, the agent answers by hand.
+# root-local,incus-worker-local · prd: incus-worker-prd), the runner answers both; unset, the agent may answer by hand on dev only (on the release environment nobody does:
+# the spec skips as N/A after 10 minutes).
 # Auto-sync and replicas go back as they were: on WORKER_START_WAIT or ADM15_GAVE_UP, on a stop that fails, and on any
 # exit while the worker is down.
 worker_apps="${REGRESSION_WORKER_APPS:-}"
@@ -107,7 +108,7 @@ worker="up"; worker_replicas=""
 stop_worker() {
   local app
   worker="stopping"
-  rm -f "$out"/worker-autosync-*.json
+  rm -f "${out:?}"/worker-autosync-*.json
   worker_replicas="$(k -n "$app_ns" get deploy incus-worker -o 'jsonpath={.spec.replicas}')" || return 1
   for app in ${worker_apps//,/ }; do
     k -n argocd get application "$app" -o json \
@@ -225,8 +226,8 @@ status=1
 if grep -q '^REGRESSION_EXIT=0$' "$out/runner.log"; then status=0; fi
 
 if [ "$phase" = "Running" ]; then
-  # A rerun into the same work dir (a lane runs cleanup twice) must not compare the earlier run's files.
-  rm -rf "$out/results"
+  # A rerun into the same work dir (by hand, or run-lanes.py with the same --out) must not compare the earlier run's files.
+  rm -rf "${out:?}/results"
   k -n "$ns" cp "$pod:/work/results" "$out/results" >/dev/null
   k -n "$ns" exec "$pod" -- sh -c 'cd /work/results && find . -type f ! -name .done -exec sha256sum {} +' | sort -k2 > "$out/sha-pod.txt"
   sha_local() { (cd "$out/results" && find . -type f ! -name .done -exec shasum -a 256 {} + | sort -k2) > "$out/sha-local.txt"; }

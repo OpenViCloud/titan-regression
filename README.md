@@ -188,7 +188,8 @@ of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud
 `incus-worker` stopped and started when the spec logs `WORKER_STOP_WAIT` and `WORKER_START_WAIT`: `run-module.sh` does it
 when `REGRESSION_WORKER_APPS` lists the ArgoCD Applications that would bring the worker back, root first (dev
 `root-local,incus-worker-local`, release environment `incus-worker-prd`), and puts their auto-sync and the replicas back;
-every tenant of the cluster feels it, so on the release environment it runs only under an approved `L-x`.
+every tenant of the cluster feels it, so on the release environment it runs only under an approved `L-x` (never by
+hand: without it the spec skips as N/A after 10 minutes), and only in the sequential run, never beside another module.
 
 Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — state changed on the Incus host outside
 OpenViCloud, needs an approved `L-x` command; `site` — the public site through Playwright MCP on the agent's machine;
