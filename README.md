@@ -52,13 +52,15 @@ up by hand.
    (`patch-job.py` points the job's `specs` volume at that ConfigMap).
 3. **Wait** for the job's own pod to be `Running` (`--field-selector=status.phase=Running`: a recreated job leaves its
    old pod behind), then poll `kubectl exec <pod> -- test -f /work/results/.done`; stop as soon as the pod is `Failed` or
-   `Succeeded` (the runner exits early, for example `NO_SPECS`, without writing `.done`). Then read `REGRESSION_EXIT=`
+   `Succeeded` (the runner exits early, for example `NO_SPECS`, without writing `.done`). A phase read that fails
+   (kubectl prints nothing) is read again every 15 s, up to 20 times in a row. Then read `REGRESSION_EXIT=`
    from `kubectl logs <pod>` (not `-f`).
 4. **Copy the results** (`kubectl cp <pod>:/work/results …`) while the pod is still held (30 minutes by default), in
    the same step as 3, and compare the sha256 of every file with `sha256sum` in the pod; a file that differs is copied
-   again in chunks (`dd bs=16384 skip=N count=1 | base64`) until it matches.
+   once more on its own (`SHA256_DIFFERS <file>`), and one that still differs is named and copied by hand in chunks
+   (`dd bs=16384 skip=N count=1 | base64`) until it matches.
 5. **Delete the job and its ConfigMap** once every file matched. A mismatch (or `NO_POD`, `POD_NOT_STARTED`,
-   `BINARY_SHA_MISMATCH`) exits 1 and keeps both for a look: delete both by hand when done.
+   `BINARY_SHA_MISMATCH`, a phase unreadable 20 times) exits 1 and keeps both for a look: delete both by hand when done.
 
 The script also leaves in `<log dir>`: `control-plane.log` and `incus-worker.log` since the job was created, of the
 pods alive when the module ended (a pod replaced mid-run has none) — for diagnosis; the verdict comes from the specs —
@@ -138,6 +140,7 @@ python3 test_count_cases.py
 python3 test_check_screenshots.py
 python3 test_trim_cp_log.py
 python3 test_patch_job.py
+python3 test_run_module.py
 python3 test_run_lanes.py
 python3 run-lanes.py --check
 ```
@@ -165,7 +168,7 @@ create a network and beta-user may hold one.
 | 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes, except BIL-18 (not covered) |
 | 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no | yes | yes, except CON-14 (plan only), CON-15 (not covered) |
 | 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once | no | yes | yes |
-| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API), except ADM-15 (`L-x`, a job of its own: `run-module.sh` on `admin/stuck-requests`) |
+| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API), except ADM-15 (`L-x`, a job of its own: `run-module.sh` on `admin/stuck-requests`, with `REGRESSION_WORKER_APPS`) |
 | 16 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: Keycloak's database `keycloak` as a `Database` object, ArgoCD's health checks, schema `public` for its owner only, the name CNPG archives under and `ContinuousArchiving` (`kubectl` reads) | no | yes | yes (API and admin portal screens); `(host)`, `L-x` and `kubectl` cases in Phase 4 of the release |
 | 17 | `portal-ui` | customer portal end to end, signed in | no | yes | yes |
 | 18 | `tenant-suspend` | suspended ⇒ writes refused, reads allowed; reactivated | no | yes | yes |

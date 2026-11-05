@@ -22,8 +22,11 @@
 #   <work dir>    runner output, outside the repo (scratchpad)
 #   <log dir>     control-plane.log + incus-worker.log + <ID>-*.png: release evidence/<module>[-<lane>][-<step label>]/
 #                 (run-lanes.py adds the lane for a module both lanes run); its *.png are deleted first
-# Exit 0 = REGRESSION_EXIT=0 and every result file copied with a matching sha256. A sha256 mismatch keeps the job
-# for a chunked copy.
+# Exit 0 = REGRESSION_EXIT=0 and every result file copied with a matching sha256. A file whose sha256 differs is copied
+# once more on its own; one that still differs keeps the job for a chunked copy.
+# REGRESSION_WORKER_APPS (ADM-15 only): the ArgoCD Applications that would bring incus-worker back, root first; the runner
+# then stops and starts the worker when the spec asks (below). It is a write every tenant of the cluster feels: on prd an
+# approved L-x.
 set -uo pipefail
 
 if [ "$#" -lt 6 ] || [ "$#" -gt 7 ]; then
@@ -94,6 +97,41 @@ for p in json.load(sys.stdin)["items"]:
   echo "$app.log: $(wc -l < "$file" | tr -d ' ') lines"
 }
 
+# ADM-15 (admin/stuck-requests) asks for the cluster's incus-worker stopped, then started again, by two log lines. With
+# REGRESSION_WORKER_APPS, the ArgoCD Applications whose auto-sync would bring the worker back, root first (dev:
+# root-local,incus-worker-local · prd: incus-worker-prd), the runner answers both; unset, the agent answers by hand.
+# Auto-sync and replicas go back as they were: on WORKER_START_WAIT or ADM15_GAVE_UP, on a stop that fails, and on any
+# exit while the worker is down.
+worker_apps="${REGRESSION_WORKER_APPS:-}"
+worker="up"; worker_replicas=""
+stop_worker() {
+  local app
+  worker="stopping"
+  worker_replicas="$(k -n "$app_ns" get deploy incus-worker -o 'jsonpath={.spec.replicas}')" || return 1
+  for app in ${worker_apps//,/ }; do
+    k -n argocd get application "$app" -o json \
+      | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin)["spec"].get("syncPolicy", {}).get("automated")))' \
+      > "$out/worker-autosync-$app.json" || return 1
+    k -n argocd patch application "$app" --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}' >/dev/null || return 1
+  done
+  k -n "$app_ns" scale deploy/incus-worker --replicas=0 >/dev/null || return 1
+  k -n "$app_ns" wait --for=delete pod -l app=incus-worker --timeout=5m >/dev/null || return 1
+  worker="stopped"
+}
+start_worker() {
+  local app apps=""
+  for app in ${worker_apps//,/ }; do apps="$app $apps"; done
+  if [ -n "$worker_replicas" ]; then k -n "$app_ns" scale deploy/incus-worker --replicas="$worker_replicas" >/dev/null; fi
+  for app in $apps; do
+    if [ -s "$out/worker-autosync-$app.json" ]; then
+      k -n argocd patch application "$app" --type merge \
+        -p "{\"spec\":{\"syncPolicy\":{\"automated\":$(cat "$out/worker-autosync-$app.json")}}}" >/dev/null
+    fi
+  done
+  k -n "$app_ns" rollout status deploy/incus-worker --timeout=10m >/dev/null && worker="up"
+}
+trap 'if [ "$worker" != up ]; then echo "worker still stopped at exit — putting it back"; start_worker; fi' EXIT
+
 runner_dir="$(cd "$(dirname "$0")" && pwd)"
 runner_state="clean"
 if ! git -C "$runner_dir" diff --quiet HEAD -- "$runner_dir/run-module.sh"; then runner_state="dirty"; fi
@@ -123,14 +161,43 @@ echo "pod: $pod phase: $phase"
 if [ -z "$pod" ]; then echo "NO_POD after 10 minutes — job kept for a look"; exit 1; fi
 case "$phase" in Running|Failed|Succeeded) ;; *) echo "POD_NOT_STARTED phase=$phase after 10 minutes — job kept for a look"; exit 1 ;; esac
 
-copied=0
+copied=0; unreadable=0; answered=""
 while true; do
-  phase="$(phase_of "$pod")"
+  # A failing kubectl prints nothing: an empty phase is a read that failed, not a pod that ended.
+  phase="$(phase_of "$pod" 2>/dev/null)"
+  if [ -z "$phase" ]; then
+    unreadable=$((unreadable + 1))
+    if [ "$unreadable" -gt 20 ]; then echo "pod phase unreadable 20 times — job kept for a look"; exit 1; fi
+    echo "pod phase unreadable (#$unreadable), reading again in 15 s"; sleep 15; continue
+  fi
+  unreadable=0
   if [ "$phase" != "Running" ]; then echo "pod ended: $phase (no .done)"; break; fi
   if k -n "$ns" exec "$pod" -- test -f /work/results/.done 2>/dev/null; then break; fi
-  if [ -n "$bin" ] && [ "$copied" = 0 ]; then
+  if { [ -n "$bin" ] && [ "$copied" = 0 ]; } || { [ -n "$worker_apps" ] && [ "$answered" != start ]; }; then
     # Logs into a variable first: `kubectl logs | grep -q` under pipefail turns false when grep exits early.
     logs="$(k -n "$ns" logs "$pod" 2>/dev/null)"
+  fi
+  if [ -n "$worker_apps" ]; then
+    if [ -z "$answered" ] && grep -q WORKER_STOP_WAIT <<< "$logs"; then
+      answered=stop
+      if stop_worker; then
+        k -n "$ns" exec "$pod" -- touch /work/adm-15/worker-stopped
+        echo "ADM-15 worker stopped: auto-sync off ($worker_apps), replicas $worker_replicas → 0"
+      else
+        echo "WORKER_STOP_FAILED — putting the worker back; the spec gives up after 10 minutes"
+        start_worker
+      fi
+    elif [ "$answered" = stop ] && grep -q -e WORKER_START_WAIT -e ADM15_GAVE_UP <<< "$logs"; then
+      answered=start
+      if start_worker; then
+        k -n "$ns" exec "$pod" -- touch /work/adm-15/worker-started
+        echo "ADM-15 worker started: replicas $worker_replicas, auto-sync back"
+      else
+        echo "WORKER_START_FAILED — incus-worker not rolled out in 10 minutes"
+      fi
+    fi
+  fi
+  if [ -n "$bin" ] && [ "$copied" = 0 ]; then
     if grep -q BINARY_WAIT <<< "$logs"; then
       k -n "$ns" exec "$pod" -- mkdir -p /work/bin
       k -n "$ns" cp "$bin" "$pod:/work/bin/openvicloud" >/dev/null
@@ -156,11 +223,25 @@ if grep -q '^REGRESSION_EXIT=0$' "$out/runner.log"; then status=0; fi
 if [ "$phase" = "Running" ]; then
   k -n "$ns" cp "$pod:/work/results" "$out/results" >/dev/null
   k -n "$ns" exec "$pod" -- sh -c 'cd /work/results && find . -type f ! -name .done -exec sha256sum {} +' | sort -k2 > "$out/sha-pod.txt"
-  (cd "$out/results" && find . -type f ! -name .done -exec shasum -a 256 {} + | sort -k2) > "$out/sha-local.txt"
+  sha_local() { (cd "$out/results" && find . -type f ! -name .done -exec shasum -a 256 {} + | sort -k2) > "$out/sha-local.txt"; }
+  # Pod lines with no equal local line; the path starts after the 64-hex sum and two spaces.
+  differing() { grep -vxFf "$out/sha-local.txt" "$out/sha-pod.txt" | cut -c67-; }
+  sha_local
+  # A file that differs is copied once more on its own before the job is kept: the run then says what it measured, and
+  # a file that still differs is named for the chunked copy.
+  if [ -s "$out/sha-pod.txt" ] && ! diff -q "$out/sha-pod.txt" "$out/sha-local.txt" >/dev/null; then
+    while IFS= read -r file; do
+      [ -n "$file" ] || continue
+      echo "SHA256_DIFFERS $file — copying it again"
+      mkdir -p "$out/results/$(dirname "$file")"
+      k -n "$ns" cp "$pod:/work/results/${file#./}" "$out/results/${file#./}" >/dev/null
+    done <<< "$(differing)"
+    sha_local
+  fi
   if [ -s "$out/sha-pod.txt" ] && diff -q "$out/sha-pod.txt" "$out/sha-local.txt" >/dev/null; then
     echo "SHA256_MATCH $(wc -l < "$out/sha-pod.txt" | tr -d ' ') file(s)"
   else
-    echo "SHA256_MISMATCH — job $job kept for a chunked copy"
+    echo "SHA256_MISMATCH $(differing | tr '\n' ' ')— job $job kept for a chunked copy"
     exit 1
   fi
   # Top level only: results/test-output/ is Playwright's own folder.
