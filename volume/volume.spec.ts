@@ -377,7 +377,7 @@ test.describe.serial('volume', () => {
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs Delete (SnapshotQuotaUsage: a snapshot being deleted
   // no longer counts), FinishOperation ·
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VolumeReports.cs FinishOperation (the snapshots waiting on their delete, read before the call) ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Entities/VolumeSnapshot.cs EndWithItsVolume, FinishOperation (IsTerminal)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Entities/VolumeSnapshot.cs EndWithItsVolume, FinishOperation (IsDeleted)
   // — titan-ops architecture/intent-and-observation.md#terminal-state-absorbs
   test('VOL-14 a volume deleted while its only snapshot is being deleted: 202, both Deleted, one volume_snapshot.deleted', async () => {
     const name = `rg-vrs-${RUN}`

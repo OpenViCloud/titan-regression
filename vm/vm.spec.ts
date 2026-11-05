@@ -447,7 +447,7 @@ test.describe.serial('vm', () => {
     expect(countOf(actions, 'vm.delete_requested')).toBe(1)
     expect(countOf(actions, 'vm.deleted')).toBe(1)
 
-    // A Deleted VM keeps its name: OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs Rename (IsTerminal ⇒ VM_INVALID_STATUS),
+    // A Deleted VM keeps its name: OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs Rename (IsDeleted ⇒ VM_INVALID_STATUS),
     // reached after RenameVmCommandHandler HandleAsync finds the new name free.
     expectError(await call('tenant', 'PATCH', `/v1/tenant/vms/${vmA}`, { name: `rg-vmdel-${RUN}` }), 422, 'VM_INVALID_STATUS')
     expect((await getVm(vmA)).name).toBe(renamed)
