@@ -79,7 +79,7 @@ test.describe.serial('firewall', () => {
   }
 
   // Waits for the network's request to end, asks for its delete if it still wants to exist, waits for Deleted; its
-  // rules go with it (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs EndOperation).
+  // rules go with it (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs FinishOperation).
   async function deleteNetwork(id: string): Promise<void> {
     const settled = await waitNetwork(`network ${id} at rest`, id, (n) => n.transition === null)
     if (settled.desiredExistence === 'Exists' && settled.currentExistence !== 'Deleted') {

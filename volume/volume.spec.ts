@@ -375,9 +375,9 @@ test.describe.serial('volume', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs Delete (SnapshotQuotaUsage: a snapshot being deleted
-  // no longer counts), EndOperation · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Results/VolumeOperationEnded.cs SnapshotsWhoseDeleteEnded ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VolumeReports.cs RecordEnded ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Entities/VolumeSnapshot.cs EndWithItsVolume, EndOperation (IsTerminal)
+  // no longer counts), FinishOperation ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VolumeReports.cs FinishOperation (the snapshots waiting on their delete, read before the call) ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Entities/VolumeSnapshot.cs EndWithItsVolume, FinishOperation (IsTerminal)
   // — titan-ops architecture/intent-and-observation.md#terminal-state-absorbs
   test('VOL-14 a volume deleted while its only snapshot is being deleted: 202, both Deleted, one volume_snapshot.deleted', async () => {
     const name = `rg-vrs-${RUN}`
@@ -559,7 +559,7 @@ test.describe.serial('volume', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync (ListAttachedToVmLockedAsync, volume.ReleaseFromVmDelete),
-  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs RecordEndedAsync (volume.MarkDetachedByVmDelete).
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs FinishOperationAsync (volume.MarkDetachedByVmDelete).
   // The spec measures the end without desiredAttachedVmId; plan.md VOL-09 also expects no transition while the VM's delete
   // waits, then no desired attachment and a delete that goes through, and the release that writes its spec tightens it.
   test('VOL-09 deleting a VM releases the volume attached to it, which stays', async () => {

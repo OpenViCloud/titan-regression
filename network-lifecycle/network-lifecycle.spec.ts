@@ -56,7 +56,7 @@ test.describe.serial('network-lifecycle', () => {
     expect(countOf(actions, 'network.deleted')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs EndOperation (the delete's Done ends every live
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs FinishOperation (the delete's Done ends every live
   // rule of the network — the rule is the network's child entity); the rule list drops Deleted rows
   // (OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/FirewallRuleRepository.cs ListByNetworkAsync).
   // No outcome row: one is recorded only for a rule whose own delete was waiting

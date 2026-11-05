@@ -435,7 +435,7 @@ test.describe.serial('vm', () => {
 
   // titan-ops features/vm/design.md#vm-delete-observes-done · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/DeleteVmEndpoint.cs HandleAsync ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync (vm.IsDeletedOrDeleting: a Deleted VM answers 202) ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs EndOperation (Done of the delete: Deleted)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs FinishOperation (Done of the delete: Deleted)
   test('VM-16 delete is 202, then Deleted; a repeat is 202; renaming the Deleted VM is 422 VM_INVALID_STATUS', async () => {
     const reply = await call('tenant', 'DELETE', `/v1/tenant/vms/${vmA}`)
     expectStatus(reply, 202)
