@@ -7,9 +7,11 @@ import { RUN, createVm, deleteVmAndWait, envOf, getVm, readVolume, runNetwork, r
 
 // Case ADM-15 of plan.md (L-x; on prd only until titan-ops status/known-state.md#first-real-customer). A job of its own
 // (run-module.sh … admin/stuck-requests …): the admin module's ConfigMap takes only the files of admin/, so this one never
-// runs with it. The runner cannot stop the incus-worker, so the agent does, outside the runner, on two log lines:
+// runs with it. The worker is stopped and started on two log lines, by run-module.sh when REGRESSION_WORKER_APPS names
+// the worker's ArgoCD Applications, else, on dev only, by the agent outside the runner (on the release environment only
+// the runner, under an approved L-x; nobody answers by hand there):
 //   WORKER_STOP_WAIT  — turn off auto-sync of the worker's Application, scale the worker to 0, wait until no worker pod
-//                       is left, then touch /work/adm-15/worker-stopped in this pod (or /work/adm-15/skip: no L-x ⇒ N/A);
+//                       is left, then touch /work/adm-15/worker-stopped in this pod (or, on dev, /work/adm-15/skip: N/A at once);
 //   WORKER_START_WAIT — scale the worker back, turn auto-sync back on, wait until the worker pod is Ready, then touch
 //                       /work/adm-15/worker-started.
 // ADM15_GAVE_UP means the spec stopped waiting for WORKER_STOP_WAIT's answer: the worker must be (or be put) back.

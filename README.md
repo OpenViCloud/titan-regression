@@ -52,13 +52,16 @@ up by hand.
    (`patch-job.py` points the job's `specs` volume at that ConfigMap).
 3. **Wait** for the job's own pod to be `Running` (`--field-selector=status.phase=Running`: a recreated job leaves its
    old pod behind), then poll `kubectl exec <pod> -- test -f /work/results/.done`; stop as soon as the pod is `Failed` or
-   `Succeeded` (the runner exits early, for example `NO_SPECS`, without writing `.done`). Then read `REGRESSION_EXIT=`
+   `Succeeded` (the runner exits early, for example `NO_SPECS`, without writing `.done`). A phase read that fails
+   (kubectl prints nothing) is read again every 15 s, up to 20 times in a row. Then read `REGRESSION_EXIT=`
    from `kubectl logs <pod>` (not `-f`).
-4. **Copy the results** (`kubectl cp <pod>:/work/results …`) while the pod is still held (30 minutes by default), in
+4. **Copy the results** (`kubectl cp <pod>:/work/results …` into an emptied `<work dir>/results`) while the pod is still held (30 minutes by default), in
    the same step as 3, and compare the sha256 of every file with `sha256sum` in the pod; a file that differs is copied
-   again in chunks (`dd bs=16384 skip=N count=1 | base64`) until it matches.
+   once more on its own (`SHA256_DIFFERS <file>`), and one that still differs is named (a file only on the agent's side
+   is not: it shows in `sha-local.txt`) and copied by hand in chunks
+   (`dd bs=16384 skip=N count=1 | base64`) until it matches.
 5. **Delete the job and its ConfigMap** once every file matched. A mismatch (or `NO_POD`, `POD_NOT_STARTED`,
-   `BINARY_SHA_MISMATCH`) exits 1 and keeps both for a look: delete both by hand when done.
+   `BINARY_SHA_MISMATCH`, a phase unreadable 21 times in a row) exits 1 and keeps both for a look: delete both by hand when done.
 
 The script also leaves in `<log dir>`: `control-plane.log` and `incus-worker.log` since the job was created, of the
 pods alive when the module ended (a pod replaced mid-run has none) — for diagnosis; the verdict comes from the specs —
@@ -138,6 +141,7 @@ python3 test_count_cases.py
 python3 test_check_screenshots.py
 python3 test_trim_cp_log.py
 python3 test_patch_job.py
+python3 test_run_module.py
 python3 test_run_lanes.py
 python3 run-lanes.py --check
 ```
@@ -165,7 +169,7 @@ create a network and beta-user may hold one.
 | 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes, except BIL-18 (not covered) |
 | 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no | yes | yes, except CON-14 (plan only), CON-15 (not covered) |
 | 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once | no | yes | yes |
-| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API), except ADM-15 (`L-x`, a job of its own: `run-module.sh` on `admin/stuck-requests`) |
+| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API), except ADM-15 (`L-x`, a job of its own: `run-module.sh` on `admin/stuck-requests`, with `REGRESSION_WORKER_APPS`) |
 | 16 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: Keycloak's database `keycloak` as a `Database` object, ArgoCD's health checks, schema `public` for its owner only, the name CNPG archives under and `ContinuousArchiving` (`kubectl` reads) | no | yes | yes (API and admin portal screens); `(host)`, `L-x` and `kubectl` cases in Phase 4 of the release |
 | 17 | `portal-ui` | customer portal end to end, signed in | no | yes | yes |
 | 18 | `tenant-suspend` | suspended ⇒ writes refused, reads allowed; reactivated | no | yes | yes |
@@ -180,7 +184,12 @@ Steps outside the runner: before `billing` the agent runs `billing/seed-invoices
 database; on the release environment an approved `L-x`), after `concurrency` it runs `billing/check-wallets.sql` (read only, BIL-14);
 modules `cli` and `terraform-provider` need the agent to copy a binary into the pod when the spec logs `BINARY_WAIT`
 (`cli`: the CLI built for the node's architecture; `terraform-provider`: `GOOS=linux GOARCH=<node> CGO_ENABLED=0 go test -c`
-of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud`).
+of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud`); `admin/stuck-requests` (ADM-15) needs the
+`incus-worker` stopped and started when the spec logs `WORKER_STOP_WAIT` and `WORKER_START_WAIT`: `run-module.sh` does it
+when `REGRESSION_WORKER_APPS` lists the ArgoCD Applications that would bring the worker back, root first (dev
+`root-local,incus-worker-local`, release environment `incus-worker-prd`), and puts their auto-sync and the replicas back;
+every tenant of the cluster feels it, so on the release environment it runs only under an approved `L-x` (never by
+hand: without it the spec skips as N/A after 10 minutes), and only in the sequential run, never beside another module.
 
 Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — state changed on the Incus host outside
 OpenViCloud, needs an approved `L-x` command; `site` — the public site through Playwright MCP on the agent's machine;
