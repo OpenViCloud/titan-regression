@@ -86,14 +86,18 @@ FAKE_KUBECTL = textwrap.dedent('''\
 ''')
 
 
-def run(phases, done_reads=0, **extra_env):
-    """(exit code, output, kubectl calls) of one run-module.sh run of module `mod` against the fake."""
+def run(phases, done_reads=0, earlier=None, **extra_env):
+    """(exit code, output, kubectl calls) of one run-module.sh run of module `mod` against the fake. `earlier` maps a path
+    under <work dir> to text an earlier run left there."""
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
         bin_dir, state, src = tmp / "bin", tmp / "state", tmp / "src"
         for d in (bin_dir, state, src / "lib", src / "mod"):
             d.mkdir(parents=True)
         (src / "lib" / "helpers.ts").write_text("")
+        for rel, text in (earlier or {}).items():
+            (tmp / "out" / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp / "out" / rel).write_text(text)
         (src / "mod" / "mod.spec.ts").write_text("")
         (bin_dir / "kubectl").write_text(FAKE_KUBECTL)
         (bin_dir / "sleep").write_text("#!/bin/sh\nexit 0\n")
@@ -206,6 +210,13 @@ class WorkerStopTest(unittest.TestCase):
         self.assertIn("worker still stopped", out)
         self.assertEqual(code, 0, out)
 
+    def test_a_stop_that_fails_before_saving_restores_nothing_an_earlier_run_saved(self):
+        code, out, calls = run("Running", done_reads=7, FAKE_LOGS=STOP, FAKE_FAIL="get deploy incus-worker",
+                               earlier={"worker-autosync-root-local.json": '{"prune": false}'}, **APPS)
+        self.assertIn("WORKER_STOP_FAILED", out)
+        self.assertNotIn("patch application", calls)
+        self.assertEqual(code, 0, out)
+
     def test_a_run_that_ends_with_the_worker_stopped_puts_it_back(self):
         code, out, calls = run("Running,Running,Running,Running,Failed", done_reads=99, FAKE_LOGS=STOP, **APPS)
         steps = worker_calls(calls)
@@ -230,6 +241,11 @@ class ResultCopyTest(unittest.TestCase):
         self.assertIn("SHA256_MISMATCH ./a.txt — job regression-mod-t1 kept for a chunked copy", out)
         self.assertNotIn("delete job", calls)
         self.assertEqual(code, 1, out)
+
+    def test_results_of_an_earlier_run_in_the_same_work_dir_are_not_compared(self):
+        code, out, _ = run("Running", earlier={"results/old.txt": "from an earlier run\n"})
+        self.assertIn("SHA256_MATCH 1 file(s)", out)
+        self.assertEqual(code, 0, out)
 
     def test_a_file_only_on_this_side_copies_nothing_again_and_keeps_the_job(self):
         code, out, calls = run("Running", FAKE_LOCAL_EXTRA="1")

@@ -225,6 +225,8 @@ status=1
 if grep -q '^REGRESSION_EXIT=0$' "$out/runner.log"; then status=0; fi
 
 if [ "$phase" = "Running" ]; then
+  # A rerun into the same work dir (a lane runs cleanup twice) must not compare the earlier run's files.
+  rm -rf "$out/results"
   k -n "$ns" cp "$pod:/work/results" "$out/results" >/dev/null
   k -n "$ns" exec "$pod" -- sh -c 'cd /work/results && find . -type f ! -name .done -exec sha256sum {} +' | sort -k2 > "$out/sha-pod.txt"
   sha_local() { (cd "$out/results" && find . -type f ! -name .done -exec shasum -a 256 {} + | sort -k2) > "$out/sha-local.txt"; }

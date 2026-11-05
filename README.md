@@ -55,13 +55,13 @@ up by hand.
    `Succeeded` (the runner exits early, for example `NO_SPECS`, without writing `.done`). A phase read that fails
    (kubectl prints nothing) is read again every 15 s, up to 20 times in a row. Then read `REGRESSION_EXIT=`
    from `kubectl logs <pod>` (not `-f`).
-4. **Copy the results** (`kubectl cp <pod>:/work/results …`) while the pod is still held (30 minutes by default), in
+4. **Copy the results** (`kubectl cp <pod>:/work/results …` into an emptied `<work dir>/results`) while the pod is still held (30 minutes by default), in
    the same step as 3, and compare the sha256 of every file with `sha256sum` in the pod; a file that differs is copied
    once more on its own (`SHA256_DIFFERS <file>`), and one that still differs is named (a file only on the agent's side
    is not: it shows in `sha-local.txt`) and copied by hand in chunks
    (`dd bs=16384 skip=N count=1 | base64`) until it matches.
 5. **Delete the job and its ConfigMap** once every file matched. A mismatch (or `NO_POD`, `POD_NOT_STARTED`,
-   `BINARY_SHA_MISMATCH`, a phase unreadable 20 times) exits 1 and keeps both for a look: delete both by hand when done.
+   `BINARY_SHA_MISMATCH`, a phase unreadable 21 times in a row) exits 1 and keeps both for a look: delete both by hand when done.
 
 The script also leaves in `<log dir>`: `control-plane.log` and `incus-worker.log` since the job was created, of the
 pods alive when the module ended (a pod replaced mid-run has none) — for diagnosis; the verdict comes from the specs —
