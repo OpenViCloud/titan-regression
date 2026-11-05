@@ -533,7 +533,7 @@ Nguồn cho người đo: `OpenViCloud/titan-landing:site/src/scripts/language.j
 
 ---
 
-## worker — image và danh sách kind (máy agent, chỉ env của release — không runner)
+## worker — image, danh sách kind và lệnh thiếu `requestId` (máy agent, chỉ env của release — không runner)
 
 Image worker do repo `OpenViCloud/titan-incus-worker` build; dev kéo tag bằng `OpenViCloud/titan-local-cluster:scripts/pull-images.py`, prd nhận tên và tag của image dev đang chạy lúc promote. `<wsha>` = sha của tag image worker mà prd đang chạy; `<sha>` = commit titan-ops release đo; `<csha>` = commit `OpenViCloud/titan-control-plane` mà release ghim (release ghi commit và digest image của từng repo khác). Lệnh `kubectl` chỉ đọc.
 

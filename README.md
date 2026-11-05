@@ -155,7 +155,7 @@ create a network and beta-user may hold one.
 | 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-14 (host, not covered) and CAT-16 (host) |
 | 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21 (host, not covered) and NET-25 (host) |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes |
-| 5 | `vm` | VMs: create per tier, stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes, except VM-25 (host), VM-28 (host, `L-x`), VM-30 (not covered) |
+| 5 | `vm` | VMs: create per tier, stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered) |
 | 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-14, VMS-15 (host, not covered) and VMS-17 (host) |
 | 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes, except VOL-18 (host, not covered), VOL-21 (not covered) |
 | 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: only the negative cases that need no IPv6 network) | yes | yes | yes, except LB-12 (host, not covered) |
@@ -184,7 +184,7 @@ of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud
 
 Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — state changed on the Incus host outside
 OpenViCloud, needs an approved `L-x` command; `site` — the public site through Playwright MCP on the agent's machine;
-`worker`, `control-plane-image` — read-only `gh`/`curl`/`kubectl` on the agent's machine.
+`worker`, `control-plane-image` — read-only `gh`/`curl`/`kubectl` and `go test` of a worker clone on the agent's machine.
 
 Four things change state every tenant of the environment shares: ADM-06 (a global price), ADM-15 (the cluster's
 `incus-worker` stopped), `billing/seed-invoices.sql` (written straight into the database) and the `L-x` writes on the
