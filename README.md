@@ -57,7 +57,8 @@ up by hand.
    from `kubectl logs <pod>` (not `-f`).
 4. **Copy the results** (`kubectl cp <pod>:/work/results …`) while the pod is still held (30 minutes by default), in
    the same step as 3, and compare the sha256 of every file with `sha256sum` in the pod; a file that differs is copied
-   once more on its own (`SHA256_DIFFERS <file>`), and one that still differs is named and copied by hand in chunks
+   once more on its own (`SHA256_DIFFERS <file>`), and one that still differs is named (a file only on the agent's side
+   is not: it shows in `sha-local.txt`) and copied by hand in chunks
    (`dd bs=16384 skip=N count=1 | base64`) until it matches.
 5. **Delete the job and its ConfigMap** once every file matched. A mismatch (or `NO_POD`, `POD_NOT_STARTED`,
    `BINARY_SHA_MISMATCH`, a phase unreadable 20 times) exits 1 and keeps both for a look: delete both by hand when done.
@@ -183,7 +184,11 @@ Steps outside the runner: before `billing` the agent runs `billing/seed-invoices
 database; on the release environment an approved `L-x`), after `concurrency` it runs `billing/check-wallets.sql` (read only, BIL-14);
 modules `cli` and `terraform-provider` need the agent to copy a binary into the pod when the spec logs `BINARY_WAIT`
 (`cli`: the CLI built for the node's architecture; `terraform-provider`: `GOOS=linux GOARCH=<node> CGO_ENABLED=0 go test -c`
-of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud`).
+of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud`); `admin/stuck-requests` (ADM-15) needs the
+`incus-worker` stopped and started when the spec logs `WORKER_STOP_WAIT` and `WORKER_START_WAIT`: `run-module.sh` does it
+when `REGRESSION_WORKER_APPS` lists the ArgoCD Applications that would bring the worker back, root first (dev
+`root-local,incus-worker-local`, release environment `incus-worker-prd`), and puts their auto-sync and the replicas back;
+every tenant of the cluster feels it, so on the release environment it runs only under an approved `L-x`.
 
 Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — state changed on the Incus host outside
 OpenViCloud, needs an approved `L-x` command; `site` — the public site through Playwright MCP on the agent's machine;

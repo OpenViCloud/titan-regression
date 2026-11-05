@@ -3,7 +3,7 @@ import { closeSessions, useBrowser } from './auth'
 import { bodyOf, call, expectStatus, log, startLog } from './api'
 
 // Case ADM-14 of plan.md. Read only. ADM-15 (the same route with the worker stopped) is admin/stuck-requests/, a job of
-// its own: it needs the agent to stop and start the incus-worker outside the runner.
+// its own: the incus-worker is stopped and started by run-module.sh (REGRESSION_WORKER_APPS) or by the agent.
 test.describe.serial('admin-stuck-requests', () => {
   test.beforeAll(async ({ browser }) => {
     startLog('admin-stuck-requests')

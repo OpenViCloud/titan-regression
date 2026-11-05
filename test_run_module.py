@@ -124,7 +124,7 @@ class WaitLoopTest(unittest.TestCase):
         code, out, calls = run("Running,")
         self.assertIn("pod phase unreadable (#20)", out)
         self.assertNotIn("pod phase unreadable (#21)", out)
-        self.assertIn("pod phase unreadable 20 times", out)
+        self.assertIn("pod phase unreadable 21 times in a row", out)
         self.assertNotIn("delete job", calls)
         self.assertEqual(code, 1, out)
 
@@ -198,6 +198,14 @@ class WorkerStopTest(unittest.TestCase):
         self.assertLess(calls.index("rollout status deploy/incus-worker"), calls.index("delete job"))
         self.assertEqual(code, 0, out)
 
+    def test_a_stop_marker_that_cannot_be_written_is_not_reported_as_an_answer(self):
+        code, out, _ = run("Running", done_reads=7, FAKE_LOGS=STOP,
+                           FAKE_FAIL="touch /work/adm-15/worker-stopped", **APPS)
+        self.assertIn("WORKER_STOPPED_UNANSWERED", out)
+        self.assertNotIn("ADM-15 worker stopped", out)
+        self.assertIn("worker still stopped", out)
+        self.assertEqual(code, 0, out)
+
     def test_a_run_that_ends_with_the_worker_stopped_puts_it_back(self):
         code, out, calls = run("Running,Running,Running,Running,Failed", done_reads=99, FAKE_LOGS=STOP, **APPS)
         steps = worker_calls(calls)
@@ -205,6 +213,7 @@ class WorkerStopTest(unittest.TestCase):
         self.assertEqual(steps[-1], "-n regression rollout status deploy/incus-worker --timeout=10m")
         self.assertIn("-n regression scale deploy/incus-worker --replicas=1", steps)
         self.assertIn("worker still stopped", out)
+        self.assertEqual(code, 0, out)
 
 
 class ResultCopyTest(unittest.TestCase):
@@ -222,13 +231,14 @@ class ResultCopyTest(unittest.TestCase):
         self.assertNotIn("delete job", calls)
         self.assertEqual(code, 1, out)
 
-
     def test_a_file_only_on_this_side_copies_nothing_again_and_keeps_the_job(self):
         code, out, calls = run("Running", FAKE_LOCAL_EXTRA="1")
         self.assertNotIn("SHA256_DIFFERS", out)
         self.assertNotIn("cp regression-mod-t1-pod:/work/results/", calls)
         self.assertIn("SHA256_MISMATCH", out)
+        self.assertNotIn("delete job", calls)
         self.assertEqual(code, 1, out)
+
 
 if __name__ == "__main__":
     unittest.main()

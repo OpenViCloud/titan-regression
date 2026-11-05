@@ -107,6 +107,7 @@ worker="up"; worker_replicas=""
 stop_worker() {
   local app
   worker="stopping"
+  rm -f "$out"/worker-autosync-*.json
   worker_replicas="$(k -n "$app_ns" get deploy incus-worker -o 'jsonpath={.spec.replicas}')" || return 1
   for app in ${worker_apps//,/ }; do
     k -n argocd get application "$app" -o json \
@@ -167,7 +168,7 @@ while true; do
   phase="$(phase_of "$pod" 2>/dev/null)"
   if [ -z "$phase" ]; then
     unreadable=$((unreadable + 1))
-    if [ "$unreadable" -gt 20 ]; then echo "pod phase unreadable 20 times — job kept for a look"; exit 1; fi
+    if [ "$unreadable" -gt 20 ]; then echo "pod phase unreadable 21 times in a row — job kept for a look"; exit 1; fi
     echo "pod phase unreadable (#$unreadable), reading again in 15 s"; sleep 15; continue
   fi
   unreadable=0
@@ -181,8 +182,11 @@ while true; do
     if [ -z "$answered" ] && grep -q WORKER_STOP_WAIT <<< "$logs"; then
       answered=stop
       if stop_worker; then
-        k -n "$ns" exec "$pod" -- touch /work/adm-15/worker-stopped
-        echo "ADM-15 worker stopped: auto-sync off ($worker_apps), replicas $worker_replicas → 0"
+        if k -n "$ns" exec "$pod" -- touch /work/adm-15/worker-stopped; then
+          echo "ADM-15 worker stopped: auto-sync off ($worker_apps), replicas $worker_replicas → 0"
+        else
+          echo "WORKER_STOPPED_UNANSWERED — the marker was not written; the spec gives up after 10 minutes"
+        fi
       else
         echo "WORKER_STOP_FAILED — putting the worker back; the spec gives up after 10 minutes"
         start_worker
