@@ -275,7 +275,7 @@ test.describe.serial('load-balancer', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs (Delete: a delete replaces a waiting update;
-  // EndOperation: a report for a request no longer waiting ends nothing) ·
+  // FinishOperation, FailOperation: a report for a request no longer waiting ends nothing) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/LoadBalancer/EndLoadBalancerRequestCommandHandler.cs (HandleAsync: an ignored
   // report records no outcome) · titan-ops architecture/resource-lifecycle.md#repeat · titan-ops features/load-balancer/design.md#lb-lifecycle
   test('LB-11 a DELETE while an update waits replaces it: Deleting, then Deleted, and no load_balancer.updated', async () => {

@@ -369,7 +369,7 @@ test.describe.serial('network', () => {
     expect((await get('tenant', `/v1/tenant/networks/${ipv6B}`)).publicIpv6Subnet).toBe(subnetB)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Services/NetworkRoutes.cs RecordEndedAsync (a delete's Done gives the route back) ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Services/NetworkRoutes.cs FinishOperationAsync (a delete's Done gives the route back) ·
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/ClusterIpv6Route/ClusterIpv6Route.cs NextToGive (never-released first, then
   // released longest ago); titan-ops features/network/design.md#ipv6-public
   test('NET-12 the /64 of a deleted network is not the next one given', async () => {

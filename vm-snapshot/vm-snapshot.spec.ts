@@ -167,7 +167,7 @@ test.describe.serial('vm-snapshot', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/VmSnapshots/RevertSnapshotEndpoint.cs HandleAsync ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.cs EndOperation (Done of the revert)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.cs FinishOperation (Done of the revert)
   test('VMS-04 revert is 202, Reverting then settled, outcome reverted, desired unchanged', async () => {
     const before = await getVm(vmId)
     const reply = await call('tenant', 'POST', `${path()}/${snapshots.s1}/revert`)
@@ -259,9 +259,9 @@ test.describe.serial('vm-snapshot', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.cs BlocksVmDelete (a waiting delete does not block),
-  // EndWithItsVm, EndOperation (IsTerminal: a later report records nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs
-  // Delete, EndOperation · OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs RecordEndedAsync
-  // (SnapshotsWhoseDeleteEnded) — titan-ops architecture/intent-and-observation.md#terminal-state-absorbs
+  // EndWithItsVm, FinishOperation (IsTerminal: a later report records nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs
+  // Delete, FinishOperation · OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs FinishOperationAsync
+  // (the snapshots waiting on their delete, read before the call) — titan-ops architecture/intent-and-observation.md#terminal-state-absorbs
   test('VMS-11 a VM deleted while its only snapshot is being deleted: 202, both Deleted, one vm_snapshot.deleted', async () => {
     const id = snapshots.b1
     const name = `rg-sb1-${RUN}`
@@ -387,7 +387,7 @@ test.describe.serial('vm-snapshot', () => {
     test.skip(skipped.length === 2, `both laps skipped: ${skipped.join('; ')}`)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs EndOperation (the delete's Done takes the VM's snapshots along) — the VM's
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs FinishOperation (the delete's Done takes the VM's snapshots along) — the VM's
   // delete report marks its snapshots Deleted. The delete is VMS-16's; deleteVmAndWait only waits when VMS-16 did not send it.
   test('VMS-07 deleting the VM takes its remaining snapshots to Deleted', async () => {
     await deleteVmAndWait(vmId)
