@@ -199,7 +199,7 @@ test.describe.serial('vm', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/CreateVmEndpoint.cs HandleAsync; current comes from the reconciler:
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/UpdateVmStatusCommandHandler.cs HandleAsync (vm.MarkObserved) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/ObserveVmCommandHandler.cs HandleAsync (vm.MarkObserved) ·
   // titan-ops features/vm/design.md#vm-create-flow — userData is kept as sent (OpenViCloud/titan-control-plane:Titan.Application/Queries/Compute/Vm/Contracts/VmQueryResult.cs
   // VmQueryResult.UserData); comments only ⇒ the worker sets no cloud-init.user-data (OpenViCloud/titan-incus-worker:resource/vm/create.go HasUserDataContent, VM-23 on the host)
   test('VM-01 a VM of the smallest tier with comment-only userData is 202 {vmId}, then Running or Ready with an address; userData reads back byte for byte', async () => {
