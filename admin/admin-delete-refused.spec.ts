@@ -107,8 +107,8 @@ test.describe.serial('admin-delete-refused', () => {
 
   // titan-ops features/vm/design.md#vm-snapshot-counting · titan-ops features/vm/design.md#admin-delete-audit ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Admin/Vm/DeleteAdminVmCommandHandler.cs (HandleAsync: deletion.DeleteAsync before
-  // auditLog.Add) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs (Delete: ASnapshotCommandIsRunning ⇒ VM_SNAPSHOT_IN_PROGRESS) ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.cs (BlocksVmDelete: create or revert waiting) ·
+  // auditLog.Add) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Deletion.cs (Delete: EnsureNotInTransition ⇒ VM_INVALID_STATUS) ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs (AddSnapshot, RevertSnapshot: Status = Snapshotting) ·
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/ErrorStatus.cs (BusinessException ⇒ 422)
   test('ADM-12 admin delete of a VM whose snapshot is being made is 422 VM_SNAPSHOT_IN_PROGRESS; the VM stays, no audit row', async () => {
     const network = await runNetwork()
