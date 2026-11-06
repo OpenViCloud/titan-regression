@@ -259,8 +259,8 @@ test.describe.serial('vm-snapshot', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs (a snapshot's delete does not change the VM status),
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.cs EndWithItsVm, FinishOperation (IsDeleted: a later report records nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs
-  // Delete, FinishOperation · OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs FinishOperationAsync
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.cs EndWithItsVm, FinishOperation (IsDeleted: a later report records nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Deletion.cs
+  // DeleteSucceeded · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs FinishSnapshotOperation · OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs FinishOperationAsync
   // (the snapshots waiting on their delete, read before the call) — titan-ops architecture/intent-and-observation.md#terminal-state-absorbs
   test('VMS-11 a VM deleted while its only snapshot is being deleted: 202, both Deleted, one vm_snapshot.deleted', async () => {
     const id = snapshots.b1
@@ -343,7 +343,7 @@ test.describe.serial('vm-snapshot', () => {
     expect(rows.length).toBe(cap)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs AddSnapshot (EnsureSnapshottable ⇒ EnsureNoStopOrDeleteWaiting:
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Guards.cs IncusCanSnapshot (a VM that is Starting, Stopping or Deleting is refused:
   // VM_INVALID_STATUS) — titan-ops features/vm/design.md#conflict-and-delete-wins
   test('VMS-16 a snapshot asked while the VM is Stopping or Deleting is 422 VM_INVALID_STATUS; stop and delete still end', async () => {
     // Room under the cap first: VMS-09 left the VM at it.
