@@ -177,7 +177,7 @@ test.describe.serial('concurrency-requests', () => {
     volumeId = ''
   }
 
-  // A snapshot create or revert in flight refuses the VM's delete (VM_SNAPSHOT_IN_PROGRESS); a waiting delete does not.
+  // A snapshot create or revert in flight makes the VM Snapshotting, which refuses its delete (VM_INVALID_STATUS); a waiting delete does not.
   async function deleteVm(): Promise<void> {
     if (vmId === '') {
       return
