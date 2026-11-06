@@ -559,7 +559,7 @@ test.describe.serial('volume', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync (ListAttachedToVmLockedAsync, volume.ReleaseFromVmDelete),
-  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs FinishOperationAsync (volume.MarkDetachedByVmDelete).
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs ApplyDoneAsync (volume.MarkDetachedByVmDelete).
   // The spec measures the end without desiredAttachedVmId; plan.md VOL-09 also expects no transition while the VM's delete
   // waits, then no desired attachment and a delete that goes through, and the release that writes its spec tightens it.
   test('VOL-09 deleting a VM releases the volume attached to it, which stays', async () => {
