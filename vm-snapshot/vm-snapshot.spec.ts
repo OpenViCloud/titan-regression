@@ -260,7 +260,7 @@ test.describe.serial('vm-snapshot', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs (a snapshot's delete does not change the VM status),
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.cs EndWithItsVm, FinishOperation (IsDeleted: a later report records nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Deletion.cs
-  // DeleteSucceeded · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs FinishSnapshotOperation · OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs FinishOperationAsync
+  // DeleteSucceeded · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs FinishSnapshotOperation · OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs ApplyDoneAsync
   // (the snapshots waiting on their delete, read before the call) — titan-ops architecture/intent-and-observation.md#terminal-state-absorbs
   test('VMS-11 a VM deleted while its only snapshot is being deleted: 202, both Deleted, one vm_snapshot.deleted', async () => {
     const id = snapshots.b1
