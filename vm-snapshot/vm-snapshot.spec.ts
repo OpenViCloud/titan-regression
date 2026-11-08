@@ -5,8 +5,8 @@ import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, s
 import { cleanUp } from './clean-up'
 import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, getVm, runNetwork, runs, vmShape, waitVm } from './fixtures'
 
-// Cases VMS-01..13 and VMS-16 of plan.md, plus ACT-02/ACT-03 for VM snapshots (VMS-14, VMS-15, VMS-17 read the Incus
-// host). VMS-12, VMS-10 and VMS-11 use a second VM, which VMS-11 deletes; VMS-16 deletes the module's VM and VMS-07
+// Cases VMS-01..13 and VMS-16 of plan.md, plus ACT-02/ACT-03 for VM snapshots (VMS-14, VMS-15, VMS-17, VMS-20 read the
+// Incus host). VMS-12, VMS-10 and VMS-11 use a second VM, which VMS-11 deletes; VMS-16 deletes the module's VM and VMS-07
 // reads what that delete did to its snapshots.
 
 // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/ValueObjects/TenantQuota.cs DefaultMaxVmSnapshotsPerVm — no API reads the cap
@@ -17,7 +17,8 @@ function snapshotShape(s: any): string {
 }
 
 // Counts toward MaxVmSnapshotsPerVm as the server counts (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.cs
-// CountsTowardQuota): desired Exists and (Exists, or its create waits).
+// CountsTowardQuota): Creating, Available, or Reverting while Incus holds the snapshot. The body below still reads the old
+// fields; it is rewritten with the module's specs at the next release.
 function countsTowardQuota(s: any): boolean {
   return s.desiredExistence === 'Exists' && (s.currentExistence === 'Exists' || s.transition === 'Creating')
 }
@@ -167,7 +168,7 @@ test.describe.serial('vm-snapshot', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/VmSnapshots/RevertSnapshotEndpoint.cs HandleAsync ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.cs FinishOperation (Done of the revert)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.Revert.cs RevertSucceeded (Done of the revert)
   test('VMS-04 revert is 202, Reverting then settled, outcome reverted, desired unchanged', async () => {
     const before = await getVm(vmId)
     const reply = await call('tenant', 'POST', `${path()}/${snapshots.s1}/revert`)
@@ -259,8 +260,8 @@ test.describe.serial('vm-snapshot', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs (a snapshot's delete does not change the VM status),
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.cs EndWithItsVm, FinishOperation (IsDeleted: a later report records nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Deletion.cs
-  // DeleteSucceeded · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs FinishSnapshotOperation · OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs ApplyDoneAsync
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.Deletion.cs EndWithItsVm, DeleteSucceeded (IsWaitingOn: a later report records nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Deletion.cs
+  // DeleteSucceeded · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs SnapshotDeleteSucceeded · OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs ApplyDoneAsync
   // (the snapshots waiting on their delete, read before the call) — titan-ops architecture/intent-and-observation.md#terminal-state-absorbs
   test('VMS-11 a VM deleted while its only snapshot is being deleted: 202, both Deleted, one vm_snapshot.deleted', async () => {
     const id = snapshots.b1
