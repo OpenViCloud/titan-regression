@@ -4,7 +4,7 @@ Mỗi case một ID ổn định (`<MODULE>-NN`); spec mang ID trong tên test (
 
 Kỳ vọng chung cho mọi case tạo tài nguyên (không nhắc lại từng dòng):
 - Create gửi `Idempotency-Key`, nhận id-only body (`titan-ops architecture/http-contract.md#create-returns-id`); poll `GET` tới khi yêu cầu hết chờ và đạt đích (VM, network, firewall rule, VM snapshot, volume, volume snapshot: `status` không còn `Creating`/`Attaching`/`Detaching`/`Reverting`/`Deleting` và là đích; template mỗi cluster, load balancer: `transition` rỗng và current đạt đích), hạn chờ = 2 chu kỳ reconciler (4 phút) + thời gian lệnh.
-- Tài nguyên tạo ra mang tên `rg-<loại>-<lượt>` và được xoá trong `finally`; xoá xong `GET` list không còn nó, `GET` theo id (nếu route giữ hàng) báo `status = Deleted` (template mỗi cluster và load balancer: existence `Deleted`).
+- Tài nguyên tạo ra mang tên `rg-<loại>-<lượt>` và được xoá trong `finally`; xoá xong `GET` list không còn nó, `GET` theo id (nếu route giữ hàng) báo `status = Deleted` (load balancer: existence `Deleted`).
 - Lỗi đọc ở `code`, không ở `detail` (`titan-ops architecture/http-contract.md#error-envelope`).
 
 **(host)** = đọc trên host Incus của cluster (Phase 4 của `release:regression-prd`, lệnh `L-x`). **(`L-x`)** = case cần một lệnh ghi trên env của release mà release đã duyệt; không có `L-x` ⇒ report ghi **N/A — không có `L-x`**.
