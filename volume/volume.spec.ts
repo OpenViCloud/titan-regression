@@ -205,7 +205,7 @@ test.describe.serial('volume', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Volume/AttachVolumeEndpoint.cs HandleAsync — 202, no body;
   // attachment is read from used_by (titan-ops features/volume/design.md#attachment-from-used-by) ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs Delete (IsInUse ⇒ VOLUME_INVALID_STATE) ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.Deletion.cs Delete (IsInUse ⇒ VOLUME_INVALID_STATE) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DeleteVolumeCommandHandler.cs HandleAsync (the refusal stages nothing)
   test('VOL-03 attach to a running VM is 202 with no body, then attached; deleting it attached is 422 VOLUME_INVALID_STATE', async () => {
     const reply = await call('tenant', 'POST', `/v1/tenant/volumes/${volumeA}/attach`, { vmId })
@@ -293,7 +293,7 @@ test.describe.serial('volume', () => {
     expect(countOf(actions, 'volume.created')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs Delete (VOLUME_HAS_SNAPSHOTS)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.Deletion.cs Delete (VOLUME_HAS_SNAPSHOTS)
   test('VOL-07 deleting a volume that still has snapshots is 422 VOLUME_HAS_SNAPSHOTS', async () => {
     expectError(await call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeA}`), 422, 'VOLUME_HAS_SNAPSHOTS')
   })
@@ -374,10 +374,10 @@ test.describe.serial('volume', () => {
     expect(rows.some((v) => v.name === name)).toBe(false)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs Delete (SnapshotQuotaUsage: a snapshot being deleted
-  // no longer counts), FinishOperation ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.Deletion.cs Delete (SnapshotQuotaUsage: a snapshot being deleted
+  // no longer counts), DeleteSucceeded ·
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VolumeReports.cs FinishOperation (the snapshots waiting on their delete, read before the call) ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Entities/VolumeSnapshot.cs EndWithItsVolume, FinishOperation (IsDeleted)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Entities/VolumeSnapshot.Deletion.cs EndWithItsVolume (IsDeleted)
   // — titan-ops architecture/intent-and-observation.md#terminal-state-absorbs
   test('VOL-14 a volume deleted while its only snapshot is being deleted: 202, both Deleted, one volume_snapshot.deleted', async () => {
     const name = `rg-vrs-${RUN}`

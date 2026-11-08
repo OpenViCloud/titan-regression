@@ -87,7 +87,7 @@ test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () =
     // A wait on the API may sign in again (auth.ts headersOf) and close the old context: pageOf() again after
     // every wait.
     let page = await pageOf('tenant')
-    // Read the quota card BEFORE the new network exists, the same way OpenViCloud/titan-cloud-console:portal/src/components/QuotaCard.tsx itself counts (occupiesQuota
+    // Read the quota card BEFORE the new network exists, the same way OpenViCloud/titan-cloud-console:portal/src/components/QuotaCard.tsx itself counts (networkOccupiesQuota
     // over the live network list) — not a hand-rolled filter that could drift from the component's own rule.
     await page.goto(PORTAL + '/', { waitUntil: 'networkidle' })
     const ipv6RowOf = () => page.getByRole('region', { name: 'Quota' }).locator('[data-quota-row]').filter({ hasText: 'Public IPv6' })
@@ -127,7 +127,7 @@ test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () =
     await page.screenshot({ path: `${RESULTS}/UI-16-network-ipv6.png` })
 
     // Quota card: Public IPv6 used count increases by exactly one over what it read before this network existed
-    // (OpenViCloud/titan-cloud-console:portal/src/components/QuotaCard.tsx's own occupiesQuota count, read from the page both times — not a parallel hand count that
+    // (OpenViCloud/titan-cloud-console:portal/src/components/QuotaCard.tsx's own networkOccupiesQuota count, read from the page both times — not a parallel hand count that
     // could silently diverge from the component's rule).
     await page.goto(PORTAL + '/', { waitUntil: 'networkidle' })
     const usedBefore = usedOf(ipv6Before)
