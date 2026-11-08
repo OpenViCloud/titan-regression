@@ -17,7 +17,8 @@ function snapshotShape(s: any): string {
 }
 
 // Counts toward MaxVmSnapshotsPerVm as the server counts (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.cs
-// CountsTowardQuota): Creating, Available, or Reverting while Incus holds the snapshot.
+// CountsTowardQuota): Creating, Available, or Reverting while Incus holds the snapshot. The body below still reads the old
+// fields; it is rewritten with the module's specs at the next release.
 function countsTowardQuota(s: any): boolean {
   return s.desiredExistence === 'Exists' && (s.currentExistence === 'Exists' || s.transition === 'Creating')
 }
