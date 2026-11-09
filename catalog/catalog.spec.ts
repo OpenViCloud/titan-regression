@@ -13,11 +13,11 @@ function clusterRowOf(template: any, clusterId: string): any {
 }
 
 function everyRowAtRest(rows: any[]): boolean {
-  return rows.every((r) => r.clusters.every((z: any) => z.transition === null))
+  return rows.every((r) => r.clusters.every((z: any) => z.status !== 'Syncing'))
 }
 
 function restShape(rows: any[]): string {
-  return rows.map((r) => r.clusters.map((z: any) => `${r.name}@${z.clusterId}=${z.currentExistence}/${z.transition}`).join(' ')).join(' ')
+  return rows.map((r) => r.clusters.map((z: any) => `${r.name}@${z.clusterId}=${z.status}`).join(' ')).join(' ')
 }
 
 // Ordinal, like StringComparer.Ordinal: JavaScript compares strings by UTF-16 code unit, as .NET's ordinal does.
@@ -63,7 +63,7 @@ test.describe.serial('catalog', () => {
     for (const template of templates) {
       const row = admin.find((a) => a.id === template.id)
       const cluster = row.clusters.find((z: any) => z.clusterId === clusterId)
-      expect(cluster.currentExistence, `${template.name} in ${clusterId}`).toBe('Exists')
+      expect(cluster.status, `${template.name} in ${clusterId}`).toBe('Available')
     }
   })
 
@@ -101,7 +101,7 @@ test.describe.serial('catalog', () => {
     const admin = await get('admin', '/v1/admin/templates') as any[]
     for (const template of templates) {
       const row = admin.find((a) => a.id === template.id)
-      const somewhere = row.clusters.some((z: any) => z.currentExistence === 'Exists')
+      const somewhere = row.clusters.some((z: any) => z.status === 'Available')
       expect(somewhere, template.name).toBe(true)
     }
     const ofCluster = await get('tenant', `/v1/templates?clusterId=${clusterId}`) as any[]
@@ -188,31 +188,31 @@ test.describe.serial('catalog', () => {
     expectStatus(reply, 202)
     expect(reply.text).toBe('')
     const settled = await pollUntil('CAT-06 sync', () => get('admin', '/v1/admin/templates') as Promise<any[]>,
-      (rows) => rows.every((r) => r.clusters.find((z: any) => z.clusterId === clusterId).transition === null),
+      (rows) => rows.every((r) => r.clusters.find((z: any) => z.clusterId === clusterId).status !== 'Syncing'),
       (rows) => rows.map((r) => {
         const z = r.clusters.find((x: any) => x.clusterId === clusterId)
-        return `${r.name}=${z.currentExistence}/${z.transition}/${z.requestFailureReason}`
+        return `${r.name}=${z.status}/${z.requestFailureReason}`
       }).join(' '))
     for (const row of settled) {
       const cluster = row.clusters.find((z: any) => z.clusterId === clusterId)
-      const done = cluster.currentExistence === 'Exists' || cluster.requestFailureReason !== null
+      const done = cluster.status === 'Available' || cluster.requestFailureReason !== null
       expect(done, `${row.name} in ${clusterId}`).toBe(true)
     }
-    expect(settled.some((r) => r.clusters.find((z: any) => z.clusterId === clusterId).currentExistence === 'Exists')).toBe(true)
+    expect(settled.some((r) => r.clusters.find((z: any) => z.clusterId === clusterId).status === 'Available')).toBe(true)
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs HandleAsync (NeedsASyncRequest) — a cluster that has the alias asks for nothing
   test('CAT-07 a second sync leaves the templates that Exist as they are', async () => {
     const { clusterId } = await envOf()
     const before = (await get('admin', '/v1/admin/templates') as any[])
-      .filter((r) => r.clusters.find((z: any) => z.clusterId === clusterId).currentExistence === 'Exists').map((r) => r.id)
+      .filter((r) => r.clusters.find((z: any) => z.clusterId === clusterId).status === 'Available').map((r) => r.id)
     expectStatus(await call('admin', 'POST', '/v1/admin/templates/sync'), 202)
     const after = await pollUntil('CAT-07 second sync', () => get('admin', '/v1/admin/templates') as Promise<any[]>,
-      (rows) => rows.every((r) => r.clusters.find((z: any) => z.clusterId === clusterId).transition === null),
-      (rows) => rows.map((r) => `${r.name}=${r.clusters.find((z: any) => z.clusterId === clusterId).currentExistence}`).join(' '))
+      (rows) => rows.every((r) => r.clusters.find((z: any) => z.clusterId === clusterId).status !== 'Syncing'),
+      (rows) => rows.map((r) => `${r.name}=${r.clusters.find((z: any) => z.clusterId === clusterId).status}`).join(' '))
     for (const id of before) {
       const cluster = after.find((r) => r.id === id).clusters.find((z: any) => z.clusterId === clusterId)
-      expect(cluster.currentExistence, id).toBe('Exists')
+      expect(cluster.status, id).toBe('Available')
     }
   })
 
@@ -247,13 +247,13 @@ test.describe.serial('catalog', () => {
   test('CAT-13 a second sync while a template is still Syncing sends nothing more: it comes to rest once', async () => {
     const { clusterId } = await envOf()
     const before = await get('admin', '/v1/admin/templates') as any[]
-    const notThere = before.filter((r) => clusterRowOf(r, clusterId).currentExistence !== 'Exists').map((r) => r.id as string)
-    log(`CAT-13 not Exists in ${clusterId}: ${JSON.stringify(before.filter((r) => notThere.includes(r.id)).map((r) => r.name))}`)
-    test.skip(notThere.length === 0, `every template Exists in ${clusterId}: no sync is left to wait (amd64 syncs all three)`)
+    const notThere = before.filter((r) => clusterRowOf(r, clusterId).status !== 'Available').map((r) => r.id as string)
+    log(`CAT-13 not Available in ${clusterId}: ${JSON.stringify(before.filter((r) => notThere.includes(r.id)).map((r) => r.name))}`)
+    test.skip(notThere.length === 0, `every template Available in ${clusterId}: no sync is left to wait (amd64 syncs all three)`)
 
     expectStatus(await call('admin', 'POST', '/v1/admin/templates/sync'), 202)
     const afterFirst = await get('admin', '/v1/admin/templates') as any[]
-    const syncing = afterFirst.filter((r) => notThere.includes(r.id) && clusterRowOf(r, clusterId).transition === 'Syncing')
+    const syncing = afterFirst.filter((r) => notThere.includes(r.id) && clusterRowOf(r, clusterId).status === 'Syncing')
       .map((r) => r.id as string)
     log(`CAT-13 Syncing after the first POST: ${JSON.stringify(afterFirst.filter((r) => syncing.includes(r.id)).map((r) => r.name))}`)
     test.skip(syncing.length === 0, 'the sync came to rest before the second POST could be sent')
@@ -263,7 +263,9 @@ test.describe.serial('catalog', () => {
     expect(second.text).toBe('')
 
     // Each row's transitions and give-up times, read every 2 s from the second POST until 60 s after the last row rests:
-    // one request means Syncing … then at rest, never Syncing again, and at most one new requestFailedAt.
+    // one request means Syncing … then at rest, never Syncing again, and at most one new requestFailedAt. A "transition"
+    // here is just the cluster's status while it is Syncing, else null (at rest).
+    const transitionOf = (row: any): string | null => (row.status === 'Syncing' ? 'Syncing' : null)
     const seen: Record<string, { transitions: Array<string | null>, failedAt: Set<string> }> = {}
     for (const id of syncing) {
       const row = clusterRowOf(before.find((r) => r.id === id), clusterId)
@@ -276,9 +278,10 @@ test.describe.serial('catalog', () => {
       for (const id of syncing) {
         const row = clusterRowOf(rows.find((r) => r.id === id), clusterId)
         const transitions = seen[id].transitions
-        if (transitions.length === 0 || transitions[transitions.length - 1] !== row.transition) {
-          transitions.push(row.transition)
-          log(`CAT-13 ${rows.find((r) => r.id === id).name}: ${row.currentExistence}/${row.transition} failedAt=${row.requestFailedAt} reason=${row.requestFailureReason} (+${Math.round((Date.now() - started) / 1000)}s)`)
+        const transition = transitionOf(row)
+        if (transitions.length === 0 || transitions[transitions.length - 1] !== transition) {
+          transitions.push(transition)
+          log(`CAT-13 ${rows.find((r) => r.id === id).name}: ${row.status} failedAt=${row.requestFailedAt} reason=${row.requestFailureReason} (+${Math.round((Date.now() - started) / 1000)}s)`)
         }
         if (row.requestFailedAt !== null) {
           seen[id].failedAt.add(row.requestFailedAt)
@@ -319,7 +322,7 @@ test.describe.serial('catalog', () => {
       expect(tiers, `${row.name} borrows a real tier`).toContain(row.vmOfferingId)
       expect(row.clusters.length, row.name).toBeGreaterThan(0)
       for (const cluster of row.clusters) {
-        expect(['NotCreated', 'Exists', 'NotFound']).toContain(cluster.currentExistence)
+        expect(['Syncing', 'Available', 'NotFound', 'Failed']).toContain(cluster.status)
       }
     }
     log(`CAT-08 ${rows.map((r) => `${r.name}→${r.vmOfferingId}`).join(' ')}`)

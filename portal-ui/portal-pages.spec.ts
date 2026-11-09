@@ -75,10 +75,10 @@ test.describe.serial('portal-ui pages', () => {
   // titan-ops features/cloud-console/design.md#quota-card · OpenViCloud/titan-cloud-console:portal/src/lib/quota.ts
   test('UI-14 the quota card shows the caps the API returns and counts the live VM', async () => {
     const tenant = await get('tenant', '/v1/tenant')
-    // Same rule as the card: wanted, and Incus holds it or its create still waits.
-    const vms = await get('tenant', '/v1/tenant/vms') as Array<{ desiredExistence: string, currentExistence: string, transition: string | null }>
-    const used = vms.filter((v) => v.desiredExistence === 'Exists'
-      && (v.currentExistence === 'Exists' || (v.currentExistence === 'NotCreated' && v.transition !== null))).length
+    // Same rule as the card (OpenViCloud/titan-cloud-console:portal/src/lib/quota.ts vmOccupiesQuota): every status but
+    // Deleting, Deleted, NotFound and Failed.
+    const vms = await get('tenant', '/v1/tenant/vms') as Array<{ status: string }>
+    const used = vms.filter((v) => v.status !== 'Deleting' && v.status !== 'Deleted' && v.status !== 'NotFound' && v.status !== 'Failed').length
     const page = await pageOf('tenant')
     await page.goto(PORTAL + '/', { waitUntil: 'networkidle' })
     const card = page.getByRole('region', { name: 'Quota' })
@@ -92,17 +92,18 @@ test.describe.serial('portal-ui pages', () => {
   // titan-ops features/network/user-stories.md#us-p07 · titan-ops features/network/user-stories.md#us-p09
   // OpenViCloud/titan-cloud-console:portal/src/pages/NetworkListPage.tsx (NetworkListPage: row name, incusLabel badge, `cidr ?? '—'`,
   // `gateway ?? '—'`, clusterMap name · networks.createdOn(f.date(createdAt)); Delete disabled while attachedNetworkIds holds the
-  // network, title deleteBlockedTitle) · OpenViCloud/titan-cloud-console:portal/src/lib/networkState.ts (incusLabel: transition, else
-  // currentState) · OpenViCloud/titan-cloud-console:portal/src/lib/vmState.ts (holdsItsNetwork: currentExistence Exists)
-  // · OpenViCloud/titan-cloud-console:portal/src/lib/money.ts (formatDate) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts,
+  // network, title deleteBlockedTitle) · OpenViCloud/titan-cloud-console:portal/src/lib/networkState.ts (incusLabel: status verbatim,
+  // "Not found" for NotFound) · OpenViCloud/titan-cloud-console:portal/src/lib/vmState.ts (holdsItsNetwork: every status but Deleted,
+  // NotFound, Failed) · OpenViCloud/titan-cloud-console:portal/src/lib/money.ts (formatDate) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts,
   // OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts (networks.removeVmsFirst, networks.createdOn, networks.listLabel, common.delete)
   test('UI-29 the run network row shows the API facts and holds Delete back while its VM lives, in English then Vietnamese', async () => {
     const network = await get('tenant', `/v1/tenant/networks/${networkId}`)
-    expect(network.transition, 'the run network rests, so its badge is the Incus word').toBeNull()
+    // NetworkStatus: Creating, Deleting are in flight; the run network, long in use, must rest in one of the others.
+    expect(['Creating', 'Deleting'], 'the run network rests, so its badge is the Incus word').not.toContain(network.status)
     const clusters = await get('anonymous', '/v1/clusters') as Array<{ id: string, name: string }>
     const clusterName = clusters.find((c) => c.id === network.clusterId)?.name
     expect(clusterName, `GET /v1/clusters lists ${network.clusterId}`).toBeTruthy()
-    log(`UI-29 ${network.name} state=${network.currentState} cidr=${network.cidr} gateway=${network.gateway} cluster=${clusterName}`)
+    log(`UI-29 ${network.name} status=${network.status} cidr=${network.cidr} gateway=${network.gateway} cluster=${clusterName}`)
 
     const page = await pageOf('tenant')
     const deletes: string[] = []
@@ -129,7 +130,8 @@ test.describe.serial('portal-ui pages', () => {
       const row = page.getByRole('list', { name: view.list }).getByRole('listitem')
         .filter({ has: page.getByText(network.name, { exact: true }) })
       await expect(row).toHaveCount(1)
-      await expect(row.getByText(network.currentState, { exact: true })).toBeVisible()
+      // incusLabel: the status verbatim, "Not found" (space) only for NotFound.
+      await expect(row.getByText(network.status === 'NotFound' ? 'Not found' : network.status, { exact: true })).toBeVisible()
       await expect(row.getByText('CIDR', { exact: true }).locator('xpath=following-sibling::p[1]')).toHaveText(network.cidr ?? '—')
       await expect(row.getByText('Gateway', { exact: true }).locator('xpath=following-sibling::p[1]')).toHaveText(network.gateway ?? '—')
       await expect(row.getByText(`${clusterName} · ${view.created} ${date}`, { exact: true })).toBeVisible()

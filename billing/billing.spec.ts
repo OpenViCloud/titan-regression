@@ -105,7 +105,7 @@ test.describe.serial('billing', () => {
       await pollUntil('billing snapshots gone', () => get('tenant', `/v1/tenant/volumes/${volumeId}/snapshots`) as Promise<any[]>,
         (rows) => rows.length === 0, (rows) => `${rows.length} left`)
       expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeId}`), 202)
-      await waitVolume('billing volume deleted', volumeId, (v) => v.currentExistence === 'Deleted')
+      await waitVolume('billing volume deleted', volumeId, (v) => v.status === 'Deleted')
     }
     await closeSessions()
   })
@@ -462,7 +462,7 @@ test.describe.serial('billing', () => {
     const volumeReply = await call('tenant', 'POST', '/v1/tenant/volumes', { name: `rg-billvol-${RUN}`, volumeOfferingId, clusterId, sizeGb: BILLED_GB }, newKey())
     expectStatus(volumeReply, 202)
     volumeId = bodyOf(volumeReply).volumeId
-    await waitVolume('BIL-02 volume', volumeId, (v) => v.currentExistence === 'Exists' && v.transition === null)
+    await waitVolume('BIL-02 volume', volumeId, (v) => v.status === 'Available')
     const storageBefore = (await get('tenant', '/v1/tenant/billing/summary')).storageCost as number
 
     const cost = await pollUntil('BIL-01 compute usage', () => get('tenant', `/v1/tenant/vms/${vmId}/cost`),
@@ -492,7 +492,7 @@ test.describe.serial('billing', () => {
     expect(storage.storageCost - storageBefore).toBeGreaterThanOrEqual(perTick - 1e-6)
 
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmId}/stop`), 202)
-    await waitVm('BIL-01 vm stopped', vmId, (v) => v.currentState === 'Stopped' && v.transition === null)
+    await waitVm('BIL-01 vm stopped', vmId, (v) => v.status === 'Stopped')
     // A tick may already have sampled the VM while it ran; give it one tick to land, then a full tick stopped.
     await sleep(TICK_MS)
     const stoppedAt = (await get('tenant', `/v1/tenant/vms/${vmId}/cost`)).breakdown.length

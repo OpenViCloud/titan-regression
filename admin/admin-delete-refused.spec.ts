@@ -22,19 +22,25 @@ test.describe.serial('admin-delete-refused', () => {
   const http = { protocol: 'TCP', port: 80, targetPort: 8080 }
 
   function snapshotShape(s: any): string {
-    return `existence=${s.currentExistence} desired=${s.desiredExistence} transition=${s.transition} failure=${s.requestFailureReason}`
+    return `status=${s.status} failure=${s.requestFailureReason}`
+  }
+
+  // VmSnapshotStatus: Creating, Reverting, Deleting are in flight; everything else (Available, NotFound, Failed,
+  // Deleted) is at rest.
+  function snapshotAtRest(s: any): boolean {
+    return s.status !== 'Creating' && s.status !== 'Reverting' && s.status !== 'Deleting'
   }
 
   // The list leaves Deleted snapshots out (OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/VmSnapshotRepository.cs FindByVmIdAsync).
   async function readSnapshot(vmId: string, id: string): Promise<any> {
     const reply = await call('tenant', 'GET', `/v1/tenant/vms/${vmId}/snapshots`)
     if (reply.status === 404) {
-      return { currentExistence: 'Deleted' }
+      return { status: 'Deleted' }
     }
     expectStatus(reply, 200)
     const row = (bodyOf(reply) as any[]).find((s) => s.id === id)
     if (row === undefined) {
-      return { currentExistence: 'Deleted' }
+      return { status: 'Deleted' }
     }
     return row
   }
@@ -62,7 +68,7 @@ test.describe.serial('admin-delete-refused', () => {
     await cleanUp([
       ['snapshot at rest', async () => {
         if (snapshotId !== '') {
-          await pollUntil('snapshot at rest', () => readSnapshot(snapshotVmId, snapshotId), (s) => s.transition === null || s.currentExistence === 'Deleted', snapshotShape)
+          await pollUntil('snapshot at rest', () => readSnapshot(snapshotVmId, snapshotId), snapshotAtRest, snapshotShape)
         }
       }],
       ['vm with a snapshot', async () => {
@@ -75,11 +81,12 @@ test.describe.serial('admin-delete-refused', () => {
           return
         }
         const lb = await readLb(lbId)
-        if (lb.desiredExistence === 'Exists') {
-          await pollUntil('load balancer at rest', () => readLb(lbId), (row) => row.transition === null, existenceShape)
+        if (lb.status !== 'Deleting' && lb.status !== 'Deleted') {
+          // LoadBalancerStatus: Creating, Updating, Deleting are in flight; Available is the resting status.
+          await pollUntil('load balancer at rest', () => readLb(lbId), (row) => row.status !== 'Creating' && row.status !== 'Updating' && row.status !== 'Deleting', existenceShape)
           expectStatus(await call('tenant', 'DELETE', `/v1/tenant/load-balancers/${lbId}`), 202)
         }
-        await pollUntil('load balancer deleted', () => readLb(lbId), (row) => row.currentExistence === 'Deleted', existenceShape)
+        await pollUntil('load balancer deleted', () => readLb(lbId), (row) => row.status === 'Deleted', existenceShape)
       }],
       ['backend vm', async () => {
         if (backendVmId !== '') {
@@ -91,10 +98,10 @@ test.describe.serial('admin-delete-refused', () => {
           return
         }
         const network = await get('tenant', `/v1/tenant/networks/${ipv6NetworkId}`)
-        if (network.desiredExistence === 'Exists') {
+        if (network.status !== 'Deleting' && network.status !== 'Deleted') {
           expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${ipv6NetworkId}`), 202)
         }
-        await waitNetwork('IPv6 network deleted', ipv6NetworkId, (n) => n.currentExistence === 'Deleted')
+        await waitNetwork('IPv6 network deleted', ipv6NetworkId, (n) => n.status === 'Deleted')
       }],
       ['quota', async () => {
         if (originalQuota !== null) {
@@ -110,11 +117,11 @@ test.describe.serial('admin-delete-refused', () => {
   // auditLog.Add) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Deletion.cs (Delete: EnsureNotInTransition ⇒ VM_INVALID_STATUS) ·
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs (AddSnapshot, RevertSnapshot: Status = Snapshotting) ·
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/ErrorStatus.cs (BusinessException ⇒ 422)
-  test('ADM-12 admin delete of a VM whose snapshot is being made is 422 VM_SNAPSHOT_IN_PROGRESS; the VM stays, no audit row', async () => {
+  test('ADM-12 admin delete of a VM whose snapshot is being made is 422 VM_INVALID_STATUS; the VM stays, no audit row', async () => {
     const network = await runNetwork()
     const { smallTier } = await envOf()
     snapshotVmId = await createVm(`rg-admsnapvm-${RUN}`, smallTier, network.id)
-    await waitVm('ADM-12 vm running', snapshotVmId, (v) => runs(v) && v.transition === null)
+    await waitVm('ADM-12 vm running', snapshotVmId, (v) => runs(v))
 
     // The window is from the 202 to the worker's report (lease poll 2 s plus Incus's snapshot): the delete goes
     // right after one read of the snapshot. The admin session is opened first, so its sign-in does not eat the
@@ -125,17 +132,18 @@ test.describe.serial('admin-delete-refused', () => {
     snapshotId = bodyOf(created).snapshotId
     const before = await readSnapshot(snapshotVmId, snapshotId)
     log(`ADM-12 snapshot before the delete: ${snapshotShape(before)}`)
-    test.skip(before.transition === null, 'ADM-12: the snapshot came to rest before the admin delete; the race window was missed')
+    test.skip(snapshotAtRest(before), 'ADM-12: the snapshot came to rest before the admin delete; the race window was missed')
     const refused = await call('admin', 'DELETE', `/v1/admin/vms/${snapshotVmId}`)
     log(`ADM-12 admin delete: ${refused.status} ${refused.text.slice(0, 300)}`)
-    expectError(refused, 422, 'VM_SNAPSHOT_IN_PROGRESS')
+    expectError(refused, 422, 'VM_INVALID_STATUS')
 
     const vm = await getVm(snapshotVmId)
     log(`ADM-12 vm after: ${vmShape(vm)}`)
-    expect(vm.desiredExistence).toBe('Exists')
-    expect(vm.transition).toBeNull()
+    expect(['Deleting', 'Deleted']).not.toContain(vm.status)
+    // The refused delete leaves the VM on the snapshot's wait or at rest; it never starts a request of its own.
+    expect(['Creating', 'Starting', 'Stopping']).not.toContain(vm.status)
     expect(await crossTenantDeletesOf(snapshotVmId)).toEqual([])
-    await pollUntil('ADM-12 snapshot settles', () => readSnapshot(snapshotVmId, snapshotId), (s) => s.transition === null, snapshotShape)
+    await pollUntil('ADM-12 snapshot settles', () => readSnapshot(snapshotVmId, snapshotId), snapshotAtRest, snapshotShape)
   })
 
   // titan-ops features/vm/design.md#admin-delete-audit · titan-ops features/load-balancer/design.md#lb-and-vm-network ·
@@ -157,21 +165,21 @@ test.describe.serial('admin-delete-refused', () => {
     ipv6NetworkId = bodyOf(network).networkId
     await waitNetwork('ADM-13 IPv6 network usable', ipv6NetworkId, networkUsable)
     backendVmId = await createVm(`rg-admlbvm-${RUN}`, smallTier, ipv6NetworkId)
-    await waitVm('ADM-13 backend vm on Incus', backendVmId, (v) => v.currentExistence === 'Exists')
+    await waitVm('ADM-13 backend vm on Incus', backendVmId, (v) => runs(v))
     const created = await call('tenant', 'POST', '/v1/tenant/load-balancers',
       { name: `rg-admlb-${RUN}`, networkId: ipv6NetworkId, listeners: [http], backends: [{ vmId: backendVmId }] }, newKey())
     expectStatus(created, 202)
     lbId = bodyOf(created).loadBalancerId
     const lb = await readLb(lbId)
     log(`ADM-13 load balancer: ${existenceShape(lb)}`)
-    expect(lb.desiredExistence).toBe('Exists')
+    expect(['Deleting', 'Deleted']).not.toContain(lb.status)
 
     const refused = await call('admin', 'DELETE', `/v1/admin/vms/${backendVmId}`)
     log(`ADM-13 admin delete: ${refused.status} ${refused.text.slice(0, 300)}`)
     expectError(refused, 422, 'VM_IS_LOAD_BALANCER_BACKEND')
     const vm = await getVm(backendVmId)
     log(`ADM-13 vm after: ${vmShape(vm)}`)
-    expect(vm.desiredExistence).toBe('Exists')
+    expect(['Deleting', 'Deleted']).not.toContain(vm.status)
     expect(await crossTenantDeletesOf(backendVmId)).toEqual([])
   })
 })

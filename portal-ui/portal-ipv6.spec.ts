@@ -44,11 +44,12 @@ test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () =
           return
         }
         const lb = await readLb(lbId)
-        if (lb.desiredExistence === 'Exists') {
-          await pollUntil('cleanup: load balancer at rest', () => readLb(lbId), (row) => row.transition === null, existenceShape)
+        if (lb.status !== 'Deleting' && lb.status !== 'Deleted') {
+          // LoadBalancerStatus: Creating, Updating, Deleting are in flight; Available is the resting status.
+          await pollUntil('cleanup: load balancer at rest', () => readLb(lbId), (row) => row.status !== 'Creating' && row.status !== 'Updating' && row.status !== 'Deleting', existenceShape)
           expectStatus(await call('tenant', 'DELETE', `/v1/tenant/load-balancers/${lbId}`), 202)
         }
-        await pollUntil('cleanup: load balancer deleted', () => readLb(lbId), (row) => row.currentExistence === 'Deleted', existenceShape)
+        await pollUntil('cleanup: load balancer deleted', () => readLb(lbId), (row) => row.status === 'Deleted', existenceShape)
       }],
       ['vm', async () => {
         if (vmId !== '') {
@@ -60,10 +61,10 @@ test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () =
           return
         }
         const network = await readNetwork()
-        if (network.desiredExistence === 'Exists') {
+        if (network.status !== 'Deleting' && network.status !== 'Deleted') {
           expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${networkId}`), 202)
         }
-        await waitNetwork('cleanup: IPv6 network deleted', networkId, (n) => n.currentExistence === 'Deleted')
+        await waitNetwork('cleanup: IPv6 network deleted', networkId, (n) => n.status === 'Deleted')
       }],
       ['quota', async () => {
         if (originalQuota !== null) {
@@ -206,7 +207,7 @@ test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () =
     await page.screenshot({ path: `${RESULTS}/UI-17-lb-creating.png` })
 
     const settled = await pollUntil('UI-17 load balancer on Incus', () => readLb(lbId),
-      (lb) => lb.currentExistence === 'Exists' && lb.transition === null, existenceShape)
+      (lb) => lb.status === 'Available', existenceShape)
     expect(settled.vip).toBe(`${subnet.replace(/::\/64$/, '')}::1:1`)
     await reopen()
     await expect(rowOf()).toContainText(settled.vip)
@@ -233,7 +234,7 @@ test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () =
     await expect(editDialog).toHaveCount(0)
 
     const updated = await pollUntil('UI-17 load balancer updated', () => readLb(lbId),
-      (lb) => lb.transition === null && lb.listeners.length === 2, existenceShape)
+      (lb) => lb.status === 'Available' && lb.listeners.length === 2, existenceShape)
     expect(updated.listeners).toEqual(expect.arrayContaining([
       { protocol: 'TCP', port: 80, targetPort: 8080 },
       { protocol: 'UDP', port: 53, targetPort: 53 },
@@ -249,7 +250,7 @@ test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () =
     await page.getByRole('button', { name: 'Confirm' }).click()
     await expect(rowOf().getByText(/deleting/i)).toBeVisible()
     await page.screenshot({ path: `${RESULTS}/UI-17-lb-deleting.png` })
-    await pollUntil('UI-17 load balancer deleted', () => readLb(lbId), (lb) => lb.currentExistence === 'Deleted', existenceShape)
+    await pollUntil('UI-17 load balancer deleted', () => readLb(lbId), (lb) => lb.status === 'Deleted', existenceShape)
     await reopen()
     await expect(page.getByRole('listitem').filter({ hasText: lbName })).toHaveCount(0)
     log(`UI-17 ${lbName} deleted`)

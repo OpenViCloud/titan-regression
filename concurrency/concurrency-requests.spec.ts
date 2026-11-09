@@ -17,14 +17,37 @@ function statusOf(reply: Reply): string {
   return `${reply.status} ${bodyOf(reply).code || ''}`.trim()
 }
 
-// What counts toward MaxNetworks: desired Exists and (Exists, or its create waits)
+// What counts toward MaxNetworks: not Deleting, Deleted, NotFound or Failed
 // (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs OccupiesQuota).
 function countsTowardQuota(n: any): boolean {
-  return n.desiredExistence === 'Exists' && (n.currentExistence === 'Exists' || n.transition === 'Creating')
+  return n.status !== 'Deleting' && n.status !== 'Deleted' && n.status !== 'NotFound' && n.status !== 'Failed'
 }
 
 function plainShape(r: any): string {
-  return `existence=${r.currentExistence} desired=${r.desiredExistence} transition=${r.transition} failure=${r.requestFailureReason}`
+  return `status=${r.status} failure=${r.requestFailureReason}`
+}
+
+// Waiting on its own command: network and firewall rule share the same two (Creating, Deleting), volume and load
+// balancer have their own kinds (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs,
+// Entities/FirewallRule.cs, Titan.Domain/Aggregates/Volume/Volume.cs, Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs).
+function networkPending(n: any): boolean {
+  return n.status === 'Creating' || n.status === 'Deleting'
+}
+
+function rulePending(r: any): boolean {
+  return r.status === 'Creating' || r.status === 'Deleting'
+}
+
+function volumePending(v: any): boolean {
+  return v.status === 'Creating' || v.status === 'Attaching' || v.status === 'Detaching' || v.status === 'Deleting'
+}
+
+function lbPending(row: any): boolean {
+  return row.status === 'Creating' || row.status === 'Updating' || row.status === 'Deleting'
+}
+
+function vmSnapshotPending(s: any): boolean {
+  return s.status === 'Creating' || s.status === 'Reverting' || s.status === 'Deleting'
 }
 
 async function feedIds(): Promise<Set<string>> {
@@ -110,11 +133,11 @@ test.describe.serial('concurrency-requests', () => {
 
   // Waits for the network's request to end, asks for its delete if it still wants to exist, waits for Deleted.
   async function deleteNetwork(id: string): Promise<void> {
-    const settled = await waitNetwork(`network ${id} at rest`, id, (n) => n.transition === null)
-    if (settled.desiredExistence === 'Exists' && settled.currentExistence !== 'Deleted') {
+    const settled = await waitNetwork(`network ${id} at rest`, id, (n) => !networkPending(n))
+    if (settled.status !== 'Deleted') {
       expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${id}`), 202)
     }
-    await waitNetwork(`network ${id} deleted`, id, (n) => n.currentExistence === 'Deleted')
+    await waitNetwork(`network ${id} deleted`, id, (n) => n.status === 'Deleted')
     const at = networks.indexOf(id)
     if (at >= 0) {
       networks.splice(at, 1)
@@ -133,18 +156,18 @@ test.describe.serial('concurrency-requests', () => {
     const rows = await get('tenant', `/v1/tenant/networks/${ruleNetworkId}/firewall-rules`) as any[]
     // A Deleted rule is kept but not listed
     // (OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/FirewallRuleRepository.cs ListByNetworkAsync).
-    return rows.find((r) => r.id === ruleId) ?? { currentExistence: 'Deleted' }
+    return rows.find((r) => r.id === ruleId) ?? { status: 'Deleted' }
   }
 
   async function readSnapshot(): Promise<any> {
     const reply = await call('tenant', 'GET', `/v1/tenant/vms/${vmId}/snapshots`)
     if (reply.status === 404) {
-      return { currentExistence: 'Deleted' }
+      return { status: 'Deleted' }
     }
     expectStatus(reply, 200)
     // The list leaves Deleted snapshots out
     // (OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/VmSnapshotRepository.cs FindByVmIdAsync).
-    return (bodyOf(reply) as any[]).find((s) => s.id === snapshotId) ?? { currentExistence: 'Deleted' }
+    return (bodyOf(reply) as any[]).find((s) => s.id === snapshotId) ?? { status: 'Deleted' }
   }
 
   const readLb = () => get('tenant', `/v1/tenant/load-balancers/${lbId}`)
@@ -153,11 +176,11 @@ test.describe.serial('concurrency-requests', () => {
     if (lbId === '') {
       return
     }
-    const lb = await pollUntil('load balancer at rest', readLb, (row) => row.transition === null, existenceShape)
-    if (lb.desiredExistence === 'Exists' && lb.currentExistence !== 'Deleted') {
+    const lb = await pollUntil('load balancer at rest', readLb, (row) => !lbPending(row), existenceShape)
+    if (lb.status !== 'Deleted') {
       expectStatus(await call('tenant', 'DELETE', `/v1/tenant/load-balancers/${lbId}`), 202)
     }
-    await pollUntil('load balancer deleted', readLb, (row) => row.currentExistence === 'Deleted', existenceShape)
+    await pollUntil('load balancer deleted', readLb, (row) => row.status === 'Deleted', existenceShape)
     lbId = ''
   }
 
@@ -165,15 +188,15 @@ test.describe.serial('concurrency-requests', () => {
     if (volumeId === '') {
       return
     }
-    let v = await waitVolume('volume at rest', volumeId, (row) => row.transition === null || row.currentExistence === 'Deleted')
-    if (v.currentExistence !== 'Deleted' && v.desiredExistence === 'Exists') {
+    let v = await waitVolume('volume at rest', volumeId, (row) => !volumePending(row))
+    if (v.status !== 'Deleted') {
       if (v.currentAttachedVmId !== null || v.desiredAttachedVmId !== null) {
         expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${volumeId}/detach`), 202)
-        v = await waitVolume('volume detached', volumeId, (row) => row.currentAttachedVmId === null && row.transition === null)
+        v = await waitVolume('volume detached', volumeId, (row) => row.currentAttachedVmId === null && !volumePending(row))
       }
       expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeId}`), 202)
     }
-    await waitVolume('volume deleted', volumeId, (row) => row.currentExistence === 'Deleted')
+    await waitVolume('volume deleted', volumeId, (row) => row.status === 'Deleted')
     volumeId = ''
   }
 
@@ -183,7 +206,7 @@ test.describe.serial('concurrency-requests', () => {
       return
     }
     if (snapshotId !== '') {
-      await pollUntil('snapshot at rest', readSnapshot, (s) => s.transition === null || s.transition === 'Deleting', plainShape)
+      await pollUntil('snapshot at rest', readSnapshot, (s) => s.status !== 'Creating' && s.status !== 'Reverting', plainShape)
     }
     await deleteVmAndWait(vmId)
     vmId = ''
@@ -222,7 +245,7 @@ test.describe.serial('concurrency-requests', () => {
       networkId = hostNetworkId
     }
     vmId = await createVm(vmName, smallTier, networkId)
-    await waitVm('host VM runs', vmId, (v) => runs(v) && v.transition === null)
+    await waitVm('host VM runs', vmId, runs)
     return vmId
   }
 
@@ -245,11 +268,11 @@ test.describe.serial('concurrency-requests', () => {
         if (ruleId === '') {
           return
         }
-        const rule = await pollUntil('rule at rest', readRule, (r) => r.transition === null || r.currentExistence === 'Deleted', plainShape)
-        if (rule.currentExistence !== 'Deleted' && rule.desiredExistence === 'Exists') {
+        const rule = await pollUntil('rule at rest', readRule, (r) => !rulePending(r), plainShape)
+        if (rule.status !== 'Deleted') {
           expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${ruleNetworkId}/firewall-rules/${ruleId}`), 204)
         }
-        await pollUntil('rule deleted', readRule, (r) => r.currentExistence === 'Deleted', plainShape)
+        await pollUntil('rule deleted', readRule, (r) => r.status === 'Deleted', plainShape)
       }],
       ...[...networks].map((id): [string, () => Promise<void>] => [`network ${id}`, () => deleteNetwork(id)]),
       ['sessions', closeSessions],
@@ -320,7 +343,7 @@ test.describe.serial('concurrency-requests', () => {
       const answers = await twoAtOnce('CC-08', 'DELETE', `/v1/tenant/networks/${id}`)
       log(`CC-08 right after: ${existenceShape(await get('tenant', `/v1/tenant/networks/${id}`))}`)
       expect(answers).toEqual(['202', '202'])
-      await waitNetwork('CC-08 deleted', id, (n) => n.currentExistence === 'Deleted')
+      await waitNetwork('CC-08 deleted', id, (n) => n.status === 'Deleted')
       await expectOneRequestOneOutcome('CC-08', before, (n) => n === name, 'network.delete_requested', 'network.deleted')
     } finally {
       if (id !== '' && networks.includes(id)) {
@@ -340,12 +363,14 @@ test.describe.serial('concurrency-requests', () => {
       { direction: 'Ingress', protocol: 'TCP', startPort: 7007, endPort: 7007, cidr: ruleCidr }, newKey())
     expectStatus(created, 201)
     ruleId = bodyOf(created).ruleId as string
-    await pollUntil('CC-09 rule Exists', readRule, (r) => r.currentExistence === 'Exists' && r.transition === null, plainShape)
+    // At rest with the ACL line applied: one of the Incus words (enabled/disabled/logged) or Unknown
+    // (titan-ops features/network/design.md#firewall-rule-status).
+    await pollUntil('CC-09 rule Exists', readRule, (r) => !['Creating', 'Deleting', 'NotFound', 'Failed', 'Deleted'].includes(r.status), plainShape)
     const before = await feedIds()
     const answers = await twoAtOnce('CC-09', 'DELETE', `/v1/tenant/networks/${ruleNetworkId}/firewall-rules/${ruleId}`)
     log(`CC-09 right after: ${plainShape(await readRule())}`)
     expect(answers).toEqual(['204', '204'])
-    await pollUntil('CC-09 rule deleted', readRule, (r) => r.currentExistence === 'Deleted', plainShape)
+    await pollUntil('CC-09 rule deleted', readRule, (r) => r.status === 'Deleted', plainShape)
     await expectOneRequestOneOutcome('CC-09', before, (n) => n.endsWith(` ${ruleCidr}`),
       'firewall_rule.delete_requested', 'firewall_rule.deleted')
     ruleId = ''
@@ -361,14 +386,14 @@ test.describe.serial('concurrency-requests', () => {
     const created = await call('tenant', 'POST', '/v1/tenant/volumes', { name: volumeName, volumeOfferingId, clusterId, sizeGb: 1 }, newKey())
     expectStatus(created, 202)
     volumeId = bodyOf(created).volumeId as string
-    await waitVolume('CC-07 volume Exists', volumeId, (v) => v.currentExistence === 'Exists' && v.transition === null)
+    await waitVolume('CC-07 volume Exists', volumeId, (v) => v.status === 'Available')
     expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${volumeId}/attach`, { vmId: vm }), 202)
-    await waitVolume('CC-07 attached at rest', volumeId, (v) => v.currentAttachedVmId === vm && v.transition === null)
+    await waitVolume('CC-07 attached at rest', volumeId, (v) => v.currentAttachedVmId === vm && !volumePending(v))
     const before = await feedIds()
     const answers = await twoAtOnce('CC-07', 'POST', `/v1/tenant/volumes/${volumeId}/detach`)
     log(`CC-07 right after: ${volumeShape(await readVolume(volumeId))}`)
     expect(answers).toEqual(['202', '202'])
-    await waitVolume('CC-07 detached', volumeId, (v) => v.currentAttachedVmId === null && v.transition === null)
+    await waitVolume('CC-07 detached', volumeId, (v) => v.currentAttachedVmId === null && !volumePending(v))
     await expectOneRequestOneOutcome('CC-07', before, (n) => n === volumeName, 'volume.detach_requested', 'volume.detached')
   })
 
@@ -381,16 +406,16 @@ test.describe.serial('concurrency-requests', () => {
     const created = await call('tenant', 'POST', `/v1/tenant/vms/${vm}/snapshots`, { name: snapshotName }, newKey())
     expectStatus(created, 202)
     snapshotId = bodyOf(created).snapshotId as string
-    await pollUntil('CC-10 snapshot Exists', readSnapshot, (s) => s.currentExistence === 'Exists' && s.transition === null, plainShape)
+    await pollUntil('CC-10 snapshot Exists', readSnapshot, (s) => s.status === 'Available', plainShape)
     const before = await feedIds()
     const answers = await twoAtOnce('CC-10', 'POST', `/v1/tenant/vms/${vm}/snapshots/${snapshotId}/revert`)
     const right = await readSnapshot()
     log(`CC-10 right after: ${plainShape(right)}`)
     expect(answers).toEqual(['202', '202'])
-    await pollUntil('CC-10 revert at rest', readSnapshot, (s) => s.currentExistence === 'Exists' && s.transition === null, plainShape)
+    await pollUntil('CC-10 revert at rest', readSnapshot, (s) => !vmSnapshotPending(s), plainShape)
     // Only a revert still waiting when the second arrives makes the second a repeat; one already ended makes it a new
     // revert, which is right too, so that lap measures nothing.
-    test.skip(right.transition === null, 'the revert had already ended when both answers were in: the second may have been a new revert')
+    test.skip(!vmSnapshotPending(right), 'the revert had already ended when both answers were in: the second may have been a new revert')
     await expectOneRequestOneOutcome('CC-10', before, (n) => n === snapshotName, 'vm_snapshot.revert_requested', 'vm_snapshot.reverted')
   })
 
@@ -400,12 +425,12 @@ test.describe.serial('concurrency-requests', () => {
   // (TwoDeletesOfOneSnapshot_AtOnce_LeaveOneRequest_AndOneCommandRow)
   test('CC-11 two deletes of one snapshot at once: two 202, one vm_snapshot.delete_requested, Deleted, one vm_snapshot.deleted', async () => {
     test.skip(snapshotId === '', 'CC-10 made no snapshot')
-    await pollUntil('CC-11 snapshot at rest', readSnapshot, (s) => s.currentExistence === 'Exists' && s.transition === null, plainShape)
+    await pollUntil('CC-11 snapshot at rest', readSnapshot, (s) => s.status === 'Available', plainShape)
     const before = await feedIds()
     const answers = await twoAtOnce('CC-11', 'DELETE', `/v1/tenant/vms/${vmId}/snapshots/${snapshotId}`)
     log(`CC-11 right after: ${plainShape(await readSnapshot())}`)
     expect(answers).toEqual(['202', '202'])
-    await pollUntil('CC-11 snapshot deleted', readSnapshot, (s) => s.currentExistence === 'Deleted', plainShape)
+    await pollUntil('CC-11 snapshot deleted', readSnapshot, (s) => s.status === 'Deleted', plainShape)
     await expectOneRequestOneOutcome('CC-11', before, (n) => n === snapshotName, 'vm_snapshot.delete_requested', 'vm_snapshot.deleted')
     snapshotId = ''
   })
@@ -423,12 +448,12 @@ test.describe.serial('concurrency-requests', () => {
       { name: lbName, networkId: hostNetworkId, listeners: [{ protocol: 'TCP', port: 80, targetPort: 8080 }], backends: [{ vmId: vm }] }, newKey())
     expectStatus(created, 202)
     lbId = bodyOf(created).loadBalancerId as string
-    await pollUntil('CC-12 load balancer Exists', readLb, (row) => row.currentExistence === 'Exists' && row.transition === null, existenceShape)
+    await pollUntil('CC-12 load balancer Exists', readLb, (row) => row.status === 'Available', existenceShape)
     const before = await feedIds()
     const answers = await twoAtOnce('CC-12', 'DELETE', `/v1/tenant/load-balancers/${lbId}`)
     log(`CC-12 right after: ${existenceShape(await readLb())}`)
     expect(answers).toEqual(['202', '202'])
-    await pollUntil('CC-12 deleted', readLb, (row) => row.currentExistence === 'Deleted', existenceShape)
+    await pollUntil('CC-12 deleted', readLb, (row) => row.status === 'Deleted', existenceShape)
     await expectOneRequestOneOutcome('CC-12', before, (n) => n === lbName, 'load_balancer.delete_requested', 'load_balancer.deleted')
     lbId = ''
   })
@@ -439,12 +464,12 @@ test.describe.serial('concurrency-requests', () => {
   test('CC-06 two stops of one running VM at once: two 202, one vm.stop_requested, Stopped, one vm.stopped', async () => {
     try {
       const vm = await host()
-      await waitVm('CC-06 running at rest', vm, (v) => runs(v) && v.transition === null)
+      await waitVm('CC-06 running at rest', vm, runs)
       const before = await feedIds()
       const answers = await twoAtOnce('CC-06', 'POST', `/v1/tenant/vms/${vm}/stop`)
       log(`CC-06 right after: ${vmShape(await get('tenant', `/v1/tenant/vms/${vm}`))}`)
       expect(answers).toEqual(['202', '202'])
-      await waitVm('CC-06 stopped', vm, (v) => v.currentState === 'Stopped' && v.transition === null)
+      await waitVm('CC-06 stopped', vm, (v) => v.status === 'Stopped')
       await expectOneRequestOneOutcome('CC-06', before, (n) => n === vmName, 'vm.stop_requested', 'vm.stopped')
     } finally {
       await deleteHost()

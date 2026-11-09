@@ -5,12 +5,9 @@ import { envOf, nameOf, runNetwork, runs, waitVm, waitVolume } from './fixtures'
 import { topUpEnabledOf } from './portal-config'
 
 // Cases UI-18..21, UI-24..26 of plan.md: form validation (network, VM, firewall rule), the buy-credit
-// amount parser, the VM delete button's existence/transition invariant, deleting a volume that still has a
+// amount parser, the VM delete button's status invariant, deleting a volume that still has a
 // snapshot, and the 404 page. UI-18 is N/A where the portal config has no topUpEnabled: true. UI-22 is NOT COVERED
 // (plan.md says why: needs a provider-refused delete, no fault injection on any environment).
-//
-// POLL_MS — OpenViCloud/titan-cloud-console:portal/src/hooks/pollUntilSettled.ts — is the interval the VM list page itself refetches at
-// while a row is waiting, used below to size how long an "enabled" assertion is given to catch up with it.
 //
 // UI-23 (network with a load balancer and no VM blocks Delete with "Delete the load balancers of this network
 // first") is also NOT COVERED: a load balancer requires at least one backend VM
@@ -35,40 +32,45 @@ test.describe.serial('portal-ui forms: network, firewall, volume and VM form val
   const volumeName = nameOf('volui21')
   const ruleCidr = '203.0.113.5/32' // TEST-NET-3 (RFC 5737): distinctive, never collides with another rule's CIDR
 
+  // VolumeStatus: Creating, Attaching, Detaching, Deleting are in flight; everything else is at rest.
+  function volumeAtRest(v: any): boolean {
+    return v.status !== 'Creating' && v.status !== 'Attaching' && v.status !== 'Detaching' && v.status !== 'Deleting'
+  }
+
   // Same shape as volume/volume.spec.ts and portal-flows.spec.ts's deleteVolumeAndWait: drain attach
   // and snapshots first, since a DELETE on a volume that still has one 422s with VOLUME_HAS_SNAPSHOTS — the very
   // refusal UI-21 means to exercise, so cleanup must not race it.
   async function deleteVolumeAndWait(id: string): Promise<void> {
-    const volume = await waitVolume(`cleanup: volume ${id} at rest`, id, (v) => v.transition === null || v.currentExistence === 'Deleted')
-    if (volume.currentExistence === 'Deleted') {
+    const volume = await waitVolume(`cleanup: volume ${id} at rest`, id, volumeAtRest)
+    if (volume.status === 'Deleted') {
       return
     }
     if (volume.currentAttachedVmId !== null) {
       expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${id}/detach`), 202)
-      await waitVolume('cleanup: detached', id, (v) => v.currentAttachedVmId === null && v.transition === null)
+      await waitVolume('cleanup: detached', id, (v) => v.currentAttachedVmId === null && volumeAtRest(v))
     }
     const snaps = await get('tenant', `/v1/tenant/volumes/${id}/snapshots`) as any[]
     for (const snap of snaps) {
-      if (snap.desiredExistence === 'Exists') {
+      if (snap.status !== 'Deleting' && snap.status !== 'Deleted') {
         await pollUntil('cleanup: snapshot at rest', () => get('tenant', `/v1/tenant/volumes/${id}/snapshots`).then((rows: any[]) => rows.find((s) => s.id === snap.id)),
-          (s) => s === undefined || s.transition === null, (s) => `transition=${s?.transition}`)
+          (s) => s === undefined || (s.status !== 'Creating' && s.status !== 'Deleting'), (s) => `status=${s?.status}`)
         expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${id}/snapshots/${snap.id}`), 202)
       }
     }
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${id}`), 202)
-    await waitVolume('cleanup: volume deleted', id, (v) => v.currentExistence === 'Deleted')
+    await waitVolume('cleanup: volume deleted', id, (v) => v.status === 'Deleted')
   }
 
   async function deleteVmAndWait(id: string): Promise<void> {
-    // A delete while the create is still waiting without an instance yet is refused (VM_INVALID_STATUS,
-    // titan-ops features/vm/design.md#requests-follow-incus); wait past that window first.
-    const vm = await waitVm(`cleanup: vm ${id} out of NotCreated`, id,
-      (v) => v.currentExistence !== 'NotCreated' || v.transition === null || v.currentExistence === 'Deleted')
-    if (vm.currentExistence === 'Deleted') {
+    // A delete while the create is still waiting is refused (VM_INVALID_STATUS, titan-ops
+    // features/vm/design.md#requests-follow-incus); every VM here comes to this helper at rest or Creating, so wait
+    // past the create first.
+    const vm = await waitVm(`cleanup: vm ${id} out of Creating`, id, (v) => v.status !== 'Creating')
+    if (vm.status === 'Deleted') {
       return
     }
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/vms/${id}`), 202)
-    await waitVm('cleanup: vm deleted', id, (v) => v.currentExistence === 'Deleted')
+    await waitVm('cleanup: vm deleted', id, (v) => v.status === 'Deleted')
   }
 
   test.beforeAll(async ({ browser }) => {
@@ -90,15 +92,15 @@ test.describe.serial('portal-ui forms: network, firewall, volume and VM form val
       const rule = await pollUntil('cleanup: firewall rule at rest', () => get('tenant', `/v1/tenant/networks/${runNetworkId}/firewall-rules`),
         (rows: any[]) => {
           const row = rows.find((r) => r.id === ruleId)
-          return row === undefined || row.transition === null
+          return row === undefined || (row.status !== 'Creating' && row.status !== 'Deleting')
         }, (rows: any[]) => `count=${rows.length}`)
       const stillThere = rule.find((r: any) => r.id === ruleId)
-      if (stillThere !== undefined && stillThere.currentExistence !== 'Deleted') {
+      if (stillThere !== undefined && stillThere.status !== 'Deleted') {
         expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${runNetworkId}/firewall-rules/${ruleId}`), 204)
         await pollUntil('cleanup: firewall rule gone', () => get('tenant', `/v1/tenant/networks/${runNetworkId}/firewall-rules`),
           (rows: any[]) => {
             const row = rows.find((r) => r.id === ruleId)
-            return row === undefined || row.currentExistence === 'Deleted'
+            return row === undefined || row.status === 'Deleted'
           }, (rows: any[]) => `count=${rows.length}`)
       }
     }
@@ -231,13 +233,13 @@ test.describe.serial('portal-ui forms: network, firewall, volume and VM form val
     expectStatus(created, 202)
     volumeId = bodyOf(created).volumeId as string
     await pollUntil('UI-21 volume ready', () => get('tenant', '/v1/tenant/volumes').then((rows: any[]) => rows.find((v) => v.id === volumeId)),
-      (v) => v.currentExistence === 'Exists' && v.transition === null, (v) => `existence=${v.currentExistence} transition=${v.transition}`)
+      (v) => v.status === 'Available', (v) => `status=${v.status}`)
 
     const snapReply = await call('tenant', 'POST', `/v1/tenant/volumes/${volumeId}/snapshots`, { name: nameOf('volsnap21') }, newKey())
     expectStatus(snapReply, 202)
     const snapshotId = bodyOf(snapReply).snapshotId as string
     await pollUntil('UI-21 snapshot ready', () => get('tenant', `/v1/tenant/volumes/${volumeId}/snapshots`).then((rows: any[]) => rows.find((s) => s.id === snapshotId)),
-      (s) => s.currentExistence === 'Exists' && s.transition === null, (s) => `existence=${s.currentExistence} transition=${s.transition}`)
+      (s) => s.status === 'Available', (s) => `status=${s.status}`)
 
     const page = await pageOf('tenant')
     await page.goto(PORTAL + '/volumes', { waitUntil: 'networkidle' })
@@ -252,17 +254,14 @@ test.describe.serial('portal-ui forms: network, firewall, volume and VM form val
     await page.screenshot({ path: `${RESULTS}/UI-21-still-has-snapshots.png` })
 
     const volume = await get('tenant', '/v1/tenant/volumes').then((rows: any[]) => rows.find((v) => v.id === volumeId))
-    expect(volume.currentExistence, 'the volume must still exist').toBe('Exists')
+    expect(volume.status, 'the volume must still exist').toBe('Available')
     log(`UI-21 volume ${volumeName} survives delete attempt while it has a snapshot`)
   })
 
-  // titan-ops features/vm/design.md#vm-portal · OpenViCloud/titan-cloud-console:portal/src/lib/vmState.ts (canDeleteVm: false while Deleting, and while
-  // transition === 'Creating' && currentExistence === 'NotCreated'; true once Exists, even mid-Creating)
+  // titan-ops features/vm/design.md#vm-portal · OpenViCloud/titan-cloud-console:portal/src/lib/vmState.ts (canDeleteVm: every status but
+  // Creating, Deleting, Deleted or Snapshotting)
   // OpenViCloud/titan-cloud-console:portal/src/components/vm/VmActions.tsx (VmActions: Delete disabled by canDeleteVm)
-  // OpenViCloud/titan-cloud-console:portal/src/hooks/pollUntilSettled.ts (POLL_MS = 5000,
-  // the interval the VM list itself refetches at while a row waits)
-  test('UI-20 creating a VM through the form: Delete is disabled only while Creating and NotCreated, enabled once Exists', async () => {
-    const POLL_MS = 5_000
+  test('UI-20 creating a VM through the form: Delete is disabled only while Creating, enabled once it rests', async () => {
     const { clusterId, templateId, smallTier } = await envOf()
     const network = await runNetwork()
     let page = await pageOf('tenant')
@@ -288,8 +287,7 @@ test.describe.serial('portal-ui forms: network, firewall, volume and VM form val
     const deleteButton = () => row().getByRole('button', { name: 'Delete', exact: true })
     await expect(row()).toBeVisible()
 
-    let sawNotCreated = false
-    let sawExistsWhileCreating = false
+    let sawCreating = false
     await pollUntil('UI-20 vm running', async () => {
       // A long poll may sign in again (auth.ts headersOf), which closes the old browser context: pick up the
       // current page and reload before reading it, or the row's own token can run out mid-loop.
@@ -298,32 +296,26 @@ test.describe.serial('portal-ui forms: network, firewall, volume and VM form val
         page = current
         await page.goto(PORTAL + '/vms', { waitUntil: 'networkidle' })
       }
-      // Read the button state BEFORE the API call it is meant to reflect: existence only moves NotCreated ->
-      // Exists, so a disabled reading taken first is still valid against a NotCreated read that follows it
-      // (the server cannot have moved backwards in the meantime) — reading after the GET would let the UI
-      // observe a flip to Exists that happened in between and fail a true invariant.
+      // Read the button state BEFORE the API call it is meant to reflect: status only moves Creating -> a resting
+      // status, so a disabled reading taken first is still valid against a Creating read that follows it (the
+      // server cannot have moved backwards in the meantime) — reading after the GET would let the UI observe a
+      // flip to resting that happened in between and fail a true invariant.
       const disabledBefore = await deleteButton().isDisabled()
       const vm = await get('tenant', `/v1/tenant/vms/${vmId20}`)
-      if (vm.transition === 'Creating' && vm.currentExistence === 'NotCreated') {
-        expect(disabledBefore, 'Delete must be disabled while Creating and NotCreated').toBe(true)
-        sawNotCreated = true
-      } else if (vm.transition === 'Creating' && vm.currentExistence === 'Exists') {
-        // The list page polls at POLL_MS while a row waits (OpenViCloud/titan-cloud-console:portal/src/hooks/pollUntilSettled.ts) — give the UI one full tick
-        // past that to catch up before asserting it reflects the already-Exists API state.
-        await expect(deleteButton()).toBeEnabled({ timeout: POLL_MS + 5_000 })
-        sawExistsWhileCreating = true
+      if (vm.status === 'Creating') {
+        expect(disabledBefore, 'Delete must be disabled while Creating').toBe(true)
+        sawCreating = true
       }
       return vm
-    }, (vm) => runs(vm), (vm) => `state=${vm.currentState} existence=${vm.currentExistence} transition=${vm.transition}`, undefined, 3_000)
+    }, (vm) => runs(vm), (vm) => `status=${vm.status}`, undefined, 3_000)
 
     // Re-fetch the page (a wait may have signed in again and replaced the context) and confirm Delete is
-    // enabled once the VM is settled, regardless of whether the Creating ∧ Exists window above was observed
-    // — that window is short and not guaranteed to land between two 3s polls.
+    // enabled once the VM is settled.
     page = await pageOf('tenant')
     await page.goto(PORTAL + '/vms', { waitUntil: 'networkidle' })
     await expect(deleteButton()).toBeEnabled()
     await page.screenshot({ path: `${RESULTS}/UI-20-vm-running-delete-enabled.png` })
-    log(`UI-20 ${vmName20} sawNotCreated=${sawNotCreated} sawExistsWhileCreating=${sawExistsWhileCreating}`)
+    log(`UI-20 ${vmName20} sawCreating=${sawCreating}`)
   })
 })
 

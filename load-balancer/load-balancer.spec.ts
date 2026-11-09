@@ -34,15 +34,24 @@ test.describe.serial('load-balancer', () => {
 
   const readLb = (id: string) => get('tenant', `/v1/tenant/load-balancers/${id}`)
 
+  // Waiting on its own command (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs).
+  const lbPending = (row: any) => row.status === 'Creating' || row.status === 'Updating' || row.status === 'Deleting'
+
   const atRest = (id: string, label: string) =>
-    pollUntil(label, () => readLb(id), (row) => row.currentExistence === 'Exists' && row.transition === null, existenceShape)
+    pollUntil(label, () => readLb(id), (row) => row.status === 'Available', existenceShape)
 
   const deleted = (id: string, label: string) =>
-    pollUntil(label, () => readLb(id), (row) => row.currentExistence === 'Deleted', existenceShape)
+    pollUntil(label, () => readLb(id), (row) => row.status === 'Deleted', existenceShape)
 
   // The activity rows of one name, oldest first (the feed answers newest first).
   async function timelineOf(name: string): Promise<string[]> {
     return (await activityOf(name)).reverse()
+  }
+
+  // A VM a load balancer may send to: the instance is on Incus, whatever its status
+  // (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Guards.cs EnsureLoadBalancerCanSendTo).
+  function vmHasInstance(v: any): boolean {
+    return ['Running', 'Ready', 'Stopped', 'Frozen', 'Error', 'Starting', 'Stopping', 'Snapshotting'].includes(v.status)
   }
 
   async function createExtraLb(name: string): Promise<string> {
@@ -56,8 +65,8 @@ test.describe.serial('load-balancer', () => {
 
   async function deleteLbAndWait(id: string, label: string): Promise<void> {
     const lb = await readLb(id)
-    if (lb.desiredExistence === 'Exists') {
-      await pollUntil(`${label} at rest`, () => readLb(id), (row) => row.transition === null, existenceShape)
+    if (lb.status !== 'Deleting' && lb.status !== 'Deleted') {
+      await pollUntil(`${label} at rest`, () => readLb(id), (row) => !lbPending(row), existenceShape)
       expectStatus(await call('tenant', 'DELETE', `/v1/tenant/load-balancers/${id}`), 202)
     }
     await deleted(id, `${label} deleted`)
@@ -100,10 +109,10 @@ test.describe.serial('load-balancer', () => {
           return
         }
         const network = await get('tenant', `/v1/tenant/networks/${ipv6NetworkId}`)
-        if (network.desiredExistence === 'Exists') {
+        if (network.status !== 'Deleting' && network.status !== 'Deleted') {
           expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${ipv6NetworkId}`), 202)
         }
-        await waitNetwork('IPv6 network deleted', ipv6NetworkId, (n) => n.currentExistence === 'Deleted')
+        await waitNetwork('IPv6 network deleted', ipv6NetworkId, (n) => n.status === 'Deleted')
       }],
       ['quota', async () => {
         if (originalQuota === null) {
@@ -160,7 +169,7 @@ test.describe.serial('load-balancer', () => {
     subnet = network.publicIpv6Subnet
     expect(subnet).toMatch(/\/64$/)
     vmId = await createVm(`rg-vmlb-${RUN}`, smallTier, ipv6NetworkId)
-    await waitVm('backend VM on Incus', vmId, (v) => v.currentExistence === 'Exists')
+    await waitVm('backend VM on Incus', vmId, vmHasInstance)
 
     const created = await call('tenant', 'POST', '/v1/tenant/load-balancers',
       { name: lbName, networkId: ipv6NetworkId, listeners: [http], backends: [{ vmId }] }, newKey())
@@ -179,8 +188,7 @@ test.describe.serial('load-balancer', () => {
     const own = await readLb(lbId)
     log(`LB-03 after admin-test: name=${own.name} ${existenceShape(own)}`)
     expect(own.name).toBe(lbName)
-    expect(own.desiredExistence).toBe('Exists')
-    expect(own.transition).toBeNull()
+    expect(own.status).toBe('Available')
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/LoadBalancer/UpdateLoadBalancerCommandHandler.cs HandleAsync — the same
@@ -188,10 +196,10 @@ test.describe.serial('load-balancer', () => {
   test('LB-04 PUT of the same configuration changes nothing; PUT of a new one goes Updating, then rests on it', async () => {
     test.skip(lbId === '', 'LB-03 did not create a load balancer')
     expectStatus(await call('tenant', 'PUT', `/v1/tenant/load-balancers/${lbId}`, { listeners: [http], backends: [{ vmId }] }), 204)
-    expect((await readLb(lbId)).transition).toBeNull()
+    expect((await readLb(lbId)).status).toBe('Available')
 
     expectStatus(await call('tenant', 'PUT', `/v1/tenant/load-balancers/${lbId}`, { listeners: [http, dns], backends: [{ vmId }] }), 204)
-    const lb = await pollUntil('update done', () => readLb(lbId), (row) => row.transition === null, existenceShape)
+    const lb = await pollUntil('update done', () => readLb(lbId), (row) => !lbPending(row), existenceShape)
     expect(lb.listeners).toEqual([http, dns])
   })
 
@@ -200,7 +208,8 @@ test.describe.serial('load-balancer', () => {
   test('LB-05 deleting a VM a load balancer sends to is 422 VM_IS_LOAD_BALANCER_BACKEND', async () => {
     test.skip(lbId === '', 'LB-03 did not create a load balancer')
     expectError(await call('tenant', 'DELETE', `/v1/tenant/vms/${vmId}`), 422, 'VM_IS_LOAD_BALANCER_BACKEND')
-    expect((await get('tenant', `/v1/tenant/vms/${vmId}`)).desiredExistence).toBe('Exists')
+    const vm = await get('tenant', `/v1/tenant/vms/${vmId}`)
+    expect(['Deleting', 'Deleted']).not.toContain(vm.status)
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/LoadBalancer/RenameLoadBalancerEndpoint.cs (Patch, 204, no provider command);
@@ -242,7 +251,7 @@ test.describe.serial('load-balancer', () => {
     log(`LB-10 before the third PUT: ${existenceShape(await readLb(id))}`)
     const third = await call('tenant', 'PUT', `/v1/tenant/load-balancers/${id}`, { listeners: [dns], backends: [{ vmId }] })
     log(`LB-10 third PUT → ${third.status} ${third.text.slice(0, 200)}`)
-    const rested = await pollUntil('LB-10 update at rest', () => readLb(id), (row) => row.transition === null, existenceShape)
+    const rested = await pollUntil('LB-10 update at rest', () => readLb(id), (row) => !lbPending(row), existenceShape)
 
     let timeline = await timelineOf(name)
     log(`LB-10 activity ${name} after the updates: ${timeline.join(', ')}`)
@@ -290,8 +299,8 @@ test.describe.serial('load-balancer', () => {
     const right = await readLb(id)
     log(`LB-11 right after DELETE: ${existenceShape(right)}`)
     // Already Deleted would mean the worker finished the delete between two calls: nothing to read then.
-    if (right.currentExistence !== 'Deleted') {
-      expect(right.transition).toBe('Deleting')
+    if (right.status !== 'Deleted') {
+      expect(right.status).toBe('Deleting')
     }
     await deleted(id, 'LB-11 load balancer deleted')
 
@@ -315,7 +324,7 @@ test.describe.serial('load-balancer', () => {
     const early = await call('tenant', 'DELETE', `/v1/tenant/load-balancers/${id}`)
     const after = await readLb(id)
     log(`LB-13 before: ${existenceShape(before)}; DELETE → ${early.status} ${early.text.slice(0, 200)}; after: ${existenceShape(after)}`)
-    const raced = before.transition !== 'Creating' || after.transition !== 'Creating' || early.status === 202
+    const raced = before.status !== 'Creating' || after.status !== 'Creating' || early.status === 202
     if (!raced) {
       expectError(early, 422, 'LOAD_BALANCER_INVALID_STATE')
     }
@@ -339,7 +348,7 @@ test.describe.serial('load-balancer', () => {
     const { smallTier } = await envOf()
     try {
       otherVmId = await createVm(`rg-vmlbx-${RUN}`, smallTier, runNetworkId)
-      await waitVm('LB-14 VM on the run network', otherVmId, (v) => v.currentExistence === 'Exists')
+      await waitVm('LB-14 VM on the run network', otherVmId, vmHasInstance)
       expectError(await call('tenant', 'POST', '/v1/tenant/load-balancers',
         { name, networkId: ipv6NetworkId, listeners: [http], backends: [{ vmId: otherVmId }] }, newKey()),
         422, 'LOAD_BALANCER_BACKEND_INVALID')
@@ -361,7 +370,10 @@ test.describe.serial('load-balancer', () => {
   // titan-ops features/load-balancer/design.md#lb-quota-and-billing · titan-ops architecture/code-structure.md#quota-gate
   test('LB-15 with maxLoadBalancers 1 and one load balancer alive, a create is 422 LOAD_BALANCER_QUOTA_EXCEEDED', async () => {
     test.skip(lbId === '', 'LB-03 did not create a load balancer')
-    const live = (await get('tenant', '/v1/tenant/load-balancers') as any[]).filter((row) => row.desiredExistence === 'Exists')
+    // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs OccupiesQuota (approximated: the
+    // API no longer exposes whether Incus still holds an Updating load balancer).
+    const live = (await get('tenant', '/v1/tenant/load-balancers') as any[])
+      .filter((row) => row.status === 'Creating' || row.status === 'Available' || row.status === 'Updating')
     log(`LB-15 live load balancers: ${live.map((row) => row.name).join(', ')}`)
     expect(live.map((row) => row.id)).toEqual([lbId])
     const row = (await get('admin', '/v1/tenants') as any[]).find((t) => t.id === tenantId)

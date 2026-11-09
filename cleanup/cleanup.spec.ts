@@ -39,23 +39,23 @@ test.describe.serial('cleanup', () => {
     for (const lb of (await get('tenant', '/v1/tenant/load-balancers') as any[]).filter(isTest)) {
       log(`CLN-01 load balancer ${lb.name}`)
       await pollUntil(`load balancer ${lb.name} at rest`, () => get('tenant', `/v1/tenant/load-balancers/${lb.id}`),
-        (row) => row.transition === null || row.transition === 'Deleting', existenceShape)
+        (row) => row.status !== 'Creating' && row.status !== 'Updating', existenceShape)
       expectStatus(await call('tenant', 'DELETE', `/v1/tenant/load-balancers/${lb.id}`), 202)
       await pollUntil(`load balancer ${lb.name} deleted`, () => get('tenant', `/v1/tenant/load-balancers/${lb.id}`),
-        (row) => row.currentExistence === 'Deleted', existenceShape)
+        (row) => row.status === 'Deleted', existenceShape)
     }
 
     const networks = (await get('tenant', '/v1/tenant/networks') as any[]).filter(isTest)
     for (const network of networks) {
       const rules = await get('tenant', `/v1/tenant/networks/${network.id}/firewall-rules`) as any[]
       for (const rule of rules) {
-        if (rule.desiredExistence !== 'Exists') {
+        if (rule.status === 'Deleting') {
           continue
         }
         await pollUntil(`rule ${rule.id} settles`, async () => {
           const rows = await get('tenant', `/v1/tenant/networks/${network.id}/firewall-rules`) as any[]
-          return rows.find((r) => r.id === rule.id) || { transition: null }
-        }, (r) => r.transition === null, existenceShape)
+          return rows.find((r) => r.id === rule.id) || { status: 'Gone' }
+        }, (r) => r.status !== 'Creating' && r.status !== 'Deleting', existenceShape)
         expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${network.id}/firewall-rules/${rule.id}`), 204)
         log(`CLN-01 rule ${rule.id} delete asked`)
       }
@@ -68,27 +68,28 @@ test.describe.serial('cleanup', () => {
 
     for (const volume of (await get('tenant', '/v1/tenant/volumes') as any[]).filter(isTest)) {
       log(`CLN-01 volume ${volume.name}`)
-      await waitVolume(`volume ${volume.name} at rest`, volume.id, (v) => v.transition === null || v.currentExistence === 'Deleted')
+      await waitVolume(`volume ${volume.name} at rest`, volume.id,
+        (v) => v.status !== 'Creating' && v.status !== 'Attaching' && v.status !== 'Detaching' && v.status !== 'Deleting')
       for (const snapshot of await get('tenant', `/v1/tenant/volumes/${volume.id}/snapshots`) as any[]) {
-        if (snapshot.desiredExistence === 'Exists') {
+        if (snapshot.status !== 'Deleting') {
           expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${volume.id}/snapshots/${snapshot.id}`), 202)
         }
       }
       await pollUntil(`snapshots of ${volume.name} gone`, () => get('tenant', `/v1/tenant/volumes/${volume.id}/snapshots`) as Promise<any[]>,
         (rows) => rows.length === 0, (rows) => `${rows.length} left`)
-      if ((await readVolume(volume.id)).currentExistence !== 'Deleted') {
+      if ((await readVolume(volume.id)).status !== 'Deleted') {
         expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${volume.id}`), 202)
-        await waitVolume(`volume ${volume.name} deleted`, volume.id, (v) => v.currentExistence === 'Deleted')
+        await waitVolume(`volume ${volume.name} deleted`, volume.id, (v) => v.status === 'Deleted')
       }
     }
 
     for (const network of (await get('tenant', '/v1/tenant/networks') as any[]).filter(isTest)) {
       log(`CLN-01 network ${network.name}`)
-      await waitNetwork(`network ${network.name} at rest`, network.id, (n) => n.transition === null || n.currentExistence === 'Deleted')
-      if (network.desiredExistence === 'Exists') {
+      await waitNetwork(`network ${network.name} at rest`, network.id, (n) => n.status !== 'Creating' && n.status !== 'Deleting')
+      if (network.status !== 'Deleting' && network.status !== 'Deleted') {
         expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${network.id}`), 202)
       }
-      await waitNetwork(`network ${network.name} deleted`, network.id, (n) => n.currentExistence === 'Deleted')
+      await waitNetwork(`network ${network.name} deleted`, network.id, (n) => n.status === 'Deleted')
     }
 
     for (const key of (await get('tenant', '/v1/tenant/ssh-keys') as any[]).filter(isTest)) {

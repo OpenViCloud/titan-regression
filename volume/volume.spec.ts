@@ -15,17 +15,27 @@ const MAX_VOLUMES = 10
 const MAX_SNAPSHOTS_PER_VOLUME = 3
 
 function snapshotShape(s: any): string {
-  return `existence=${s.currentExistence} desired=${s.desiredExistence} transition=${s.transition} failure=${s.requestFailureReason}`
+  return `status=${s.status} failure=${s.requestFailureReason}`
 }
 
 function settled(v: any): boolean {
-  return v.currentExistence === 'Exists' && v.transition === null
+  return v.status === 'Available'
+}
+
+// A volume or snapshot waiting on its own command (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs,
+// Titan.Domain/Aggregates/Volume/Entities/VolumeSnapshot.cs).
+function volumePending(v: any): boolean {
+  return v.status === 'Creating' || v.status === 'Attaching' || v.status === 'Detaching' || v.status === 'Deleting'
+}
+
+function snapshotPending(s: any): boolean {
+  return s.status === 'Creating' || s.status === 'Deleting'
 }
 
 // Counts toward MaxVolumeSnapshotsPerVolume as the server counts (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Entities/VolumeSnapshot.cs
-// CountsTowardQuota): desired Exists and (Exists, or its create waits).
+// CountsTowardQuota): Creating or Available.
 function countsTowardQuota(s: any): boolean {
-  return s.desiredExistence === 'Exists' && (s.currentExistence === 'Exists' || s.transition === 'Creating')
+  return s.status === 'Creating' || s.status === 'Available'
 }
 
 // The feed holds the 50 newest rows (OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/ActivityEvent/ListActivityEventsQueryHandler.cs
@@ -74,7 +84,7 @@ test.describe.serial('volume', () => {
   async function readSnapshot(volumeId: string, id: string): Promise<any> {
     const row = (await snapshotsOf(volumeId)).find((s) => s.id === id)
     if (row === undefined) {
-      return { currentExistence: 'Deleted' }
+      return { status: 'Deleted' }
     }
     return row
   }
@@ -87,24 +97,24 @@ test.describe.serial('volume', () => {
   }
 
   async function deleteVolumeAndWait(id: string): Promise<void> {
-    const volume = await waitVolume(`volume ${id} at rest`, id, (v) => v.transition === null || v.currentExistence === 'Deleted')
-    if (volume.currentExistence === 'Deleted') {
+    const volume = await waitVolume(`volume ${id} at rest`, id, (v) => !volumePending(v))
+    if (volume.status === 'Deleted') {
       return
     }
     if (volume.currentAttachedVmId !== null) {
       expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${id}/detach`), 202)
-      await waitVolume('detached for cleanup', id, (v) => v.currentAttachedVmId === null && v.transition === null)
+      await waitVolume('detached for cleanup', id, (v) => v.currentAttachedVmId === null && !volumePending(v))
     }
     const snaps = await snapshotsOf(id)
     for (const snap of snaps) {
-      if (snap.desiredExistence === 'Exists') {
-        await pollUntil('snapshot at rest', () => readSnapshot(id, snap.id), (s) => s.transition === null, snapshotShape)
+      if (snap.status !== 'Deleting' && snap.status !== 'Deleted') {
+        await pollUntil('snapshot at rest', () => readSnapshot(id, snap.id), (s) => !snapshotPending(s), snapshotShape)
         expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${id}/snapshots/${snap.id}`), 202)
       }
-      await pollUntil('snapshot deleted', () => readSnapshot(id, snap.id), (s) => s.currentExistence === 'Deleted', snapshotShape)
+      await pollUntil('snapshot deleted', () => readSnapshot(id, snap.id), (s) => s.status === 'Deleted', snapshotShape)
     }
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${id}`), 202)
-    await waitVolume('volume deleted', id, (v) => v.currentExistence === 'Deleted')
+    await waitVolume('volume deleted', id, (v) => v.status === 'Deleted')
   }
 
   async function adminRow(): Promise<any> {
@@ -211,7 +221,7 @@ test.describe.serial('volume', () => {
     const reply = await call('tenant', 'POST', `/v1/tenant/volumes/${volumeA}/attach`, { vmId })
     expectStatus(reply, 202)
     expect(reply.text).toBe('')
-    const volume = await waitVolume('VOL-03', volumeA, (v) => v.currentAttachedVmId === vmId && v.transition === null)
+    const volume = await waitVolume('VOL-03', volumeA, (v) => v.currentAttachedVmId === vmId && !volumePending(v))
     expect(volume.currentAttachedElsewhere).toBe(false)
     const actions = await activityOf(`rg-vola-${RUN}`)
     expect(countOf(actions, 'volume.attach_requested')).toBe(1)
@@ -221,8 +231,7 @@ test.describe.serial('volume', () => {
     const after = await readVolume(volumeA)
     log(`VOL-03 after the refused delete: ${volumeShape(after)}`)
     expect(after.currentAttachedVmId).toBe(vmId)
-    expect(after.desiredExistence).toBe('Exists')
-    expect(after.transition).toBeNull()
+    expect(after.status).toBe('Available')
     expect(countOf(await activityOf(`rg-vola-${RUN}`), 'volume.delete_requested')).toBe(0)
   })
 
@@ -232,7 +241,7 @@ test.describe.serial('volume', () => {
   // answered like the first, nothing recorded, nothing sent) — titan-ops architecture/resource-lifecycle.md#repeat
   test('VOL-04 detach is 202, then not attached; a detach of a detached or never-attached volume is 202 and changes nothing', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${volumeA}/detach`), 202)
-    const detached = await waitVolume('VOL-04', volumeA, (v) => v.currentAttachedVmId === null && v.transition === null)
+    const detached = await waitVolume('VOL-04', volumeA, (v) => v.currentAttachedVmId === null && !volumePending(v))
     const actions = await activityOf(`rg-vola-${RUN}`)
     expect(countOf(actions, 'volume.detach_requested')).toBe(1)
     expect(countOf(actions, 'volume.detached')).toBe(1)
@@ -307,11 +316,11 @@ test.describe.serial('volume', () => {
       expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeA}/snapshots/${id}`), 202)
     }
     for (const id of snapshotsOfA) {
-      await pollUntil(`VOL-08 ${id}`, () => readSnapshot(volumeA, id), (s) => s.currentExistence === 'Deleted', snapshotShape)
+      await pollUntil(`VOL-08 ${id}`, () => readSnapshot(volumeA, id), (s) => s.status === 'Deleted', snapshotShape)
     }
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeA}/snapshots/${snapshotsOfA[0]}`), 202)
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeA}`), 202)
-    await waitVolume('VOL-08', volumeA, (v) => v.currentExistence === 'Deleted')
+    await waitVolume('VOL-08', volumeA, (v) => v.status === 'Deleted')
     const actions = await activityOf(`rg-vola-${RUN}`)
     expect(countOf(actions, 'volume.delete_requested')).toBe(1)
     expect(countOf(actions, 'volume.deleted')).toBe(1)
@@ -359,7 +368,7 @@ test.describe.serial('volume', () => {
   // child entity: one of another volume answers like a missing one) · OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VolumeSnapshot/DeleteVolumeSnapshotCommandHandler.cs
   // and OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VolumeSnapshot/RestoreVolumeSnapshotCommandHandler.cs HandleAsync — titan-ops architecture/code-structure.md#child-entity
   test("VOL-13 another volume's snapshot through this volume's route is 404 VOLUME_SNAPSHOT_NOT_FOUND on delete and restore", async () => {
-    const snapshotOfB = (await snapshotsOf(volumeB)).find((s) => s.currentExistence === 'Exists' && s.transition === null)
+    const snapshotOfB = (await snapshotsOf(volumeB)).find((s) => s.status === 'Available')
     expect(snapshotOfB, 'VOL-12 leaves snapshots on volume B').toBeDefined()
     const name = `rg-vol13-${RUN}`
     expectError(await call('tenant', 'DELETE', `/v1/tenant/volumes/${restored}/snapshots/${snapshotOfB.id}`), 404, 'VOLUME_SNAPSHOT_NOT_FOUND')
@@ -367,9 +376,7 @@ test.describe.serial('volume', () => {
       404, 'VOLUME_SNAPSHOT_NOT_FOUND')
     const after = await readSnapshot(volumeB, snapshotOfB.id)
     log(`VOL-13 snapshot of B after: ${snapshotShape(after)}`)
-    expect(after.transition).toBeNull()
-    expect(after.desiredExistence).toBe('Exists')
-    expect(after.currentExistence).toBe('Exists')
+    expect(after.status).toBe('Available')
     const rows = await get('tenant', '/v1/tenant/volumes') as any[]
     expect(rows.some((v) => v.name === name)).toBe(false)
   })
@@ -389,8 +396,8 @@ test.describe.serial('volume', () => {
     const snapshotThen = await readSnapshot(restored, id)
     log(`VOL-14 snapshot when the volume delete was answered: ${snapshotShape(snapshotThen)}`)
     expectStatus(reply, 202)
-    await waitVolume('VOL-14 volume deleted', restored, (v) => v.currentExistence === 'Deleted')
-    await pollUntil('VOL-14 snapshot deleted', () => readSnapshot(restored, id), (s) => s.currentExistence === 'Deleted', snapshotShape)
+    await waitVolume('VOL-14 volume deleted', restored, (v) => v.status === 'Deleted')
+    await pollUntil('VOL-14 snapshot deleted', () => readSnapshot(restored, id), (s) => s.status === 'Deleted', snapshotShape)
     // The report that came second may still be on its way; it must record nothing.
     await sleep(20_000)
     const actions = await activityOf(name)
@@ -479,10 +486,8 @@ test.describe.serial('volume', () => {
     const volume = await readVolume(volumeC)
     log(`VOL-19 owner's volume after: ${volumeShape(volume)}`)
     expect(settled(volume)).toBe(true)
-    expect(volume.desiredExistence).toBe('Exists')
     const snapshot = await readSnapshot(volumeC, snapshotOfC)
-    expect(snapshot.transition).toBeNull()
-    expect(snapshot.desiredExistence).toBe('Exists')
+    expect(snapshot.status).toBe('Available')
     expect((await get('tenant', '/v1/tenant/volumes') as any[]).map((v) => v.id).sort()).toEqual(ownBefore)
     expect((await get('admin', '/v1/tenant/volumes') as any[]).some((v) => v.name === restoreName)).toBe(false)
     expect(await newActionsOf(before, volumeName)).toEqual([])
@@ -498,21 +503,21 @@ test.describe.serial('volume', () => {
     const name = `rg-volc-${RUN}`
     const base = `/v1/tenant/volumes/${volumeC}`
     expectStatus(await call('tenant', 'POST', `${base}/attach`, { vmId }), 202)
-    await waitVolume('VOL-17 attached at rest', volumeC, (v) => v.currentAttachedVmId === vmId && v.transition === null)
+    await waitVolume('VOL-17 attached at rest', volumeC, (v) => v.currentAttachedVmId === vmId && !volumePending(v))
     const skipped: string[] = []
 
     let before = await feedIds()
     expectStatus(await call('tenant', 'POST', `${base}/detach`), 202)
     const detaching = await readVolume(volumeC)
     log(`VOL-17 detach lap: ${volumeShape(detaching)}`)
-    if (detaching.transition === 'Detaching') {
+    if (detaching.status === 'Detaching') {
       const repeat = await call('tenant', 'POST', `${base}/detach`)
       expectStatus(repeat, 202)
       expect(repeat.text).toBe('')
     } else {
       skipped.push('detach lap: the detach had already ended before the repeat could be sent')
     }
-    await waitVolume('VOL-17 detached', volumeC, (v) => v.currentAttachedVmId === null && v.transition === null)
+    await waitVolume('VOL-17 detached', volumeC, (v) => v.currentAttachedVmId === null && !volumePending(v))
     let actions = await newActionsOf(before, name)
     log(`VOL-17 detach lap ${name}: ${actions.join(', ')}`)
     expect(countOf(actions, 'volume.detach_requested')).toBe(1)
@@ -522,14 +527,14 @@ test.describe.serial('volume', () => {
     expectStatus(await call('tenant', 'POST', `${base}/attach`, { vmId }), 202)
     const attaching = await readVolume(volumeC)
     log(`VOL-17 attach lap: ${volumeShape(attaching)}`)
-    if (attaching.transition === 'Attaching') {
+    if (attaching.status === 'Attaching') {
       const repeat = await call('tenant', 'POST', `${base}/attach`, { vmId })
       expectStatus(repeat, 202)
       expect(repeat.text).toBe('')
     } else {
       skipped.push('attach lap: the attach had already ended before the repeat could be sent')
     }
-    await waitVolume('VOL-17 attached again', volumeC, (v) => v.currentAttachedVmId === vmId && v.transition === null)
+    await waitVolume('VOL-17 attached again', volumeC, (v) => v.currentAttachedVmId === vmId && !volumePending(v))
     actions = await newActionsOf(before, name)
     log(`VOL-17 attach lap ${name}: ${actions.join(', ')}`)
     expect(countOf(actions, 'volume.attach_requested')).toBe(1)
@@ -545,9 +550,11 @@ test.describe.serial('volume', () => {
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs OccupiesQuota ·
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Platform/Tenant/TenantQuotaGate.cs EnsureHasRoom
   test('VOL-10 the volume past MaxVolumes is 422 VOLUME_QUOTA_EXCEEDED', async () => {
-    // The server's count (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs OccupiesQuota; VolumeRepository.CountActiveByTenantAsync writes the same condition in SQL): desired Exists and (Exists, or its create waits).
+    // The server's count (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs OccupiesQuota;
+    // VolumeRepository.CountActiveByTenantAsync writes the same condition in SQL): Creating, Available, or Attaching/Detaching
+    // while Incus still holds the volume — the API no longer tells attach/detach apart from the rest, so this counts both.
     const live = (await get('tenant', '/v1/tenant/volumes') as any[])
-      .filter((v) => v.desiredExistence === 'Exists' && (v.currentExistence === 'Exists' || v.transition === 'Creating')).length
+      .filter((v) => v.status === 'Creating' || v.status === 'Available' || v.status === 'Attaching' || v.status === 'Detaching').length
     log(`VOL-10 live volumes before: ${live}`)
     const missing = MAX_VOLUMES - live
     for (let i = 0; i < missing; i++) {
@@ -560,16 +567,16 @@ test.describe.serial('volume', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync (ListAttachedToVmLockedAsync, volume.ReleaseFromVmDelete),
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs ApplyDoneAsync (volume.MarkDetachedByVmDelete).
-  // The spec measures the end without desiredAttachedVmId; plan.md VOL-09 also expects no transition while the VM's delete
-  // waits, then no desired attachment and a delete that goes through, and the release that writes its spec tightens it.
+  // The spec measures the end without desiredAttachedVmId; plan.md VOL-09 also expects the volume to stay Available while
+  // the VM's delete waits, then no desired attachment and a delete that goes through, and the release that writes its spec tightens it.
   test('VOL-09 deleting a VM releases the volume attached to it, which stays', async () => {
     const id = made[made.length - 1]
     await waitVolume('VOL-09 ready', id, settled)
     expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${id}/attach`, { vmId }), 202)
-    await waitVolume('VOL-09 attached', id, (v) => v.currentAttachedVmId === vmId && v.transition === null)
+    await waitVolume('VOL-09 attached', id, (v) => v.currentAttachedVmId === vmId && !volumePending(v))
     await deleteVmAndWait(vmId)
     vmId = ''
-    const volume = await waitVolume('VOL-09 released', id, (v) => v.currentAttachedVmId === null && v.transition === null)
-    expect(volume.currentExistence).toBe('Exists')
+    const volume = await waitVolume('VOL-09 released', id, (v) => v.currentAttachedVmId === null && !volumePending(v))
+    expect(volume.status).toBe('Available')
   })
 })
