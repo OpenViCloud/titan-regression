@@ -54,19 +54,19 @@ export async function envOf(): Promise<Env> {
 // --- shapes for the log --------------------------------------------------------------------------------------
 
 export function vmShape(vm: any): string {
-  return `state=${vm.currentState} existence=${vm.currentExistence} desired=${vm.desiredState}/${vm.desiredExistence} transition=${vm.transition} ip=${vm.ipAddress} failure=${vm.requestFailureReason}`
+  return `status=${vm.status} ip=${vm.ipAddress} failure=${vm.requestFailureReason}`
 }
 
 export function existenceShape(r: any): string {
-  return `state=${r.currentState} existence=${r.currentExistence} desired=${r.desiredExistence} transition=${r.transition} failure=${r.requestFailureReason}`
+  return `status=${r.status} failure=${r.requestFailureReason}`
 }
 
 export function volumeShape(v: any): string {
-  return `existence=${v.currentExistence} desired=${v.desiredExistence} attached=${v.currentAttachedVmId} wants=${v.desiredAttachedVmId} elsewhere=${v.currentAttachedElsewhere} transition=${v.transition} failure=${v.requestFailureReason}`
+  return `status=${v.status} attached=${v.currentAttachedVmId} wants=${v.desiredAttachedVmId} elsewhere=${v.currentAttachedElsewhere} failure=${v.requestFailureReason}`
 }
 
 export function runs(vm: any): boolean {
-  return vm.currentState === 'Running' || vm.currentState === 'Ready'
+  return vm.status === 'Running' || vm.status === 'Ready'
 }
 
 // --- network -------------------------------------------------------------------------------------------------
@@ -80,12 +80,12 @@ export async function waitNetwork(label: string, id: string, done: (n: any) => b
 }
 
 export function networkUsable(n: any): boolean {
-  return n.currentState === 'Created' && n.currentExistence === 'Exists' && n.transition === null
+  return n.status === 'Created'
 }
 
 // Finds the run network a module before left, or creates one. Never deletes it: network-lifecycle does.
 export async function runNetwork(): Promise<{ id: string, name: string }> {
-  const live = (await listNetworks()).filter((n) => n.name.startsWith(RUN_NETWORK_PREFIX) && n.desiredExistence === 'Exists')
+  const live = (await listNetworks()).filter((n) => n.name.startsWith(RUN_NETWORK_PREFIX) && n.status !== 'Deleting' && n.status !== 'Deleted')
   if (live.length > 0) {
     const found = await waitNetwork('run network', live[0].id, networkUsable)
     return { id: found.id, name: found.name }
@@ -121,11 +121,11 @@ export async function createVm(name: string, tier: string, networkId: string, ex
 
 export async function deleteVmAndWait(id: string): Promise<void> {
   const vm = await getVm(id)
-  if (vm.currentExistence === 'Deleted') {
+  if (vm.status === 'Deleted') {
     return
   }
   expectStatus(await call('tenant', 'DELETE', `/v1/tenant/vms/${id}`), 202)
-  await waitVm('vm deleted', id, (v) => v.currentExistence === 'Deleted')
+  await waitVm('vm deleted', id, (v) => v.status === 'Deleted')
 }
 
 // --- volume --------------------------------------------------------------------------------------------------
@@ -134,7 +134,7 @@ export async function readVolume(id: string): Promise<any> {
   const rows = await get('tenant', '/v1/tenant/volumes') as any[]
   const row = rows.find((r) => r.id === id)
   if (row === undefined) {
-    return { currentExistence: 'Deleted' }
+    return { status: 'Deleted' }
   }
   return row
 }

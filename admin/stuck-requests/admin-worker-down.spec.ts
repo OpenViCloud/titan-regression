@@ -25,6 +25,15 @@ const GAVE_UP = `${MARKERS}/gave-up`
 // OpenViCloud/titan-control-plane:Titan.Application/Options/RequestStuckOptions.cs (ThresholdMinutes = 15)
 const STUCK_AFTER_MS = 15 * 60_000
 
+// VmStatus/VolumeStatus transient values: everything else (the Incus words, NotFound, Failed, Deleted) is at rest.
+function vmAtRest(v: any): boolean {
+  return v.status !== 'Creating' && v.status !== 'Starting' && v.status !== 'Stopping' && v.status !== 'Deleting' && v.status !== 'Snapshotting'
+}
+
+function volumeAtRest(v: any): boolean {
+  return v.status !== 'Creating' && v.status !== 'Attaching' && v.status !== 'Detaching' && v.status !== 'Deleting'
+}
+
 async function waitForFile(paths: string[], timeoutMs: number): Promise<string | null> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -73,26 +82,26 @@ test.describe.serial('admin-worker-down', () => {
         if (volumeId === '') {
           return
         }
-        const volume = await waitVolume('volume at rest', volumeId, (v) => v.transition === null || v.currentExistence === 'Deleted')
-        if (volume.currentExistence === 'Deleted') {
+        const volume = await waitVolume('volume at rest', volumeId, volumeAtRest)
+        if (volume.status === 'Deleted') {
           return
         }
         if (volume.currentAttachedVmId !== null) {
           expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${volumeId}/detach`), 202)
-          await waitVolume('volume detached for cleanup', volumeId, (v) => v.currentAttachedVmId === null && v.transition === null)
+          await waitVolume('volume detached for cleanup', volumeId, (v) => v.currentAttachedVmId === null && volumeAtRest(v))
         }
         expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeId}`), 202)
-        await waitVolume('volume deleted', volumeId, (v) => v.currentExistence === 'Deleted')
+        await waitVolume('volume deleted', volumeId, (v) => v.status === 'Deleted')
       }],
       ['stopped vm', async () => {
         if (stopVmId !== '') {
-          await waitVm('stopped vm at rest', stopVmId, (v) => v.transition === null || v.currentExistence === 'Deleted')
+          await waitVm('stopped vm at rest', stopVmId, vmAtRest)
           await deleteVmAndWait(stopVmId)
         }
       }],
       ['vm of the volume', async () => {
         if (otherVmId !== '') {
-          await waitVm('vm of the volume at rest', otherVmId, (v) => v.transition === null || v.currentExistence === 'Deleted')
+          await waitVm('vm of the volume at rest', otherVmId, vmAtRest)
           await deleteVmAndWait(otherVmId)
         }
       }],
@@ -115,11 +124,11 @@ test.describe.serial('admin-worker-down', () => {
       { name: `rg-stuckvol-${RUN}`, volumeOfferingId, clusterId, sizeGb: 1 }, newKey())
     expectStatus(created, 202)
     volumeId = bodyOf(created).volumeId
-    await waitVm('ADM-15 vm to stop running', stopVmId, (v) => runs(v) && v.transition === null)
-    await waitVm('ADM-15 vm of the volume running', otherVmId, (v) => runs(v) && v.transition === null)
-    await waitVolume('ADM-15 volume exists', volumeId, (v) => v.currentExistence === 'Exists' && v.transition === null)
+    await waitVm('ADM-15 vm to stop running', stopVmId, (v) => runs(v))
+    await waitVm('ADM-15 vm of the volume running', otherVmId, (v) => runs(v))
+    await waitVolume('ADM-15 volume exists', volumeId, (v) => v.status === 'Available')
     expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${volumeId}/attach`, { vmId: otherVmId }), 202)
-    await waitVolume('ADM-15 volume attached', volumeId, (v) => v.currentAttachedVmId === otherVmId && v.transition === null)
+    await waitVolume('ADM-15 volume attached', volumeId, (v) => v.currentAttachedVmId === otherVmId && v.status === 'Available')
 
     log(`WORKER_STOP_WAIT turn off auto-sync of the worker's Application, scale deploy/incus-worker to 0, wait until no worker pod is left, then touch ${STOPPED} (or ${SKIP}: no L-x)`)
     const answer = await waitForFile([STOPPED, SKIP], 10 * 60_000)
@@ -138,8 +147,8 @@ test.describe.serial('admin-worker-down', () => {
     const vmWaiting = await getVm(stopVmId)
     const volumeWaiting = await readVolume(volumeId)
     log(`ADM-15 a minute after the requests: vm ${vmShape(vmWaiting)} · volume ${volumeShape(volumeWaiting)}`)
-    expect(vmWaiting.transition, 'the stop still waits: the worker is down').not.toBeNull()
-    expect(volumeWaiting.transition, 'the detach still waits: the worker is down').not.toBeNull()
+    expect(vmWaiting.status, 'the stop still waits: the worker is down').toBe('Stopping')
+    expect(volumeWaiting.status, 'the detach still waits: the worker is down').toBe('Detaching')
 
     const mine = (rows: any[]) => rows.filter((r) => r.id === stopVmId || r.id === volumeId)
     const stuck = await pollUntil('ADM-15 both requests stuck',
@@ -159,9 +168,9 @@ test.describe.serial('admin-worker-down', () => {
     expect(unhealthy.text.trim()).not.toBe('Healthy')
 
     await waitWorkerStarted('ADM-15')
-    const stopped = await waitVm('ADM-15 vm stopped', stopVmId, (v) => v.currentState === 'Stopped' && v.transition === null)
-    expect(stopped.desiredExistence).toBe('Exists')
-    await waitVolume('ADM-15 volume detached', volumeId, (v) => v.currentAttachedVmId === null && v.transition === null)
+    const stopped = await waitVm('ADM-15 vm stopped', stopVmId, (v) => v.status === 'Stopped')
+    expect(['Deleting', 'Deleted']).not.toContain(stopped.status)
+    await waitVolume('ADM-15 volume detached', volumeId, (v) => v.currentAttachedVmId === null && v.status === 'Available')
     await pollUntil('ADM-15 stuck rows gone',
       () => get('admin', '/v1/admin/requests/stuck') as Promise<any[]>,
       (rows) => mine(rows).length === 0,

@@ -10,10 +10,10 @@ import { RUN, RUN_CIDR, RUN_NETWORK_PREFIX, activityOf, countOf, envOf, listNetw
 // they raise maxNetworks (NET-13 also lowers maxPublicIpv6), give it back right after the case and again in afterAll,
 // and delete every network they made.
 
-// What counts toward MaxNetworks and MaxPublicIpv6: desired Exists and (Exists, or its create waits)
+// What counts toward MaxNetworks and MaxPublicIpv6: not Deleting, Deleted, NotFound or Failed
 // (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs OccupiesQuota, OccupiesPublicIpv6Quota).
 function countsTowardQuota(n: any): boolean {
-  return n.desiredExistence === 'Exists' && (n.currentExistence === 'Exists' || n.transition === 'Creating')
+  return n.status !== 'Deleting' && n.status !== 'Deleted' && n.status !== 'NotFound' && n.status !== 'Failed'
 }
 
 // The 16 bytes of an IPv6 address or prefix (`2001:db8:0:1a01::/64` → its address part).
@@ -80,11 +80,11 @@ test.describe.serial('network', () => {
 
   // Waits for the network's request to end, asks for its delete if it still wants to exist, waits for Deleted.
   async function deleteNetwork(id: string): Promise<void> {
-    const settled = await waitNetwork(`network ${id} at rest`, id, (n) => n.transition === null)
-    if (settled.desiredExistence === 'Exists' && settled.currentExistence !== 'Deleted') {
+    const settled = await waitNetwork(`network ${id} at rest`, id, (n) => n.status !== 'Creating' && n.status !== 'Deleting')
+    if (settled.status !== 'Deleted') {
       expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${id}`), 202)
     }
-    await waitNetwork(`network ${id} deleted`, id, (n) => n.currentExistence === 'Deleted')
+    await waitNetwork(`network ${id} deleted`, id, (n) => n.status === 'Deleted')
   }
 
   // Every network gets its turn even when one fails; a network whose delete failed stays listed for afterAll.
@@ -129,10 +129,10 @@ test.describe.serial('network', () => {
     log(`quota before: ${JSON.stringify(original)}`)
     // A run network left by an earlier run would take beta-user's only network slot: remove it first.
     for (const old of await listNetworks()) {
-      if (old.name.startsWith(RUN_NETWORK_PREFIX) && old.desiredExistence === 'Exists') {
+      if (old.name.startsWith(RUN_NETWORK_PREFIX) && old.status !== 'Deleting' && old.status !== 'Deleted') {
         log(`setup: deleting the run network of an earlier run ${old.name}`)
         expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${old.id}`), 202)
-        await waitNetwork('setup old run network', old.id, (n) => n.currentExistence === 'Deleted')
+        await waitNetwork('setup old run network', old.id, (n) => n.status === 'Deleted')
       }
     }
   })
@@ -194,7 +194,7 @@ test.describe.serial('network', () => {
   test('NET-05 a second network (new name, free CIDR) past maxNetworks is 422 NETWORK_QUOTA_EXCEEDED', async () => {
     const { clusterId } = await envOf()
     const tenant = await get('tenant', '/v1/tenant')
-    const live = (await listNetworks()).filter((n) => n.desiredExistence === 'Exists').length
+    const live = (await listNetworks()).filter((n) => n.status !== 'Deleting' && n.status !== 'Deleted').length
     log(`NET-05 maxNetworks=${tenant.maxNetworks} live=${live}`)
     test.skip(live < tenant.maxNetworks, `N/A: the tenant still has room (maxNetworks=${tenant.maxNetworks}, live=${live})`)
     expectError(await call('tenant', 'POST', '/v1/tenant/networks', { name: `rg-net2-${RUN}`, clusterId, cidr: '10.77.0.0/24' }, newKey()),
@@ -240,7 +240,8 @@ test.describe.serial('network', () => {
     expectError(await call('admin', 'DELETE', `/v1/tenant/networks/${networkId}`), 404, 'NETWORK_NOT_FOUND')
     expectError(await call('admin', 'PATCH', `/v1/tenant/networks/${networkId}`, { name: `rg-netx-${RUN}` }), 404, 'NETWORK_NOT_FOUND')
     const after = await get('tenant', `/v1/tenant/networks/${networkId}`)
-    expect(after.desiredExistence).toBe('Exists')
+    expect(after.status).not.toBe('Deleting')
+    expect(after.status).not.toBe('Deleted')
     expect(after.name).toBe(before.name)
   })
 
@@ -308,29 +309,29 @@ test.describe.serial('network', () => {
         { direction: 'Ingress', protocol: 'TCP', startPort: 22, endPort: 22, cidr: '0.0.0.0/0' }, newKey())
       const del = await call('tenant', 'DELETE', `/v1/tenant/networks/${id}`)
       const second = await get('tenant', `/v1/tenant/networks/${id}`)
-      log(`NET-24 transition before=${first.transition} after=${second.transition}; (a) ${overlap.status} (b) ${rule.status} (c) ${del.status}`)
-      if (first.transition === 'Creating' && second.transition === 'Creating') {
+      log(`NET-24 status before=${first.status} after=${second.status}; (a) ${overlap.status} (b) ${rule.status} (c) ${del.status}`)
+      if (first.status === 'Creating' && second.status === 'Creating') {
         expectError(overlap, 422, 'NETWORK_CIDR_OVERLAP')
         expectError(rule, 422, 'FIREWALL_NETWORK_NOT_READY')
         expectError(del, 422, 'NETWORK_INVALID_STATE')
       } else {
         // The create ended before or between the two reads: (a)-(c) may have met a usable network and are not measured.
-        const reason = `N/A (a)-(c): the create was not waiting at both reads (transition ${first.transition}, then ${second.transition})`
+        const reason = `N/A (a)-(c): the create was not waiting at both reads (status ${first.status}, then ${second.status})`
         log(`NET-24 ${reason}`)
         test.info().annotations.push({ type: 'skip', description: reason })
       }
       expect((await listNetworks()).some((n) => n.name === `rg-net3-${RUN}`)).toBe(false)
 
-      const settled = await waitNetwork('NET-24 rg-net2 at rest', id, (n) => n.transition === null)
+      const settled = await waitNetwork('NET-24 rg-net2 at rest', id, (n) => n.status !== 'Creating' && n.status !== 'Deleting')
       expect(settled.defaultIngressPolicy).toBe('Deny')
       expect(settled.defaultEgressPolicy).toBe('Allow')
-      if (settled.desiredExistence === 'Exists') {
+      if (settled.status !== 'Deleted') {
         expectError(await call('tenant', 'PATCH', `/v1/tenant/networks/${id}`, { name: runName }), 409, 'NETWORK_NAME_TAKEN')
         expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${id}`), 202)
       } else {
         log('NET-24 rg-net2 was already being deleted: the rename onto a taken name is not measured')
       }
-      await waitNetwork('NET-24 rg-net2 deleted', id, (n) => n.currentExistence === 'Deleted')
+      await waitNetwork('NET-24 rg-net2 deleted', id, (n) => n.status === 'Deleted')
       expectError(await call('tenant', 'PATCH', `/v1/tenant/networks/${id}`, { name: `rg-net2r-${RUN}` }), 422, 'NETWORK_INVALID_STATE')
       expect((await get('tenant', `/v1/tenant/networks/${id}`)).name).toBe(net2)
     } finally {

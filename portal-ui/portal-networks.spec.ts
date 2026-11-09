@@ -49,11 +49,12 @@ test.describe.serial('portal-ui networks: rename and delete', () => {
           return
         }
         const network = await get('tenant', `/v1/tenant/networks/${networkId}`)
-        if (network.desiredExistence === 'Exists') {
-          await waitNetwork('cleanup: network at rest', networkId, (n) => n.transition === null)
+        if (network.status !== 'Deleting' && network.status !== 'Deleted') {
+          // NetworkStatus: Creating, Deleting are in flight; everything else is at rest.
+          await waitNetwork('cleanup: network at rest', networkId, (n) => n.status !== 'Creating' && n.status !== 'Deleting')
           expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${networkId}`), 202)
         }
-        await waitNetwork('cleanup: network deleted', networkId, (n) => n.currentExistence === 'Deleted')
+        await waitNetwork('cleanup: network deleted', networkId, (n) => n.status === 'Deleted')
       }],
       ['quota', async () => {
         if (originalQuota !== null) {
@@ -159,7 +160,7 @@ test.describe.serial('portal-ui networks: rename and delete', () => {
 
     // The list re-reads every 5 s while a row waits (pollWhileIncusWaits) and drops the network once it is Deleted.
     await expect(row).toHaveCount(0, { timeout: OBSERVED_WITHIN_MS })
-    await waitNetwork('UI-31 network deleted', networkId, (n) => n.currentExistence === 'Deleted')
+    await waitNetwork('UI-31 network deleted', networkId, (n) => n.status === 'Deleted')
     const networks = await get('tenant', '/v1/tenant/networks') as any[]
     expect(networks.some((n) => n.id === networkId), 'GET /v1/tenant/networks no longer lists it').toBe(false)
     log(`UI-31 ${secondName} deleted: DELETE 202, row gone, not listed`)

@@ -42,7 +42,7 @@ test.describe.serial('billing-storage', () => {
     }
     if (volumeId !== '') {
       expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeId}`), 202)
-      await waitVolume('billing-storage volume deleted', volumeId, (v) => v.currentExistence === 'Deleted')
+      await waitVolume('billing-storage volume deleted', volumeId, (v) => v.status === 'Deleted')
     }
     await closeSessions()
   })
@@ -64,7 +64,7 @@ test.describe.serial('billing-storage', () => {
       { name: `rg-storvol-${RUN}`, volumeOfferingId, clusterId, sizeGb: BILLED_GB }, newKey())
     expectStatus(volumeReply, 202)
     volumeId = bodyOf(volumeReply).volumeId as string
-    await waitVolume('BIL-16 volume exists', volumeId, (v) => v.currentExistence === 'Exists' && v.transition === null)
+    await waitVolume('BIL-16 volume exists', volumeId, (v) => v.status === 'Available')
 
     const storageBeforeSnapshot = (await get('tenant', '/v1/tenant/billing/summary')).storageCost as number
 
@@ -73,7 +73,7 @@ test.describe.serial('billing-storage', () => {
     snapshotId = bodyOf(snapshotReply).snapshotId as string
     await pollUntil('BIL-16 snapshot exists',
       () => get('tenant', `/v1/tenant/volumes/${volumeId}/snapshots`) as Promise<any[]>,
-      (rows) => rows.some((s) => s.id === snapshotId && s.currentExistence === 'Exists' && s.transition === null),
+      (rows) => rows.some((s) => s.id === snapshotId && s.status === 'Available'),
       (rows) => `snapshot=${JSON.stringify(rows.find((s) => s.id === snapshotId))}`)
 
     // Baseline after both the volume and its snapshot exist, so the next tick's growth reflects DISK + SNAPSHOT

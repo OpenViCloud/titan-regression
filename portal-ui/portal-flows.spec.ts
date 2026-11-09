@@ -16,30 +16,35 @@ async function readVm(vmId: string): Promise<any> {
 async function readVolume(id: string): Promise<any> {
   const rows = await get('tenant', '/v1/tenant/volumes') as any[]
   const row = rows.find((r) => r.id === id)
-  return row === undefined ? { currentExistence: 'Deleted' } : row
+  return row === undefined ? { status: 'Deleted' } : row
+}
+
+// VolumeStatus: Creating, Attaching, Detaching, Deleting are in flight; everything else is at rest.
+function volumeAtRest(v: any): boolean {
+  return v.status !== 'Creating' && v.status !== 'Attaching' && v.status !== 'Detaching' && v.status !== 'Deleting'
 }
 
 // Same cleanup shape as volume/volume.spec.ts: return at once on Deleted, drain attach and
 // snapshots first, otherwise a DELETE or detach on an already-deleted volume 404s or no-ops into an error.
 async function deleteVolumeAndWait(id: string): Promise<void> {
-  const volume = await waitVolume(`volume ${id} at rest`, id, (v) => v.transition === null || v.currentExistence === 'Deleted')
-  if (volume.currentExistence === 'Deleted') {
+  const volume = await waitVolume(`volume ${id} at rest`, id, volumeAtRest)
+  if (volume.status === 'Deleted') {
     return
   }
   if (volume.currentAttachedVmId !== null) {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${id}/detach`), 202)
-    await waitVolume('detached for cleanup', id, (v) => v.currentAttachedVmId === null && v.transition === null)
+    await waitVolume('detached for cleanup', id, (v) => v.currentAttachedVmId === null && volumeAtRest(v))
   }
   const snaps = await get('tenant', `/v1/tenant/volumes/${id}/snapshots`) as any[]
   for (const snap of snaps) {
-    if (snap.desiredExistence === 'Exists') {
+    if (snap.status !== 'Deleting' && snap.status !== 'Deleted') {
       await pollUntil('snapshot at rest', () => get('tenant', `/v1/tenant/volumes/${id}/snapshots`).then((rows: any[]) => rows.find((s) => s.id === snap.id)),
-        (s) => s === undefined || s.transition === null, (s) => `transition=${s?.transition}`)
+        (s) => s === undefined || (s.status !== 'Creating' && s.status !== 'Deleting'), (s) => `status=${s?.status}`)
       expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${id}/snapshots/${snap.id}`), 202)
     }
   }
   expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${id}`), 202)
-  await waitVolume('volume deleted', id, (v) => v.currentExistence === 'Deleted')
+  await waitVolume('volume deleted', id, (v) => v.status === 'Deleted')
 }
 
 function currentMonth(): string {
@@ -77,14 +82,16 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     }
     if (vmId !== '') {
       const vm = await readVm(vmId)
-      if (vm.currentExistence !== 'Deleted') {
+      if (vm.status !== 'Deleted') {
+        // VmSnapshotStatus: Creating, Reverting, Deleting are in flight; everything else is at rest.
         await pollUntil('cleanup: VM has no snapshot in progress', async () => {
           const reply = await call('tenant', 'GET', `/v1/tenant/vms/${vmId}/snapshots`)
           return reply.status === 200 ? bodyOf(reply) as any[] : []
-        }, (rows) => rows.every((s) => s.transition === null), (rows) => rows.map((s: any) => s.transition).join(','))
+        }, (rows) => rows.every((s) => s.status !== 'Creating' && s.status !== 'Reverting' && s.status !== 'Deleting'),
+          (rows) => rows.map((s: any) => s.status).join(','))
         expectStatus(await call('tenant', 'DELETE', `/v1/tenant/vms/${vmId}`), 202)
       }
-      await waitVm('cleanup: VM deleted', vmId, (v) => v.currentExistence === 'Deleted')
+      await waitVm('cleanup: VM deleted', vmId, (v) => v.status === 'Deleted')
     }
     await closeSessions()
   })
@@ -200,7 +207,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
       (rows) => rows.some((s) => s.name === snapName), (rows) => `count=${rows.length}`)
     const snap = snaps.find((s) => s.name === snapName)
     await pollUntil('UI-04 snapshot available', () => get('tenant', `/v1/tenant/vms/${vmId}/snapshots`).then((rows: any[]) => rows.find((s) => s.id === snap.id)),
-      (s) => s.currentExistence === 'Exists' && s.transition === null, (s) => `existence=${s.currentExistence} transition=${s.transition}`)
+      (s) => s.status === 'Available', (s) => `status=${s.status}`)
     page = await pageOf('tenant')
     await page.goto(PORTAL + `/vms/${vmId}`, { waitUntil: 'networkidle' })
     await page.getByRole('tab', { name: 'Snapshots' }).click()
@@ -212,7 +219,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     await pollUntil('UI-04 snapshot deleted', () => get('tenant', `/v1/tenant/vms/${vmId}/snapshots`) as Promise<any[]>,
       (rows) => {
         const row = rows.find((s) => s.id === snap.id)
-        return row === undefined || row.currentExistence === 'Deleted'
+        return row === undefined || row.status === 'Deleted'
       }, (rows) => `count=${rows.length}`)
 
     // --- Volume: create, attach, detach, delete --------------------------------------------------------------
@@ -239,7 +246,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     await expect(volRowOf()).toBeVisible()
     await page.screenshot({ path: `${RESULTS}/UI-04-volume-created.png` })
 
-    await waitVolume('UI-04 volume available', volumeId, (v) => v.currentExistence === 'Exists' && v.transition === null)
+    await waitVolume('UI-04 volume available', volumeId, (v) => v.status === 'Available')
     page = await pageOf('tenant')
     await page.goto(PORTAL + '/volumes', { waitUntil: 'networkidle' })
 
@@ -249,21 +256,21 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     // VM id) rather than by label, since the label's state suffix is not controlled by this test.
     await attachDialog.getByRole('combobox', { name: 'Select VM' }).selectOption(vmId)
     await attachDialog.getByRole('button', { name: 'Attach', exact: true }).click()
-    await waitVolume('UI-04 volume attached', volumeId, (v) => v.currentAttachedVmId === vmId && v.transition === null)
+    await waitVolume('UI-04 volume attached', volumeId, (v) => v.currentAttachedVmId === vmId && v.status === 'Available')
     page = await pageOf('tenant')
     await page.goto(PORTAL + '/volumes', { waitUntil: 'networkidle' })
     await expect(volRowOf()).toContainText('Attached')
     await page.screenshot({ path: `${RESULTS}/UI-04-volume-attached.png` })
 
     await volRowOf().getByRole('button', { name: 'Detach' }).click()
-    await waitVolume('UI-04 volume detached', volumeId, (v) => v.currentAttachedVmId === null && v.transition === null)
+    await waitVolume('UI-04 volume detached', volumeId, (v) => v.currentAttachedVmId === null && v.status === 'Available')
     page = await pageOf('tenant')
     await page.goto(PORTAL + '/volumes', { waitUntil: 'networkidle' })
     await expect(volRowOf()).toContainText('Available')
 
     await volRowOf().getByRole('button', { name: 'Delete', exact: true }).click()
     await page.getByRole('button', { name: 'Confirm' }).click()
-    await waitVolume('UI-04 volume deleted', volumeId, (v) => v.currentExistence === 'Deleted')
+    await waitVolume('UI-04 volume deleted', volumeId, (v) => v.status === 'Deleted')
     volumeId = ''
     log(`UI-04 vm-snapshot=${snapName} volume=${volumeName}`)
   })
@@ -292,7 +299,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     // activityActions.vmStopRequested in OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts — the label a stop request's feed row carries.
     await expect(feedOf().filter({ hasText: /stop/i }).first()).toBeVisible()
     await page.screenshot({ path: `${RESULTS}/UI-03-stopped-feed.png` })
-    await waitVm('UI-03 vm stopped', vmId, (v) => v.currentState === 'Stopped' && v.transition === null)
+    await waitVm('UI-03 vm stopped', vmId, (v) => v.status === 'Stopped')
     page = await pageOf('tenant')
 
     // Stopped → Start is offered, Stop is not.
@@ -317,7 +324,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     await page.getByRole('button', { name: 'Confirm' }).click()
     await expect(row.getByText('Deleting', { exact: true })).toBeVisible()
     await page.screenshot({ path: `${RESULTS}/UI-03-deleting.png` })
-    await waitVm('UI-03 vm deleted', vmId, (v) => v.currentExistence === 'Deleted')
+    await waitVm('UI-03 vm deleted', vmId, (v) => v.status === 'Deleted')
     page = await pageOf('tenant')
     await page.goto(PORTAL + '/vms', { waitUntil: 'networkidle' })
     await expect(page.getByRole('listitem').filter({ hasText: vmName })).toHaveCount(0)

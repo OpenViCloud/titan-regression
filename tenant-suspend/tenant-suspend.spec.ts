@@ -53,11 +53,11 @@ test.describe.serial('tenant-suspend', () => {
     steps.push(['SUS-05 network, should one exist', async () => {
       const left = (await get('tenant', '/v1/tenant/networks') as any[]).filter((n) => n.name === portalNetworkName)
       for (const network of left) {
-        if (network.desiredExistence === 'Exists') {
-          await waitNetwork('cleanup: SUS-05 network at rest', network.id, (n) => n.transition === null)
+        if (!['Deleting', 'Deleted'].includes(network.status)) {
+          await waitNetwork('cleanup: SUS-05 network at rest', network.id, (n) => !['Creating', 'Deleting'].includes(n.status))
           expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${network.id}`), 202)
         }
-        await waitNetwork('cleanup: SUS-05 network deleted', network.id, (n) => n.currentExistence === 'Deleted')
+        await waitNetwork('cleanup: SUS-05 network deleted', network.id, (n) => n.status === 'Deleted')
         log(`afterAll: deleted ${portalNetworkName} (${network.id})`)
       }
     }])

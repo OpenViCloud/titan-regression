@@ -27,15 +27,15 @@ test.describe.serial('network-lifecycle', () => {
     await pollUntil('NETL rule exists', async () => {
       const rows = await get('tenant', `/v1/tenant/networks/${networkId}/firewall-rules`) as any[]
       return rows.find((r) => r.id === ruleId)
-    }, (r) => r.currentExistence === 'Exists' && r.transition === null, (r) => `existence=${r.currentExistence} transition=${r.transition}`)
+    }, (r) => r.status === 'enabled', (r) => `status=${r.status}`)
   })
 
   test.afterAll(async () => {
     test.setTimeout(10 * 60_000)
     if (recreatedId !== '') {
-      await waitNetwork('recreated settles', recreatedId, (n) => n.transition === null)
+      await waitNetwork('recreated settles', recreatedId, (n) => n.status !== 'Creating' && n.status !== 'Deleting')
       expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${recreatedId}`), 202)
-      await waitNetwork('recreated deleted', recreatedId, (n) => n.currentExistence === 'Deleted')
+      await waitNetwork('recreated deleted', recreatedId, (n) => n.status === 'Deleted')
     }
     await closeSessions()
   })
@@ -46,8 +46,8 @@ test.describe.serial('network-lifecycle', () => {
     const vms = (await get('tenant', '/v1/tenant/vms') as any[]).filter((v) => v.networkId === networkId)
     expect(vms, 'every VM on the run network is gone before this module').toEqual([])
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${networkId}`), 202)
-    const network = await waitNetwork('NETL-01', networkId, (n) => n.currentExistence === 'Deleted')
-    expect(network.desiredExistence).toBe('Deleted')
+    const network = await waitNetwork('NETL-01', networkId, (n) => n.status === 'Deleted')
+    expect(network.status).toBe('Deleted')
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${networkId}`), 202)
     expect((await listNetworks()).some((n) => n.id === networkId)).toBe(false)
     const actions = await activityOf(networkName)

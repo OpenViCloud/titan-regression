@@ -40,9 +40,9 @@ test.describe.serial('concurrency', () => {
       await deleteVmAndWait(vmId)
     }
     if (volumeId !== '') {
-      await waitVolume('cc volume at rest', volumeId, (v) => v.transition === null || v.currentExistence === 'Deleted')
+      await waitVolume('cc volume at rest', volumeId, (v) => !['Creating', 'Attaching', 'Detaching', 'Deleting'].includes(v.status))
       await call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeId}`)
-      await waitVolume('cc volume deleted', volumeId, (v) => v.currentExistence === 'Deleted')
+      await waitVolume('cc volume deleted', volumeId, (v) => v.status === 'Deleted')
     }
     await closeSessions()
   })
@@ -56,7 +56,7 @@ test.describe.serial('concurrency', () => {
     const networkId = (await runNetwork()).id
     const name = `rg-ccvm-${RUN}`
     vmId = await createVm(name, smallTier, networkId)
-    await waitVm('CC-01 has an instance', vmId, (v) => v.currentExistence === 'Exists' && v.transition === null)
+    await waitVm('CC-01 has an instance', vmId, (v) => ['Running', 'Ready', 'Stopped', 'Frozen', 'Error'].includes(v.status))
     const replies = await Promise.all([
       call('tenant', 'DELETE', `/v1/tenant/vms/${vmId}`),
       call('tenant', 'DELETE', `/v1/tenant/vms/${vmId}`),
@@ -64,7 +64,7 @@ test.describe.serial('concurrency', () => {
     const answers = replies.map(statusOf)
     log(`CC-01 answers: ${answers.join(' | ')}`)
     expect(answers).toEqual(['202', '202'])
-    await waitVm('CC-01 deleted', vmId, (v) => v.currentExistence === 'Deleted')
+    await waitVm('CC-01 deleted', vmId, (v) => v.status === 'Deleted')
     await expectOneRequestOneOutcome('CC-01', name, 'vm.delete_requested', 'vm.deleted')
   })
 
@@ -123,8 +123,7 @@ test.describe.serial('concurrency', () => {
   test('CC-04 two deletes of one volume at once: two 202, one volume.delete_requested, Deleted, one volume.deleted', async () => {
     test.skip(volumeId === '', 'needs the volume of CC-02')
     const name = `rg-ccvol-${RUN}`
-    await waitVolume('CC-04 volume exists at rest', volumeId, (v) => v.currentExistence === 'Exists' && v.transition === null
-      && v.currentAttachedVmId === null)
+    await waitVolume('CC-04 volume exists at rest', volumeId, (v) => v.status === 'Available' && v.currentAttachedVmId === null)
     const replies = await Promise.all([
       call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeId}`),
       call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeId}`),
@@ -132,7 +131,7 @@ test.describe.serial('concurrency', () => {
     const answers = replies.map(statusOf)
     log(`CC-04 answers: ${answers.join(' | ')}`)
     expect(answers).toEqual(['202', '202'])
-    await waitVolume('CC-04 deleted', volumeId, (v) => v.currentExistence === 'Deleted')
+    await waitVolume('CC-04 deleted', volumeId, (v) => v.status === 'Deleted')
     await expectOneRequestOneOutcome('CC-04', name, 'volume.delete_requested', 'volume.deleted')
   })
 })

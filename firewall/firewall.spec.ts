@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { closeSessions, useBrowser } from './auth'
 import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, startLog } from './api'
 import { cleanUp } from './clean-up'
-import { RUN, envOf, listNetworks, networkUsable, runNetwork, waitNetwork } from './fixtures'
+import { RUN, envOf, existenceShape as ruleShape, listNetworks, networkUsable, runNetwork, waitNetwork } from './fixtures'
 
 // Cases FW-01..05 and FW-07..13 of plan.md: FW-07 reads the Incus host, FW-08 is NOT COVERED; rules of a
 // deleted network are NETL-02. FW-10 and FW-11 need a second network, which beta-user may not hold: they raise
@@ -17,13 +17,9 @@ function rulePath(networkId: string): string {
   return `/v1/tenant/networks/${networkId}/firewall-rules`
 }
 
-function ruleShape(r: any): string {
-  return `state=${r.currentState} existence=${r.currentExistence} desired=${r.desiredExistence} transition=${r.transition} failure=${r.requestFailureReason}`
-}
-
-// The server's count: desired Exists and (Exists, or its create waits) — titan-ops features/network/design.md#firewall-rule-quota-counting
+// The server's count: not Deleting, Deleted, NotFound or Failed — titan-ops features/network/design.md#firewall-rule-quota-counting
 function counts(r: any): boolean {
-  return r.desiredExistence === 'Exists' && (r.currentExistence === 'Exists' || r.transition === 'Creating')
+  return r.status !== 'Deleting' && r.status !== 'Deleted' && r.status !== 'NotFound' && r.status !== 'Failed'
 }
 
 function cidrOf(i: number): string {
@@ -65,7 +61,7 @@ test.describe.serial('firewall', () => {
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs OccupiesQuota).
   async function maxNetworksWithRoom(): Promise<number> {
     const counting = (await listNetworks()).filter((n) =>
-      n.desiredExistence === 'Exists' && (n.currentExistence === 'Exists' || n.transition === 'Creating')).length
+      n.status !== 'Deleting' && n.status !== 'Deleted' && n.status !== 'NotFound' && n.status !== 'Failed').length
     return Math.max(original!.maxNetworks, counting + 1)
   }
 
@@ -81,11 +77,11 @@ test.describe.serial('firewall', () => {
   // Waits for the network's request to end, asks for its delete if it still wants to exist, waits for Deleted; its
   // rules go with it (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs FinishOperation).
   async function deleteNetwork(id: string): Promise<void> {
-    const settled = await waitNetwork(`network ${id} at rest`, id, (n) => n.transition === null)
-    if (settled.desiredExistence === 'Exists' && settled.currentExistence !== 'Deleted') {
+    const settled = await waitNetwork(`network ${id} at rest`, id, (n) => n.status !== 'Creating' && n.status !== 'Deleting')
+    if (settled.status !== 'Deleted') {
       expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${id}`), 202)
     }
-    await waitNetwork(`network ${id} deleted`, id, (n) => n.currentExistence === 'Deleted')
+    await waitNetwork(`network ${id} deleted`, id, (n) => n.status === 'Deleted')
   }
 
   async function deleteExtraNetworks(): Promise<void> {
@@ -103,7 +99,7 @@ test.describe.serial('firewall', () => {
     const rows = await get('tenant', rulePath(networkId)) as any[]
     const row = rows.find((r) => r.id === id)
     if (row === undefined) {
-      return { currentExistence: 'Gone' }
+      return { status: 'Gone' }
     }
     return row
   }
@@ -119,8 +115,8 @@ test.describe.serial('firewall', () => {
   }
 
   async function deleteWhenReady(id: string): Promise<void> {
-    const rule = await pollUntil(`rule ${id} settled`, () => readRule(id), (r) => r.transition === null || r.currentExistence === 'Gone', ruleShape)
-    if (rule.currentExistence === 'Gone' || rule.desiredExistence === 'Deleted') {
+    const rule = await pollUntil(`rule ${id} settled`, () => readRule(id), (r) => r.status !== 'Creating' && r.status !== 'Deleting', ruleShape)
+    if (rule.status === 'Gone' || rule.status === 'Deleted') {
       return
     }
     expectStatus(await call('tenant', 'DELETE', `${rulePath(networkId)}/${id}`), 204)
@@ -154,7 +150,7 @@ test.describe.serial('firewall', () => {
     }
     steps.push(['deleted rules gone', async () => {
       for (const id of deleted) {
-        await pollUntil(`rule ${id} gone`, () => readRule(id), (r) => r.currentExistence === 'Gone', ruleShape)
+        await pollUntil(`rule ${id} gone`, () => readRule(id), (r) => r.status === 'Gone', ruleShape)
       }
     }])
     steps.push(['close sessions', closeSessions])
@@ -166,8 +162,8 @@ test.describe.serial('firewall', () => {
   // Done carries the state of the ACL line (titan-ops features/network/design.md#firewall-rule-status)
   test('FW-01 a rule is 201 {ruleId}, then enabled and Exists', async () => {
     const id = await createRule(0)
-    const rule = await pollUntil('FW-01', () => readRule(id), (r) => r.currentState === 'enabled' && r.transition === null, ruleShape)
-    expect(rule.currentExistence).toBe('Exists')
+    const rule = await pollUntil('FW-01', () => readRule(id), (r) => r.status === 'enabled', ruleShape)
+    expect(rule.status).toBe('enabled')
     // ACT-02: the activity row is named by the rule's label, which carries its CIDR
     // (OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/FirewallRule/CreateFirewallRuleCommandHandler.cs HandleAsync,
     // activity.Stage("firewall_rule.create_requested"))
@@ -183,7 +179,7 @@ test.describe.serial('firewall', () => {
     const id = await createRule(1)
     const rule = await readRule(id)
     log(`FW-02 right after create: ${ruleShape(rule)}`)
-    expect(rule.transition).toBe('Creating')
+    expect(rule.status).toBe('Creating')
     expectError(await call('tenant', 'DELETE', `${rulePath(networkId)}/${id}`), 422, 'FIREWALL_RULE_NOT_READY')
   })
 
@@ -198,8 +194,9 @@ test.describe.serial('firewall', () => {
     expectError(await call('admin', 'DELETE', `${rulePath(networkId)}/${id}`), 404, 'NETWORK_NOT_FOUND')
     const rule = await readRule(id)
     log(`FW-13 rule of FW-01: ${ruleShape(rule)}`)
-    expect(rule.desiredExistence).toBe('Exists')
-    expect(rule.transition).toBeNull()
+    expect(rule.status).not.toBe('Creating')
+    expect(rule.status).not.toBe('Deleting')
+    expect(rule.status).not.toBe('Deleted')
     const after = await ruleIds()
     expect(after.filter((r) => !before.includes(r))).toEqual([])
   })
@@ -212,7 +209,7 @@ test.describe.serial('firewall', () => {
     expectStatus(reply, 204)
     expect(reply.text).toBe('')
     expectStatus(await call('tenant', 'DELETE', `${rulePath(networkId)}/${id}`), 204)
-    await pollUntil('FW-03', () => readRule(id), (r) => r.currentExistence === 'Gone', ruleShape)
+    await pollUntil('FW-03', () => readRule(id), (r) => r.status === 'Gone', ruleShape)
     expectStatus(await call('tenant', 'DELETE', `${rulePath(networkId)}/${id}`), 204)
     const rows = await get('tenant', '/v1/tenant/activity?limit=50') as Array<{ action: string, resourceName: string }>
     const actions = rows.filter((r) => r.resourceName.includes(cidrOf(0))).map((r) => r.action)
@@ -322,15 +319,13 @@ test.describe.serial('firewall', () => {
         { direction: 'Ingress', protocol: 'TCP', startPort: 22, endPort: 22, cidr: '0.0.0.0/0' }, newKey())
       expectStatus(reply, 201)
       const ruleOfB = bodyOf(reply).ruleId as string
-      const readOnB = async () => (await get('tenant', rulePath(b)) as any[]).find((r) => r.id === ruleOfB) ?? { currentExistence: 'Gone' }
-      await pollUntil('FW-10 rule on B', readOnB, (r) => r.currentExistence === 'Exists' && r.transition === null, ruleShape)
+      const readOnB = async () => (await get('tenant', rulePath(b)) as any[]).find((r) => r.id === ruleOfB) ?? { status: 'Gone' }
+      await pollUntil('FW-10 rule on B', readOnB, (r) => r.status === 'enabled', ruleShape)
 
       expectError(await call('tenant', 'DELETE', `${rulePath(networkId)}/${ruleOfB}`), 404, 'FIREWALL_RULE_NOT_FOUND')
       const rule = await readOnB()
       log(`FW-10 rule on B after: ${ruleShape(rule)}`)
-      expect(rule.currentExistence).toBe('Exists')
-      expect(rule.transition).toBeNull()
-      expect(rule.desiredExistence).toBe('Exists')
+      expect(rule.status).toBe('enabled')
     } finally {
       await cleanUp([
         ['quota', restoreQuota],
@@ -350,9 +345,9 @@ test.describe.serial('firewall', () => {
       const reply = await call('tenant', 'POST', rulePath(b),
         { direction: 'Ingress', protocol: 'TCP', startPort: 22, endPort: 22, cidr: '0.0.0.0/0' }, newKey())
       const network = await get('tenant', `/v1/tenant/networks/${b}`)
-      log(`FW-11 network after the rule request: transition=${network.transition} state=${network.currentState}; rule ${reply.status} ${reply.text.slice(0, 200)}`)
+      log(`FW-11 network after the rule request: status=${network.status}; rule ${reply.status} ${reply.text.slice(0, 200)}`)
       // Still Creating after the reply ⇒ it was not Created when the rule was asked for.
-      expect(network.transition).toBe('Creating')
+      expect(network.status).toBe('Creating')
       expectError(reply, 422, 'FIREWALL_QUOTA_EXCEEDED')
       await restoreQuota()
       await waitNetwork('FW-11 network created', b, networkUsable)

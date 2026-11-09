@@ -118,10 +118,10 @@ test.describe.serial('contract-spec', () => {
     const read = async () => {
       const rows = await get('tenant', `/v1/tenant/networks/${networkId}/firewall-rules`) as any[]
       const row = rows.find((r) => r.id === id)
-      return row === undefined ? { currentExistence: 'Gone', transition: null } : row
+      return row === undefined ? { status: 'Gone' } : row
     }
-    return pollUntil(`rule ${id} at rest`, read, (r) => r.transition === null,
-      (r) => `existence=${r.currentExistence} desired=${r.desiredExistence} transition=${r.transition}`)
+    return pollUntil(`rule ${id} at rest`, read, (r) => r.status !== 'Creating' && r.status !== 'Deleting',
+      (r) => `status=${r.status}`)
   }
 
   test.beforeAll(async ({ browser }) => {
@@ -140,7 +140,7 @@ test.describe.serial('contract-spec', () => {
     }
     if (ruleId !== '') {
       const rule = await ruleSettled(ruleId)
-      if (rule.currentExistence !== 'Gone' && rule.desiredExistence !== 'Deleted') {
+      if (rule.status !== 'Gone' && rule.status !== 'Deleted') {
         await call('tenant', 'DELETE', `/v1/tenant/networks/${networkId}/firewall-rules/${ruleId}`)
       }
     }
@@ -206,19 +206,26 @@ test.describe.serial('contract-spec', () => {
     await assertDeclaredCode('CON-10 network delete (not exercised here)', 'DELETE', '/v1/tenant/networks/{networkId}', 202, false)
   })
 
-  // titan-ops features/public-api/design.md#state-enums — every currentState/desiredState/currentExistence/
-  // desiredExistence/transition (and tenant/invoice/topup status) is null or a value the spec's enum declares for
-  // that field. Lists may be empty elsewhere in the run, but the run network + a fresh rule make the network and
-  // firewall-rule checks non-empty here.
-  test('CON-11 every state/existence/transition field read back is null or a declared enum value', async () => {
+  // titan-ops features/public-api/design.md#state-enums — every status (VM, network, firewall rule, VM snapshot,
+  // volume, volume snapshot, load balancer, and tenant/invoice/topup) is null or a value the spec's enum declares
+  // for that field, and the old currentState/desiredState/currentExistence/desiredExistence/transition fields are
+  // gone from every one of those rows. Lists may be empty elsewhere in the run, but the run network + a fresh rule
+  // make the network and firewall-rule checks non-empty here.
+  test('CON-11 every status field read back is null or a declared enum value, and the old existence fields are gone', async () => {
     const spec = await fetchSpec()
+    const oldFields = ['currentState', 'desiredState', 'currentExistence', 'desiredExistence', 'transition']
+
+    function assertNoOldFields(schemaName: string, row: any): void {
+      for (const field of oldFields) {
+        expect(field in row, `${schemaName}.${field} must be gone from the row`).toBe(false)
+      }
+    }
 
     const networks = await get('tenant', '/v1/tenant/networks') as any[]
     expect(networks.length).toBeGreaterThan(0)
     for (const row of networks) {
-      for (const field of ['currentState', 'currentExistence', 'desiredExistence', 'transition']) {
-        assertEnumField(spec, 'NetworkQueryResult', field, row)
-      }
+      assertEnumField(spec, 'NetworkQueryResult', 'status', row)
+      assertNoOldFields('NetworkQueryResult', row)
     }
 
     const rules = await get('tenant', `/v1/tenant/networks/${networkId}/firewall-rules`) as any[]
@@ -231,9 +238,8 @@ test.describe.serial('contract-spec', () => {
       (rows) => rows.length > rules.length, (rows) => `${rows.length} rules`)
     expect(withNewRule.length).toBeGreaterThan(0)
     for (const row of withNewRule) {
-      for (const field of ['currentState', 'currentExistence', 'desiredExistence', 'transition']) {
-        assertEnumField(spec, 'FirewallRuleQueryResult', field, row)
-      }
+      assertEnumField(spec, 'FirewallRuleQueryResult', 'status', row)
+      assertNoOldFields('FirewallRuleQueryResult', row)
     }
     await ruleSettled(ruleId)
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${networkId}/firewall-rules/${ruleId}`), 204)
@@ -249,26 +255,20 @@ test.describe.serial('contract-spec', () => {
       const rows = await get('tenant', path) as any[]
       log(`CON-11 ${path}: ${rows.length} row(s)`)
       for (const row of rows) {
-        const fields = schema === 'VmQueryResult'
-          ? ['currentState', 'desiredState', 'currentExistence', 'desiredExistence', 'transition']
-          : ['currentExistence', 'desiredExistence', 'transition']
-        for (const field of fields) {
-          assertEnumField(spec, schema, field, row)
-        }
+        assertEnumField(spec, schema, 'status', row)
+        assertNoOldFields(schema, row)
         if (schema === 'VolumeQueryResult') {
           const snapshots = await get('tenant', `${path}/${row.id}/snapshots`) as any[]
           for (const snap of snapshots) {
-            for (const field of ['currentExistence', 'desiredExistence', 'transition']) {
-              assertEnumField(spec, 'VolumeSnapshotQueryResult', field, snap)
-            }
+            assertEnumField(spec, 'VolumeSnapshotQueryResult', 'status', snap)
+            assertNoOldFields('VolumeSnapshotQueryResult', snap)
           }
         }
         if (schema === 'VmQueryResult') {
           const snapshots = await get('tenant', `${path}/${row.id}/snapshots`) as any[]
           for (const snap of snapshots) {
-            for (const field of ['currentExistence', 'desiredExistence', 'transition']) {
-              assertEnumField(spec, 'VmSnapshotQueryResult', field, snap)
-            }
+            assertEnumField(spec, 'VmSnapshotQueryResult', 'status', snap)
+            assertNoOldFields('VmSnapshotQueryResult', snap)
           }
         }
       }

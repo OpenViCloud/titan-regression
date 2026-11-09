@@ -403,7 +403,7 @@ test.describe.serial('cli', () => {
     expect(before).toBe(attempts)
 
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmId}/stop`), 202)
-    await waitVm(`CLI-11 ${VM_NAME} stopped`, vmId, (v) => v.currentState === 'Stopped')
+    await waitVm(`CLI-11 ${VM_NAME} stopped`, vmId, (v) => v.status === 'Stopped')
     const stopped = await vmSsh('rg-key', 'yes', ['id', '-un'])
     log(`CLI-11 stopped exit=${stopped.code} stderr="${stopped.stderr.trim()}"`)
     expect(stopped.code).not.toBe(0)
@@ -573,15 +573,14 @@ test.describe.serial('cli lifecycle', () => {
       '--template', templateName, '--size', 'm', '--ssh-key', KEY_NAME, '--wait', '--timeout', '10m'])
     log(`CLI-13 create exit=${created.code} stdout="${created.stdout.trim()}" stderr="${created.stderr.trim()}"`)
     expect(created.code, created.stderr).toBe(0)
-    expect(created.stdout).toMatch(/State:\s+(Running|Ready)\s*$/m)
+    expect(created.stdout).toMatch(/Status:\s+(Running|Ready)\s*$/m)
 
     const idMatch = created.stdout.match(/^ID:\s+(\S+)/m)
     expect(idMatch, created.stdout).not.toBeNull()
     lifecycleVmId = idMatch![1]
     const fromApi = await getVm(lifecycleVmId)
     log(`CLI-13 api ${vmShape(fromApi)}`)
-    expect(fromApi.transition).toBeNull()
-    expect(['Running', 'Ready']).toContain(fromApi.currentState)
+    expect(['Running', 'Ready']).toContain(fromApi.status)
 
     const deadline = Date.now() + 5 * 60_000
     let result = await runCli(['vm', 'ssh', VM2_NAME, '--', ...sshOptions(LIFECYCLE_SSH_DIR, 'key', 'accept-new'), 'id', '-un'])
@@ -604,12 +603,12 @@ test.describe.serial('cli lifecycle', () => {
     const stopped = await runCli(['vm', 'stop', VM2_NAME, '--wait'])
     log(`CLI-14 stop exit=${stopped.code} stdout="${stopped.stdout.trim()}"`)
     expect(stopped.code, stopped.stderr).toBe(0)
-    expect(stopped.stdout).toMatch(/State:\s+Stopped\s*$/m)
+    expect(stopped.stdout).toMatch(/Status:\s+Stopped\s*$/m)
 
     const started = await runCli(['vm', 'start', VM2_NAME, '--wait'])
     log(`CLI-14 start exit=${started.code} stdout="${started.stdout.trim()}"`)
     expect(started.code, started.stderr).toBe(0)
-    expect(started.stdout).toMatch(/State:\s+(Running|Ready)\s*$/m)
+    expect(started.stdout).toMatch(/Status:\s+(Running|Ready)\s*$/m)
   })
 
   // OpenViCloud/titan-cli:command/vm/lifecycle.go newCreate (resolveNetwork/createVm — client-side resolution before any POST) ·
@@ -642,7 +641,7 @@ test.describe.serial('cli lifecycle', () => {
   })
 
   // OpenViCloud/titan-cli:command/vm/lifecycle.go newRename (rename), newRequest (delete's confirm prompt and --yes)
-  test('CLI-15 rename, decline delete, then `--yes --wait` deletes and the API shows currentExistence Deleted', async () => {
+  test('CLI-15 rename, decline delete, then `--yes --wait` deletes and the API shows status Deleted', async () => {
     test.setTimeout(10 * 60_000)
     const renamed = await runCli(['vm', 'rename', VM2_NAME, VM3_NAME])
     log(`CLI-15 rename exit=${renamed.code} stderr="${renamed.stderr.trim()}"`)
@@ -658,7 +657,7 @@ test.describe.serial('cli lifecycle', () => {
     expect(declined.code).not.toBe(0)
     expect(declined.stderr).toMatch(/not deleted/)
     const stillThere = await getVm(lifecycleVmId)
-    expect(stillThere.currentExistence).not.toBe('Deleted')
+    expect(stillThere.status).not.toBe('Deleted')
 
     const deletedResult = await runCli(['vm', 'delete', VM3_NAME, '--yes', '--wait'])
     log(`CLI-15 delete exit=${deletedResult.code} stderr="${deletedResult.stderr.trim()}"`)
@@ -667,7 +666,7 @@ test.describe.serial('cli lifecycle', () => {
     expect(deletedResult.stderr).toMatch(/deleted/)
     const fromApi = await getVm(lifecycleVmId)
     log(`CLI-15 api ${vmShape(fromApi)}`)
-    expect(fromApi.currentExistence).toBe('Deleted')
+    expect(fromApi.status).toBe('Deleted')
     lifecycleVmId = '' // afterAll's deleteVmAndWait is a no-op on an already-Deleted VM; clearing it just skips the read.
   })
 

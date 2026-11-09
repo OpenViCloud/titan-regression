@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { closeSessions, useBrowser } from './auth'
 import { bodyOf, call, expectStatus, get, log, startLog } from './api'
-import { RUN, activityOf, countOf, createVm, envOf, runNetwork, waitVm } from './fixtures'
+import { RUN, activityOf, countOf, createVm, envOf, runNetwork, runs, waitVm } from './fixtures'
 
 // The API half of cases ADM-03..07 of plan.md; the admin portal screens wait for PORTAL-REDESIGN.
 // ADM-06 changes a global price for a few seconds every time this module runs: on the release environment (prd), running
@@ -36,7 +36,7 @@ test.describe.serial('admin', () => {
     const network = await runNetwork()
     const { smallTier } = await envOf()
     vmId = await createVm(vmName, smallTier, network.id)
-    await waitVm('ADM vm has an instance', vmId, (v) => v.currentExistence === 'Exists')
+    await waitVm('ADM vm has an instance', vmId, (v) => runs(v))
     const networks = await get('admin', `/v1/admin/networks?tenantId=${tenant.id}`) as any[]
     expect(networks.some((n) => n.id === network.id && n.tenantId === tenant.id)).toBe(true)
     expect(networks.every((n) => n.tenantId === tenant.id)).toBe(true)
@@ -50,7 +50,7 @@ test.describe.serial('admin', () => {
     const reply = await call('admin', 'DELETE', `/v1/admin/vms/${vmId}`)
     expectStatus(reply, 204)
     expect(reply.text).toBe('')
-    await waitVm('ADM-03 deleted', vmId, (v) => v.currentExistence === 'Deleted')
+    await waitVm('ADM-03 deleted', vmId, (v) => v.status === 'Deleted')
     const actions = await activityOf(vmName)
     log(`ADM-03 tenant feed for ${vmName}: ${actions.join(', ')}`)
     expect(countOf(actions, 'vm.delete_requested')).toBe(0)

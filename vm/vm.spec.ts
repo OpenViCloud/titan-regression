@@ -208,7 +208,7 @@ test.describe.serial('vm', () => {
     vmA = await createVm(nameA, smallTier, networkId, { userData })
     made.push(vmA)
     const vm = await waitVm('VM-01', vmA, (v) => runs(v) && v.ipAddress !== null)
-    expect(vm.currentExistence).toBe('Exists')
+    expect(['Running', 'Ready', 'Stopped', 'Frozen', 'Error']).toContain(vm.status)
     expect(vm.vmOfferingId).toBe(smallTier)
     expect(vm.userData).toBe(userData)
     expect(Buffer.from(vm.userData, 'utf8').equals(Buffer.from(userData, 'utf8'))).toBe(true)
@@ -247,7 +247,7 @@ test.describe.serial('vm', () => {
     vmB = await createVm(nameB, otherTier, networkId)
     made.push(vmB)
     const vm = await waitVm('VM-02', vmB, (v) => runs(v) && v.ipAddress !== null)
-    expect(vm.currentExistence).toBe('Exists')
+    expect(['Running', 'Ready', 'Stopped', 'Frozen', 'Error']).toContain(vm.status)
     expect(vm.vmOfferingId).toBe(otherTier)
   })
 
@@ -318,8 +318,8 @@ test.describe.serial('vm', () => {
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs Stop · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/StopVmEndpoint.cs HandleAsync
   test('VM-03 stop from Running is 202, then Stopped with desired Stopped', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/stop`), 202)
-    const vm = await waitVm('VM-03', vmA, (v) => v.currentState === 'Stopped' && v.transition === null)
-    expect(vm.desiredState).toBe('Stopped')
+    const vm = await waitVm('VM-03', vmA, (v) => v.status === 'Stopped')
+    expect(vm.status).toBe('Stopped')
     const actions = await activityOf(nameA)
     expect(countOf(actions, 'vm.stop_requested')).toBe(1)
     expect(countOf(actions, 'vm.stopped')).toBe(1)
@@ -329,14 +329,14 @@ test.describe.serial('vm', () => {
   test('VM-04 stop again on a Stopped VM is 202 and records nothing (ACT-03)', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/stop`), 202)
     const vm = await getVm(vmA)
-    expect(vm.transition).toBeNull()
+    expect(vm.status).toBe('Stopped')
     expect(countOf(await activityOf(nameA), 'vm.stop_requested')).toBe(1)
   })
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs Start · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/StartVmEndpoint.cs HandleAsync
   test('VM-05 start from Stopped is 202, then Running or Ready', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/start`), 202)
-    await waitVm('VM-05', vmA, (v) => runs(v) && v.transition === null)
+    await waitVm('VM-05', vmA, (v) => runs(v))
     expect(countOf(await activityOf(nameA), 'vm.started')).toBe(1)
   })
 
@@ -344,7 +344,7 @@ test.describe.serial('vm', () => {
   test('VM-06 start on a running VM is 202 and changes nothing', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/start`), 202)
     const vm = await getVm(vmA)
-    expect(vm.transition).toBeNull()
+    expect(runs(vm)).toBe(true)
     expect(countOf(await activityOf(nameA), 'vm.start_requested')).toBe(1)
   })
 
@@ -356,7 +356,7 @@ test.describe.serial('vm', () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/stop`), 202)
     expect(countOf(await activityOf(nameA), 'vm.stop_requested')).toBe(2)
     expectError(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/start`), 422, 'VM_INVALID_STATUS')
-    await waitVm('VM-07 stop lands', vmA, (v) => v.currentState === 'Stopped' && v.transition === null)
+    await waitVm('VM-07 stop lands', vmA, (v) => v.status === 'Stopped')
   })
 
   // titan-ops features/vm/design.md#rename-same-name · OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/RenameVmCommandHandler.cs
@@ -368,24 +368,27 @@ test.describe.serial('vm', () => {
     expect(reply.text).toBe('')
     expect((await getVm(vmA)).name).toBe(renamed)
     expectStatus(await call('tenant', 'PATCH', `/v1/tenant/vms/${vmA}`, { name: renamed }), 204)
-    expect((await getVm(vmB)).desiredExistence).toBe('Exists')
+    expect(['Deleting', 'Deleted']).not.toContain((await getVm(vmB)).status)
     expectError(await call('tenant', 'PATCH', `/v1/tenant/vms/${vmA}`, { name: nameB }), 409, 'VM_NAME_TAKEN')
     expectError(await call('tenant', 'PATCH', `/v1/tenant/vms/${vmA}`, { name: 'rg-' + 'x'.repeat(62) }), 400, 'VALIDATION_ERROR')
     expect((await getVm(vmA)).name).toBe(renamed)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs Delete (Delete takes over a waiting stop)
-  test('VM-17 delete while a stop waits wins: 202, then Deleted', async () => {
+  // titan-ops features/vm/design.md#conflict-and-delete-wins: a delete does not take over a waiting stop; it is refused until the stop ends
+  test('VM-17 delete while a stop waits is 422 VM_INVALID_STATUS; once Stopped, the delete is 202, then Deleted', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmB}/stop`), 202)
+    expectError(await call('tenant', 'DELETE', `/v1/tenant/vms/${vmB}`), 422, 'VM_INVALID_STATUS')
+    await waitVm('VM-17 stopped', vmB, (v) => v.status === 'Stopped')
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/vms/${vmB}`), 202)
-    await waitVm('VM-17', vmB, (v) => v.currentExistence === 'Deleted')
+    await waitVm('VM-17', vmB, (v) => v.status === 'Deleted')
   })
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs OccupiesQuota (VmRepository.CountActiveByTenantAsync writes the same condition in SQL) — counted: desired Exists and (Exists, or NotCreated with a request waiting)
   test('VM-15 a create that gave up does not count: one more VM fits, the next is 422 VM_QUOTA_EXCEEDED', async () => {
     const vms = await get('tenant', '/v1/tenant/vms') as any[]
-    const counted = vms.filter((v) => v.desiredExistence === 'Exists' && v.currentExistence === 'Exists').length
-    log(`VM-15 counted=${counted} (${vms.map((v) => `${v.name}:${v.currentExistence}/${v.desiredExistence}/${v.requestFailureReason}`).join(' ')})`)
+    // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs OccupiesQuota
+    const counted = vms.filter((v) => !['Deleting', 'Deleted', 'NotFound', 'Failed'].includes(v.status)).length
+    log(`VM-15 counted=${counted} (${vms.map((v) => `${v.name}:${v.status}/${v.requestFailureReason}`).join(' ')})`)
     // A create that gave up and is still listed stays out of the count: VmRepositoryStateTests measures that rule;
     // on Incus nothing in this module makes a create give up any more.
     expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/quota`, { maxVms: counted + 1, maxNetworks: originalQuota!.maxNetworks }), 204)
@@ -396,7 +399,7 @@ test.describe.serial('vm', () => {
     expectError(await call('tenant', 'POST', '/v1/tenant/vms',
       { name: `rg-vmq2-${RUN}`, networkId, vmOfferingId: smallTier, templateId, clusterId, diskSizeGb: null }, newKey()), 422, 'VM_QUOTA_EXCEEDED')
     expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/quota`, originalQuota), 204)
-    await waitVm('VM-15 extra VM has an instance', fits, (v) => v.currentExistence === 'Exists')
+    await waitVm('VM-15 extra VM has an instance', fits, (v) => ['Running', 'Ready', 'Stopped', 'Frozen', 'Error'].includes(v.status))
   })
 
   // titan-ops architecture/tenancy-and-admin.md#tenant-isolation · OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/ComputeOwnership.cs
@@ -416,9 +419,7 @@ test.describe.serial('vm', () => {
     expectError(await call('admin', 'GET', `/v1/tenant/vms/${vmA}/snapshots`), 404, 'VM_NOT_FOUND')
 
     const after = await getVm(vmA)
-    expect(after.desiredExistence).toBe('Exists')
-    expect(after.desiredState).toBe(before.desiredState)
-    expect(after.transition).toBeNull()
+    expect(after.status).toBe(before.status)
     expect(await get('tenant', `/v1/tenant/vms/${vmA}/snapshots`)).toEqual(snapshotsBefore)
     const actionsAfter = await activityOf(before.name)
     for (const action of ['vm.stop_requested', 'vm.start_requested']) {
@@ -440,7 +441,7 @@ test.describe.serial('vm', () => {
     const reply = await call('tenant', 'DELETE', `/v1/tenant/vms/${vmA}`)
     expectStatus(reply, 202)
     expect(reply.text).toBe('')
-    await waitVm('VM-16', vmA, (v) => v.currentExistence === 'Deleted')
+    await waitVm('VM-16', vmA, (v) => v.status === 'Deleted')
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/vms/${vmA}`), 202)
     const actions = await activityOf(renamed)
     log(`ACT-01 delete ${renamed}: ${actions.join(', ')}`)
@@ -458,7 +459,7 @@ test.describe.serial('vm', () => {
     const { smallTier } = await envOf()
     const again = await createVm(renamed, smallTier, networkId)
     made.push(again)
-    await waitVm('VM-18 has an instance', again, (v) => v.currentExistence === 'Exists')
+    await waitVm('VM-18 has an instance', again, (v) => ['Running', 'Ready', 'Stopped', 'Frozen', 'Error'].includes(v.status))
     const reply = await call('tenant', 'GET', `/v1/tenant/vms/${again}`)
     expect(bodyOf(reply).name).toBe(renamed)
   })
