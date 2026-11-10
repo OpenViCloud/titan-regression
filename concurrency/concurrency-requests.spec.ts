@@ -406,13 +406,14 @@ test.describe.serial('concurrency-requests', () => {
     const created = await call('tenant', 'POST', `/v1/tenant/vms/${vm}/snapshots`, { name: snapshotName }, newKey())
     expectStatus(created, 202)
     snapshotId = bodyOf(created).snapshotId as string
-    await pollUntil('CC-10 snapshot Exists', readSnapshot, (s) => s.status === 'Available', plainShape)
+    await pollUntil('CC-10 snapshot Available', readSnapshot, (s) => s.status === 'Available', plainShape)
     const before = await feedIds()
     const answers = await twoAtOnce('CC-10', 'POST', `/v1/tenant/vms/${vm}/snapshots/${snapshotId}/revert`)
     const right = await readSnapshot()
     log(`CC-10 right after: ${plainShape(right)}`)
     expect(answers).toEqual(['202', '202'])
-    await pollUntil('CC-10 revert at rest', readSnapshot, (s) => !vmSnapshotPending(s), plainShape)
+    const rested = await pollUntil('CC-10 revert at rest', readSnapshot, (s) => !vmSnapshotPending(s), plainShape)
+    expect(rested.status).toBe('Available')
     // Only a revert still waiting when the second arrives makes the second a repeat; one already ended makes it a new
     // revert, which is right too, so that lap measures nothing.
     test.skip(!vmSnapshotPending(right), 'the revert had already ended when both answers were in: the second may have been a new revert')

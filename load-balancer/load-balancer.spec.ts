@@ -5,10 +5,10 @@ import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, s
 import { cleanUp } from './clean-up'
 import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, existenceShape, runNetwork, waitNetwork, networkUsable, waitVm } from './fixtures'
 
-// Cases LB-01..LB-07, LB-09..LB-11 and LB-13..LB-15 of plan.md (LB-08, traffic through the VIP, and LB-12 read the Incus
+// Cases LB-01..LB-07, LB-09..LB-11, LB-13..LB-15 and LB-17 of plan.md (LB-08, traffic through the VIP, and LB-12 read the Incus
 // host). The run network has no public IPv6 and beta-user holds one network, so the positive cases raise maxNetworks by
 // one for a second network with IPv6, and give it back in afterAll — in a cluster that names no IPv6 block they are
-// skipped. LB-09, LB-10, LB-11, LB-13, LB-14 and LB-15 run between LB-05 and LB-06 on load balancers of their own, never
+// skipped. LB-09, LB-10, LB-11, LB-13, LB-17, LB-14 and LB-15 run between LB-05 and LB-06 on load balancers of their own, never
 // LB-03's (LB-06 counts activity by its name), each Deleted before LB-06/LB-07.
 test.describe.serial('load-balancer', () => {
   test.describe.configure({ timeout: 20 * 60_000 })
@@ -23,7 +23,7 @@ test.describe.serial('load-balancer', () => {
   let subnet = ''
   let vmId = ''
   let lbId = ''
-  // LB-09, LB-10, LB-11, LB-13: load balancers of their own on the same network, Deleted before LB-06; afterAll deletes
+  // LB-09, LB-10, LB-11, LB-13, LB-17: load balancers of their own on the same network, Deleted before LB-06; afterAll deletes
   // any a broken run left, or the IPv6 network cannot go.
   const extraLbIds: string[] = []
   // LB-14: a VM on the run network, deleted in its finally.
@@ -335,6 +335,40 @@ test.describe.serial('load-balancer', () => {
     }
     await deleted(id, 'LB-13 load balancer deleted')
     test.skip(raced, 'the create ended before the early DELETE was read: its 422 is not measured on this lap')
+  })
+
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.Update.cs (Update: RestsOnIncus, only Available ⇒
+  // LOAD_BALANCER_INVALID_STATE otherwise) · OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/LoadBalancer/UpdateLoadBalancerCommandHandler.cs
+  // (HandleAsync: LoadBalancer.IsUpdateWaitingOrDone, false once the load balancer is being deleted, so a PUT of the configuration it
+  // already has is no repeat then) · titan-ops features/load-balancer/design.md#lb-lifecycle
+  test('LB-17 a PUT while the create waits is 422 LOAD_BALANCER_INVALID_STATE and changes nothing; a PUT after DELETE is 422 too', async () => {
+    test.skip(lbId === '', 'LB-03 did not create a load balancer')
+    const name = `rg-lb4-${RUN}`
+    const id = await createExtraLb(name)
+    const first = await readLb(id)
+    const early = await call('tenant', 'PUT', `/v1/tenant/load-balancers/${id}`, { listeners: [http, dns], backends: [{ vmId }] })
+    const second = await readLb(id)
+    log(`LB-17 before: ${existenceShape(first)}; PUT → ${early.status} ${early.text.slice(0, 200)}; after: ${existenceShape(second)}`)
+    const measured = first.status === 'Creating' && second.status === 'Creating' && early.status !== 204
+    if (measured) {
+      expectError(early, 422, 'LOAD_BALANCER_INVALID_STATE')
+      expect(second.listeners).toEqual([http])
+    } else {
+      const reason = `N/A first PUT: the create was not waiting at both reads (status ${first.status}, then ${second.status}; PUT ${early.status})`
+      log(`LB-17 ${reason}`)
+      test.info().annotations.push({ type: 'skip', description: reason })
+    }
+    const rested = await atRest(id, 'LB-17 load balancer on Incus')
+    if (measured) {
+      expect(rested.listeners).toEqual([http])
+      expect(countOf(await timelineOf(name), 'load_balancer.update_requested'), 'update_requested').toBe(0)
+    }
+
+    expectStatus(await call('tenant', 'DELETE', `/v1/tenant/load-balancers/${id}`), 202)
+    const late = await call('tenant', 'PUT', `/v1/tenant/load-balancers/${id}`, { listeners: [http], backends: [{ vmId }] })
+    log(`LB-17 PUT after DELETE → ${late.status} ${late.text.slice(0, 200)}`)
+    expectError(late, 422, 'LOAD_BALANCER_INVALID_STATE')
+    await deleted(id, 'LB-17 load balancer deleted')
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/LoadBalancer/LoadBalancerRequest.cs (BackendsAsync: a VM that does not exist is

@@ -454,6 +454,35 @@ test.describe.serial('vm', () => {
     expect((await getVm(vmA)).name).toBe(renamed)
   })
 
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs (HandleAsync: req.ClusterId ??
+  // network.ClusterId) · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/CreateVmValidator.cs (ClusterId
+  // NotEmpty().When(x => x.ClusterId != null)) · titan-ops features/catalog/design.md#cluster-is-a-real-choice ·
+  // titan-ops features/vm/user-stories.md#us-vm01. Runs after VM-16 freed vmA's slot and deletes its VM before VM-18 takes
+  // that slot, so the tenant's VM count never goes above what it was before VM-16. A clusterId other than the network's stays VM-12's.
+  test('VM-31 a VM without clusterId lands on its network\'s cluster; an empty clusterId is 400 VALIDATION_ERROR and makes no VM', async () => {
+    const { smallTier, templateId } = await envOf()
+    const networkCluster = (await get('tenant', `/v1/tenant/networks/${networkId}`)).clusterId as string
+    const name = `rg-vmnoc-${RUN}`
+    const emptyName = `rg-vmempc-${RUN}`
+    const reply = await call('tenant', 'POST', '/v1/tenant/vms',
+      { name, networkId, vmOfferingId: smallTier, templateId, diskSizeGb: null }, newKey())
+    expectStatus(reply, 202)
+    const id = bodyOf(reply).vmId as string
+    try {
+      const vm = await waitVm('VM-31 runs', id, (v) => runs(v))
+      log(`VM-31 network cluster=${networkCluster} vm cluster=${vm.clusterId} status=${vm.status}`)
+      expect(['Running', 'Ready']).toContain(vm.status)
+      expect(vm.clusterId).toBe(networkCluster)
+
+      expectError(await call('tenant', 'POST', '/v1/tenant/vms',
+        { name: emptyName, networkId, vmOfferingId: smallTier, templateId, clusterId: '', diskSizeGb: null }, newKey()),
+        400, 'VALIDATION_ERROR')
+      expect((await get('tenant', '/v1/tenant/vms') as any[]).filter((v) => v.name === emptyName)).toEqual([])
+    } finally {
+      await deleteVmAndWait(id)
+    }
+  })
+
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/VmRepository.cs ExistsByNameAsync — a Deleted VM no longer holds its name
   test('VM-18 a new VM may take the name of a Deleted one', async () => {
     const { smallTier } = await envOf()

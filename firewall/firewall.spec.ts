@@ -160,7 +160,7 @@ test.describe.serial('firewall', () => {
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Network/CreateFirewallRuleEndpoint.cs (Configure: Post("v1/tenant/networks/{networkId:guid}/firewall-rules");
   // HandleAsync: SendAsync(result, 201)); the create's
   // Done carries the state of the ACL line (titan-ops features/network/design.md#firewall-rule-status)
-  test('FW-01 a rule is 201 {ruleId}, then enabled and Exists', async () => {
+  test('FW-01 a rule is 201 {ruleId}, then enabled', async () => {
     const id = await createRule(0)
     const rule = await pollUntil('FW-01', () => readRule(id), (r) => r.status === 'enabled', ruleShape)
     expect(rule.status).toBe('enabled')
@@ -194,9 +194,7 @@ test.describe.serial('firewall', () => {
     expectError(await call('admin', 'DELETE', `${rulePath(networkId)}/${id}`), 404, 'NETWORK_NOT_FOUND')
     const rule = await readRule(id)
     log(`FW-13 rule of FW-01: ${ruleShape(rule)}`)
-    expect(rule.status).not.toBe('Creating')
-    expect(rule.status).not.toBe('Deleting')
-    expect(rule.status).not.toBe('Deleted')
+    expect(rule.status).toBe('enabled')
     const after = await ruleIds()
     expect(after.filter((r) => !before.includes(r))).toEqual([])
   })

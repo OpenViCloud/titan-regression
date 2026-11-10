@@ -112,7 +112,7 @@ test.describe.serial('admin-delete-refused', () => {
     ])
   })
 
-  // titan-ops features/vm/design.md#vm-snapshot-counting · titan-ops features/vm/design.md#admin-delete-audit ·
+  // titan-ops features/vm/design.md#vm-snapshot · titan-ops features/vm/design.md#admin-delete-audit ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Admin/Vm/DeleteAdminVmCommandHandler.cs (HandleAsync: deletion.DeleteAsync before
   // auditLog.Add) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Deletion.cs (Delete: EnsureNotInTransition ⇒ VM_INVALID_STATUS) ·
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs (AddSnapshot, RevertSnapshot: Status = Snapshotting) ·
