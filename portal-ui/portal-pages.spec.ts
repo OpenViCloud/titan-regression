@@ -72,21 +72,25 @@ test.describe.serial('portal-ui pages', () => {
     log('UI-13 search → VM page')
   })
 
-  // titan-ops features/cloud-console/design.md#quota-card · OpenViCloud/titan-cloud-console:portal/src/lib/quota.ts
-  test('UI-14 the quota card shows the caps the API returns and counts the live VM', async () => {
+  // titan-ops features/cloud-console/design.md#quota-card · OpenViCloud/titan-cloud-console:portal/src/lib/quota.ts (vmOccupiesQuota,
+  // networkOccupiesQuota, volumeOccupiesQuota: every status but Deleting, Deleted, NotFound and Failed, so Attaching and
+  // Detaching count) · OpenViCloud/titan-cloud-console:portal/src/components/QuotaCard.tsx (QuotaRow: `${used} / ${cap}`)
+  test('UI-14 the quota card shows the caps the API returns and counts VMs, networks and volumes by status', async () => {
     const tenant = await get('tenant', '/v1/tenant')
-    // Same rule as the card (OpenViCloud/titan-cloud-console:portal/src/lib/quota.ts vmOccupiesQuota): every status but
-    // Deleting, Deleted, NotFound and Failed.
-    const vms = await get('tenant', '/v1/tenant/vms') as Array<{ status: string }>
-    const used = vms.filter((v) => v.status !== 'Deleting' && v.status !== 'Deleted' && v.status !== 'NotFound' && v.status !== 'Failed').length
+    const outside = new Set(['Deleting', 'Deleted', 'NotFound', 'Failed'])
+    const counted = async (path: string) => (await get('tenant', path) as Array<{ status: string }>).filter((r) => !outside.has(r.status)).length
+    const vms = await counted('/v1/tenant/vms')
+    const networks = await counted('/v1/tenant/networks')
+    const volumes = await counted('/v1/tenant/volumes')
     const page = await pageOf('tenant')
     await page.goto(PORTAL + '/', { waitUntil: 'networkidle' })
     const card = page.getByRole('region', { name: 'Quota' })
-    const vmRow = card.locator('[data-quota-row]').filter({ hasText: 'VMs' })
-    await expect(vmRow).toContainText(`${used} / ${tenant.maxVms}`)
-    await expect(card.locator('[data-quota-row]').filter({ hasText: 'Volumes' })).toContainText(`/ ${tenant.maxVolumes}`)
+    const rowOf = (label: string) => card.locator('[data-quota-row]').filter({ hasText: label })
+    await expect(rowOf('VMs')).toContainText(`${vms} / ${tenant.maxVms}`)
+    await expect(rowOf('Networks')).toContainText(`${networks} / ${tenant.maxNetworks}`)
+    await expect(rowOf('Volumes')).toContainText(`${volumes} / ${tenant.maxVolumes}`)
     await card.screenshot({ path: `${RESULTS}/UI-14-quota.png` })
-    log(`UI-14 vms ${used}/${tenant.maxVms} volumes cap ${tenant.maxVolumes} ipv6 cap ${tenant.maxPublicIpv6}`)
+    log(`UI-14 vms ${vms}/${tenant.maxVms} networks ${networks}/${tenant.maxNetworks} volumes ${volumes}/${tenant.maxVolumes} ipv6 cap ${tenant.maxPublicIpv6}`)
   })
 
   // titan-ops features/network/user-stories.md#us-p07 · titan-ops features/network/user-stories.md#us-p09

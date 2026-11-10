@@ -234,6 +234,18 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     const selects = volDialog.locator('select')
     await selects.nth(0).selectOption(clusterId)
     await selects.nth(1).selectOption(volumeOfferingId)
+    // The tier option reads the tier's name (VolumeCreateModal: <option value={o.id}>{o.name}</option>); an empty Size
+    // stops the create with volumeCreate.sizeRequired before any request (VolumeCreateModal handleCreate:
+    // !sizeGb ⇒ setError) — OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts (volumeCreate.size, volumeCreate.sizeRequired).
+    const offeringName = (await get('anonymous', '/v1/volume-offerings') as any[]).find((o) => o.id === volumeOfferingId).name as string
+    expect(offeringName).toBe('Standard')
+    await expect(selects.nth(1).locator(`option[value="${volumeOfferingId}"]`)).toHaveText(offeringName)
+    await expect(volDialog.getByText('Size (GB)', { exact: true })).toBeVisible()
+    await volDialog.getByRole('button', { name: 'Create volume' }).click()
+    await expect(volDialog.getByText('Size is required.', { exact: true })).toBeVisible()
+    await expect(volDialog).toHaveCount(1)
+    await page.screenshot({ path: `${RESULTS}/UI-04-volume-size-required.png` })
+    expect((await get('tenant', '/v1/tenant/volumes') as any[]).filter((v) => v.name === volumeName)).toEqual([])
     await volDialog.getByPlaceholder('e.g. 50').fill('1')
     await volDialog.getByRole('button', { name: 'Create volume' }).click()
     await expect(volDialog).toHaveCount(0)
