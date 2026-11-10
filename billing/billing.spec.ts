@@ -249,8 +249,9 @@ test.describe.serial('billing', () => {
     expect((await readInvoice(900000000)).status).toBe('New')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Billing/Invoice/GetTenantInvoiceQueryHandler.cs (HandleAsync) and
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Billing/Invoice/PayInvoiceFromWalletCommandHandler.cs (HandleAsync): another
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Billing/Invoice/GetTenantInvoiceQueryHandler.cs (HandleAsync, through InvoiceOwnership.RequireInvoiceAsync) and
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Billing/Invoice/PayInvoiceFromWalletCommandHandler.cs (HandleAsync, through
+  // InvoiceOwnership.RequireInvoiceForUpdateAsync): another
   // tenant's invoice and a missing one are the same INVOICE_NOT_FOUND; OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Billing/SettleInvoiceFromWalletAdminEndpoint.cs
   // and OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Billing/MarkInvoicePaidEndpoint.cs (Configure: Roles("platform-admin")) ⇒ 403;
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Billing/Invoice/SettleInvoiceFromWalletCommandHandler.cs (HandleAsync) and

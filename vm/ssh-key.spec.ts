@@ -160,7 +160,7 @@ test.describe.serial('ssh-key', () => {
     expect(countOf(await activityOf(name), 'ssh_key.create_requested')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/SshKey/DeleteSshKeyCommandHandler.cs HandleAsync (another tenant's key is not found) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/SshKey/DeleteSshKeyCommandHandler.cs HandleAsync (through ComputeOwnership.RequireSshKeyAsync: another tenant's key is not found) ·
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/SshKey/DeleteSshKeyEndpoint.cs (Configure: Delete("v1/tenant/ssh-keys/{sshKeyId:guid}"), 204)
   test('SSH-05 another tenant cannot see or delete the key; the owner deletes it once, then 404', async () => {
     expect((await listKeys('admin')).map((k) => k.id)).not.toContain(keyId)
