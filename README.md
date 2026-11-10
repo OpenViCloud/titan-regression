@@ -1,9 +1,8 @@
 # titan-regression — OpenViCloud's regression suite
 
 The durable regression suite of [OpenViCloud](https://github.com/OpenViCloud). Every behaviour that must still
-hold at the next release has a case in [`plan.md`](plan.md) and, once written, a Playwright spec here. Before each
-release the whole suite runs against the release environment (production, `prd`); a release pins the commit of this
-repository it ran.
+hold at the next release has a case in [`plan.md`](plan.md) and, once written, a Playwright spec here. A release pins
+the commit of this repository it ran.
 
 The specs drive the public API, the portals and the CLI of a running OpenViCloud environment. They do not run on a
 laptop: each module runs as a job of the `titan-regression` runner inside the cluster (its manifests are in
@@ -159,22 +158,22 @@ create a network and beta-user may hold one.
 |---|---|---|---|---|---|
 | 1 | `smoke` | health, clusters, anonymous catalog, clean test account | yes | yes | yes |
 | 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-14 (host, not covered), CAT-16 (host), CAT-17 (plan only), CAT-01 (extended) |
-| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21, NET-27 (host, not covered), NET-25 (host), NET-26 (plan only), NET-02, NET-11 and NET-24 (extended) |
+| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21, NET-27 (host, not covered), NET-25 (host), NET-26 (new spec), NET-02, NET-11 and NET-24 (extended) |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-14 (host, not covered), FW-01, FW-10 and FW-13 (extended) |
 | 5 | `vm` | VMs: create per tier (cluster named or taken from the network), stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered), VM-31 (plan only) |
-| 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-14, VMS-15, VMS-20 (host, not covered), VMS-17 (host), VMS-18, VMS-19 (plan only) |
+| 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-14, VMS-15, VMS-20 (host, not covered), VMS-17 (host), VMS-18, VMS-19 (new spec) |
 | 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes, except VOL-18 (host, not covered), VOL-21 (not covered) |
 | 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: only the negative cases that need no IPv6 network) | yes | yes | yes, except LB-12 and LB-16 (host, not covered), LB-17 (plan only) |
 | 9 | `tenant` | tenant, quota, terms consent, approval on sign-in, the admin status route's error order | yes | yes | yes |
 | 10 | `api-token` | API tokens: create, call the API with one, duplicate name/secret, delete ⇒ `401`, unknown token | yes | yes | yes |
 | 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes, except CLI-05 (extended) |
-| 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes, except BIL-18 (not covered), BIL-02 and BIL-16 (extended) |
-| 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no | yes | yes, except CON-14 (plan only), CON-15 (not covered), CON-11 (extended) |
-| 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once | no | yes | yes, except CC-04, CC-10, CC-11 and CC-12 (extended) |
-| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | no | yes | yes (API), except ADM-12 and ADM-13 (extended) and ADM-15 (`L-x`, a job of its own: `run-module.sh` on `admin/stuck-requests`, with `REGRESSION_WORKER_APPS`) |
-| 16 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: Keycloak's database `keycloak` as a `Database` object, ArgoCD's health checks, schema `public` for its owner only, the name CNPG archives under and `ContinuousArchiving` (`kubectl` reads) | no | yes | yes (API and admin portal screens), except BAK-11 (extended); `(host)`, `L-x` and `kubectl` cases in Phase 4 of the release |
-| 17 | `portal-ui` | customer portal end to end, signed in | no | yes | yes, except UI-04, UI-14, UI-17 and UI-29 (extended) |
-| 18 | `tenant-suspend` | suspended ⇒ writes refused, reads allowed; reactivated | no | yes | yes |
+| 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | yes | yes | yes, except BIL-18 (not covered), BIL-02 and BIL-16 (extended) |
+| 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no: CON-09 reads the TLS certificates; dev serves plain HTTP | yes | yes, except CON-14 (plan only), CON-15 (not covered), CON-11 (extended) |
+| 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once | yes | yes | yes, except CC-04, CC-10, CC-11 and CC-12 (extended) |
+| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | yes | yes | yes (API), except ADM-12 and ADM-13 (extended) and ADM-15 (`L-x`, a job of its own measured at the release environment's run: `run-module.sh` on `admin/stuck-requests`, with `REGRESSION_WORKER_APPS`) |
+| 16 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: Keycloak's database `keycloak` as a `Database` object, ArgoCD's health checks, schema `public` for its owner only, the name CNPG archives under and `ContinuousArchiving` (`kubectl` reads) | yes | yes | yes (API and admin portal screens), except BAK-11 (extended); `(host)`, `L-x` and `kubectl` cases in Phase 4 of the release |
+| 17 | `portal-ui` | customer portal end to end, signed in | no: UI-28 needs a portal without `topUpEnabled`, as the release environment's; dev's sets it (UI-07 and UI-18, which need it set, are N/A at the release environment's run) | yes | yes, except UI-04, UI-14, UI-17 and UI-29 (extended) |
+| 18 | `tenant-suspend` | suspended ⇒ writes refused, reads allowed; reactivated | yes | yes | yes |
 | 19 | `network-lifecycle` | deletes the run's network (with its rules), recreates the same name | yes | yes | yes |
 | 20 | `login-page` | Keycloak sign-in page: layout, colours, font, brand, sign-up form, language, redirect URIs per client (no sign-in) | yes | yes | yes |
 | 21 | `cleanup` | sweeps `rg-*` (and the `tfacc-*` a red `terraform-provider` run left) through the API, asserts 0 (on Incus: CLN-02, host) | yes | yes | yes |
@@ -205,10 +204,10 @@ Until the specs are split or skip themselves, that stops the whole `admin` modul
 `admin/admin.spec.ts` with ADM-06, and `run-module.sh` runs the whole directory, ADM-08 and ADM-09 included) and CC-03
 with CC-04 (CC-03 pays the invoice the seed leaves; the serial spec then skips CC-04).
 
-**Spec** is `yes` when every case of the module in `plan.md` has a spec that ran green on the release environment at a release, except `(host)` cases (Phase 4
+**Spec** is `yes` when every case of the module in `plan.md` has a spec that ran green at a release, in the run that measures the module (dev for a module whose Dev column is `yes`, the release environment otherwise), except `(host)` cases (Phase 4
 of the release), **NOT COVERED** cases (the reason is in `plan.md`) and cases not applicable to the measured
 environment (the spec calls `test.skip` with the reason, e.g. VM-12 with a single cluster). `ACT-*` cases are measured
-in the module that owns the resource. A case with no spec yet gets one at the next release, and the cell names it as `yes, except <ID> (plan only)` until then; a case whose row changed (more checks, or an expectation changed) in a way its spec does not check yet is named `<ID> (extended)` until the spec catches up; a case no spec can be
+in the module that owns the resource. A case with no spec yet gets one at the next release, and the cell names it as `yes, except <ID> (plan only)` until then; a case whose spec was written outside a release and has not yet run green at a release is named `<ID> (new spec)` until a release's run of its module does; a case whose row changed (more checks, or an expectation changed) in a way its spec does not check yet is named `<ID> (extended)` until the spec catches up; a case no spec can be
 written for and that Phase 4 does not measure by hand is **NOT COVERED**, with the reason in its row of `plan.md`. Specs pick the first cluster with a listed template (`lib/fixtures.ts`,
 `envOf()`); prd's cluster is `singapore01`.
 

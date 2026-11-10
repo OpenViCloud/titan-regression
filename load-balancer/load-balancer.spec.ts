@@ -283,8 +283,9 @@ test.describe.serial('load-balancer', () => {
     expect(countOf(actions, 'load_balancer.deleted'), 'deleted').toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs (Delete: a delete replaces a waiting update;
-  // FinishOperation, FailOperation: a report for a request no longer waiting ends nothing) ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.Deletion.cs (Delete: a delete replaces a waiting update) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/LoadBalancer/LoadBalancerReports.cs (FinishOperation, FailOperation: a report
+  // for a request no longer waiting ends nothing) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/LoadBalancer/EndLoadBalancerRequestCommandHandler.cs (HandleAsync: an ignored
   // report records no outcome) · titan-ops architecture/resource-lifecycle.md#repeat · titan-ops features/load-balancer/design.md#lb-lifecycle
   test('LB-11 a DELETE while an update waits replaces it: Deleting, then Deleted, and no load_balancer.updated', async () => {
@@ -315,9 +316,9 @@ test.describe.serial('load-balancer', () => {
     expect(countOf(timeline, 'load_balancer.updated'), 'updated').toBe(0)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs (Delete: CreateIsWaiting ⇒ LOAD_BALANCER_INVALID_STATE)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.Deletion.cs (Delete: Creating ⇒ LOAD_BALANCER_INVALID_STATE)
   // · titan-ops features/load-balancer/design.md#lb-lifecycle
-  test('LB-13 a DELETE while the create waits is 422 LOAD_BALANCER_INVALID_STATE; after Exists it is 202, then Deleted', async () => {
+  test('LB-13 a DELETE while the create waits is 422 LOAD_BALANCER_INVALID_STATE; after Available it is 202, then Deleted', async () => {
     test.skip(lbId === '', 'LB-03 did not create a load balancer')
     const id = await createExtraLb(`rg-lb3-${RUN}`)
     const before = await readLb(id)

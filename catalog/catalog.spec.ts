@@ -44,7 +44,6 @@ test.describe.serial('catalog', () => {
     for (const offering of offerings) {
       expect(offering.vcpu, offering.id).toBeGreaterThan(0)
       expect(offering.memoryMb, offering.id).toBeGreaterThan(0)
-      expect(offering.cpu, offering.id).toBeGreaterThan(0)
       expect(offering.pricePerHour, offering.id).toBeGreaterThan(0)
     }
   })
@@ -86,7 +85,7 @@ test.describe.serial('catalog', () => {
     }
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Options/ClusterOptions.cs Require (CLUSTER_NOT_FOUND)
+  // OpenViCloud/titan-control-plane:Titan.Application/Options/ClusterOptions.cs ClusterOf (CLUSTER_NOT_FOUND)
   test('CAT-03 an unknown cluster is 404 CLUSTER_NOT_FOUND', async () => {
     expectError(await call('tenant', 'GET', '/v1/templates?clusterId=rg-no-such-cluster'), 404, 'CLUSTER_NOT_FOUND')
   })

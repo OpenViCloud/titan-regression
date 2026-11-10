@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test'
 import { closeSessions, useBrowser } from './auth'
-import { bodyOf, call, expectError, expectStatus, get, log, newKey, startLog } from './api'
+import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, startLog } from './api'
 import { cleanUp } from './clean-up'
 import { RUN, RUN_CIDR, RUN_NETWORK_PREFIX, activityOf, countOf, envOf, listNetworks, networkUsable, waitNetwork } from './fixtures'
 
-// Cases NET-01..07, NET-09..13 and NET-22..24 of plan.md (NET-08, NET-20, NET-21 and NET-25 read the Incus host;
+// Cases NET-01..07, NET-09..13, NET-22..24 and NET-26 of plan.md (NET-08, NET-20, NET-21 and NET-25 read the Incus host;
 // NET-14..19 are measured by tests of the control plane). This module creates the run network and leaves it for the
 // modules after it; network-lifecycle deletes it. NET-11..13 and NET-24 need more networks than beta-user may hold:
 // they raise maxNetworks (NET-13 also lowers maxPublicIpv6), give it back right after the case and again in afterAll,
@@ -174,6 +174,63 @@ test.describe.serial('network', () => {
     expect(countOf(actions, 'network.created')).toBe(1)
   })
 
+  // titan-ops features/network/design.md#network-lifecycle · titan-ops features/public-api/design.md#state-enums ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Networking/Network/Contracts/NetworkQueryResult.cs NetworkQueryResult ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Networking/FirewallRule/Contracts/FirewallRuleQueryResult.cs FirewallRuleQueryResult ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Admin/Network/Contracts/AdminNetworkQueryResult.cs AdminNetworkQueryResult
+  // (Status is a string there) · the enum each customer route declares is the served spec's
+  // (OpenViCloud/titan-control-plane:Titan.Tests/Api/OpenApiSpecTests.cs SpecUrl)
+  test('NET-26 network and rule rows carry one status and requestFailureReason, none of the old state fields', async () => {
+    const reply = await call('anonymous', 'GET', '/swagger/v1/swagger.json')
+    expectStatus(reply, 200)
+    const schemas = JSON.parse(reply.text).components.schemas as Record<string, any>
+    const enumOf = (schema: string): string[] => {
+      const property = schemas[schema]?.properties?.status
+      expect(property, `${schema}.status in the spec`).toBeDefined()
+      const ref = (property.allOf?.[0] ?? property).$ref as string | undefined
+      expect(ref, `${schema}.status is an enum reference: ${JSON.stringify(property)}`).toBeDefined()
+      return schemas[ref!.split('/').pop()!].enum as string[]
+    }
+    const oldFields = ['currentState', 'currentExistence', 'desiredExistence', 'transition']
+    const assertShape = (label: string, row: any, statuses: string[] | null): void => {
+      log(`NET-26 ${label}: ${Object.keys(row).sort().join(',')}`)
+      expect(typeof row.status, `${label}.status`).toBe('string')
+      if (statuses !== null) {
+        expect(statuses, `${label}.status = ${row.status} is one of the spec's enum`).toContain(row.status)
+      }
+      expect(Object.keys(row), `${label}.requestFailureReason`).toContain('requestFailureReason')
+      for (const field of oldFields) {
+        expect(field in row, `${label} has no ${field}`).toBe(false)
+      }
+    }
+    const networkStatuses = enumOf('NetworkQueryResult')
+    const listed = (await listNetworks()).find((n) => n.id === networkId)
+    expect(listed, `run network ${networkId} in GET /v1/tenant/networks`).toBeDefined()
+    assertShape('list row', listed, networkStatuses)
+    assertShape('network', await get('tenant', `/v1/tenant/networks/${networkId}`), networkStatuses)
+
+    const rulesPath = `/v1/tenant/networks/${networkId}/firewall-rules`
+    const ruleReply = await call('tenant', 'POST', rulesPath,
+      { direction: 'Ingress', protocol: 'TCP', startPort: 2626, endPort: 2626, cidr: '0.0.0.0/0' }, newKey())
+    expectStatus(ruleReply, 201)
+    const ruleId = bodyOf(ruleReply).ruleId as string
+    const ruleOf = async (): Promise<any> => (await get('tenant', rulesPath) as any[]).find((r) => r.id === ruleId) ?? { status: 'Gone' }
+    try {
+      const rule = await pollUntil('NET-26 rule at rest', ruleOf, (r) => r.status !== 'Creating' && r.status !== 'Deleting',
+        (r) => `status=${r.status}`)
+      assertShape('rule', rule, enumOf('FirewallRuleQueryResult'))
+    } finally {
+      // A rule whose create still waits refuses its delete (FIREWALL_RULE_NOT_READY): the poll above waited it out.
+      expectStatus(await call('tenant', 'DELETE', `${rulesPath}/${ruleId}`), 204)
+      await pollUntil('NET-26 rule gone', ruleOf, (r) => r.status === 'Gone' || r.status === 'Deleted', (r) => `status=${r.status}`)
+    }
+
+    const adminRow = (await get('admin', `/v1/admin/networks?tenantId=${tenantId}`) as any[]).find((n) => n.id === networkId)
+    expect(adminRow, `run network ${networkId} in GET /v1/admin/networks?tenantId=`).toBeDefined()
+    assertShape('admin row', adminRow, null)
+    expect(Object.keys(adminRow), 'admin row requestFailureDetail').toContain('requestFailureDetail')
+  })
+
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Auth/IdempotencyMiddleware.cs InvokeAsync (IdempotencyDecision.Replay) — the same key and body replay the stored answer
   test('NET-03 the same key and body answers the same networkId and makes no second network', async () => {
     const { clusterId } = await envOf()
@@ -285,8 +342,9 @@ test.describe.serial('network', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/NetworkRepository.cs HasCidrOverlapAsync (a create that waits holds
-  // RequestedCidr) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs AddFirewallRule (IsUsable ⇒
-  // FIREWALL_NETWORK_NOT_READY), Delete (CreateIsWaiting ⇒ NETWORK_INVALID_STATE), Rename (Deleted ⇒ NETWORK_INVALID_STATE) ·
+  // RequestedCidr) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.FirewallRules.cs AddFirewallRule (IsUsable ⇒
+  // FIREWALL_NETWORK_NOT_READY) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.Deletion.cs Delete (CreateIsWaiting ⇒
+  // NETWORK_INVALID_STATE) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs Rename (IsDeletedOrDeleting ⇒ NETWORK_INVALID_STATE) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/RenameNetworkCommandHandler.cs HandleAsync (ExistsByNameAsync
   // ⇒ NETWORK_NAME_TAKEN) · OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/Contracts/CreateNetworkCommand.cs
   // (FirewallPolicy is a number on /v1: Allow = 0, Deny = 1); titan-ops features/network/user-stories.md#us-net-intent-02 ·

@@ -45,6 +45,27 @@
           "module": "cli"
         },
         {
+          "external": "seed-invoices"
+        },
+        {
+          "module": "billing"
+        },
+        {
+          "module": "concurrency"
+        },
+        {
+          "external": "check-wallets"
+        },
+        {
+          "module": "admin"
+        },
+        {
+          "module": "backup"
+        },
+        {
+          "module": "tenant-suspend"
+        },
+        {
           "module": "network-lifecycle"
         },
         {
