@@ -21,6 +21,7 @@ Repo này không có hệ thống nào để chạy: spec chạy bằng runner `
 │                   #   UI case ✓ phải có <ID>-*.png — python3 check-screenshots.py <module>
 ├── count-cases.py   # đếm ID của plan.md với dòng ✓/✘/- của các runner.log (mở rộng dải X-01..03)
 ├── trim-cp-log.py   # run-module.sh lọc control-plane.log: bỏ dòng info của hosting, routing, SQL command (warn/fail và log Titan giữ)
+├── check-removed-fields.py   # đỏ khi spec hay lib/ còn đọc field đã rời /v1 (so hai bản api/openapi-v1.json của control plane) mà cột Spec của README không đánh dấu case
 ├── run-lanes.py     # xếp lịch hai lane (mỗi lane một tenant test, chạy song song): đọc lanes.json, barrier/signal/wait/external,
 │                   #   từ chối lịch để hai module cùng nhóm đụng chung (ví, danh sách topup Pending) chạy chồng hoặc để ba module lấy /64 IPv6 tách lane; --check đối chiếu lanes.json với README
 │                   #   (--column dev --lanes lanes-dev*.json: kế hoạch cho cụm dev, đối chiếu cột Dev)

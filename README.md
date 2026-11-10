@@ -21,6 +21,7 @@ which signs in with the test accounts there, so no credential passes through the
 | `count-cases.py` | Counts `plan.md`'s IDs against the runner logs, for the report's first line |
 | `check-screenshots.py` | Fails when a browser case passed without its `<ID>-*.png` screenshot |
 | `trim-cp-log.py` | Drops the control plane's routine info lines from a saved log |
+| `check-removed-fields.py` | Fails when a spec or a helper under `lib/` still reads a field that left the control plane's `/v1` contract and the Spec column below does not mark a case of its test; run it with the two control plane commits a contract change lies between |
 | `run-lanes.py`, `lanes.json`, `lanes-dev.json`, `lanes-dev-sequential.json` | Runs the modules as lanes, one lane per test tenant, lanes side by side (below); the two dev plans cover the Dev column |
 | `patch-job.py` | Points a job's `specs` volume at a ConfigMap of its own, so jobs started together never read each other's specs |
 | `selftest/`, `test_*.py` | Tests of the helpers and scripts above |
@@ -140,6 +141,7 @@ node --test 'selftest/*.test.ts'
 python3 test_count_cases.py
 python3 test_check_screenshots.py
 python3 test_trim_cp_log.py
+python3 test_check_removed_fields.py
 python3 test_patch_job.py
 python3 test_run_module.py
 python3 test_run_lanes.py
@@ -156,7 +158,7 @@ create a network and beta-user may hold one.
 | # | Module | Measures | Dev | Release | Spec |
 |---|---|---|---|---|---|
 | 1 | `smoke` | health, clusters, anonymous catalog, clean test account | yes | yes | yes |
-| 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-14 (host, not covered), CAT-16 (host) |
+| 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-14 (host, not covered), CAT-16 (host), CAT-17 (plan only), CAT-01 (extended) |
 | 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21, NET-27 (host, not covered), NET-25 (host), NET-26 (plan only), NET-02, NET-11 and NET-24 (extended) |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-14 (host, not covered), FW-01, FW-10 and FW-13 (extended) |
 | 5 | `vm` | VMs: create per tier (cluster named or taken from the network), stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered), VM-31 (plan only) |
@@ -165,7 +167,7 @@ create a network and beta-user may hold one.
 | 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: only the negative cases that need no IPv6 network) | yes | yes | yes, except LB-12 and LB-16 (host, not covered), LB-17 (plan only) |
 | 9 | `tenant` | tenant, quota, terms consent, approval on sign-in, the admin status route's error order | yes | yes | yes |
 | 10 | `api-token` | API tokens: create, call the API with one, duplicate name/secret, delete ⇒ `401`, unknown token | yes | yes | yes |
-| 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes |
+| 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes, except CLI-05 (extended) |
 | 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | no | yes | yes, except BIL-18 (not covered), BIL-02 and BIL-16 (extended) |
 | 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no | yes | yes, except CON-14 (plan only), CON-15 (not covered), CON-11 (extended) |
 | 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once | no | yes | yes, except CC-04, CC-10, CC-11 and CC-12 (extended) |
