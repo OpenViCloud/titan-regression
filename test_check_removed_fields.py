@@ -121,7 +121,7 @@ class MarkedCases(unittest.TestCase):
 
 
 class CasesOfATitle(unittest.TestCase):
-    def test_every_id_of_the_title_counts_and_a_dotted_range_is_expanded(self):
+    def test_every_id_of_the_title_counts_and_a_range_is_expanded(self):
         self.assertEqual(["TFP-01", "VM-31", "TFP-02", "TFP-03"], check.cases_of("TFP-01..03, VM-31 several cases"))
         self.assertEqual(["SSH-01", "SSH-02", "SSH-03"], check.cases_of("SSH-01…03 keys"))
 
@@ -194,6 +194,13 @@ class Run(unittest.TestCase):
                 "  expect(row.cpu).toBe(1)\n})\n")
         _, _, lines = self.run_on(spec=spec, helper="")
         self.assertEqual([("STALE", "CON-11", "3")], verdicts(lines))
+
+    def test_a_test_written_on_one_line_ends_on_that_line(self):
+        readme = README.replace("CAT-02 and CAT-03 (extended)", "CAT-01, CAT-02 and CAT-03 (extended)")
+        spec = ("test('CAT-01 x', async () => { expect(offering.cpu).toBe(1) })\n"
+                "test.afterAll(async () => {\n  await wait((v) => v.cpu === 1)\n})\n")
+        _, _, lines = self.run_on(readme=readme, spec=spec, helper="")
+        self.assertEqual([("MARKED", "CAT-01", "1"), ("STALE", "-", "3")], verdicts(lines))
 
     def test_node_modules_is_not_read(self):
         _, _, lines = self.run_on()

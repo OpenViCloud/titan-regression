@@ -121,8 +121,8 @@ def scan(text, fields):
     starts = [index for index, line in enumerate(lines) if TEST_LINE.match(line)]
     for begin, following in zip(starts, starts[1:] + [len(lines)]):
         indent = re.match(r"\s*", lines[begin]).group(0)
-        closing = next((index for index in range(begin + 1, following) if lines[index].startswith(indent + "})")),
-                       following - 1)
+        closing = begin if code_of(lines[begin]).rstrip().endswith("})") else next(
+            (index for index in range(begin + 1, following) if lines[index].startswith(indent + "})")), begin)
         cases = cases_of(TEST_LINE.match(lines[begin]).group(2))
         names_checked = any(NAMES_CHECKED_ABSENT.search(code_of(line)) for line in lines[begin:closing + 1])
         for index in range(begin, closing + 1):
