@@ -13,7 +13,7 @@ import { topUpEnabledOf } from './portal-config'
 // first") is also NOT COVERED: a load balancer requires at least one backend VM
 // (OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/LoadBalancer/LoadBalancerSpecRules.cs BackendsAreValid — count
 // must be 1..MaxBackends), and that VM must sit on the load balancer's own network
-// (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs ProviderIdForLoadBalancerBackend requires
+// (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Guards.cs EnsureLoadBalancerCanSendTo requires
 // NetworkId == networkId). While the load balancer lives, deleting that VM is refused
 // (OpenViCloud/titan-control-plane:Titan.Domain/Services/VmDeletion.cs DeleteAsync, VM_IS_LOAD_BALANCER_BACKEND),
 // so the network always has a live VM on it too.

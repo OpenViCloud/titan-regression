@@ -337,7 +337,7 @@ test.describe.serial('load-balancer', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/LoadBalancer/LoadBalancerRequest.cs (BackendsAsync: a VM that does not exist is
-  // LOAD_BALANCER_BACKEND_INVALID) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs (ProviderIdForLoadBalancerBackend: a VM on
+  // LOAD_BALANCER_BACKEND_INVALID) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Guards.cs (EnsureLoadBalancerCanSendTo: a VM on
   // another network is LOAD_BALANCER_BACKEND_INVALID) · titan-ops features/load-balancer/design.md#lb-resource-model
   test('LB-14 a backend that is no VM of the tenant, or a VM on another network, is 422 LOAD_BALANCER_BACKEND_INVALID', async () => {
     test.skip(lbId === '', 'LB-03 did not create a load balancer')
