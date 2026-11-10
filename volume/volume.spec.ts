@@ -237,7 +237,7 @@ test.describe.serial('volume', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Volume/DetachVolumeEndpoint.cs HandleAsync ·
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VolumeReports.cs ResolveAttachmentAsync ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DetachVolumeCommandHandler.cs HandleAsync (restsUnattached:
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DetachVolumeCommandHandler.cs HandleAsync (Volume.IsDetachWaitingOrDetached:
   // answered like the first, nothing recorded, nothing sent) — titan-ops architecture/resource-lifecycle.md#repeat
   test('VOL-04 detach is 202, then not attached; a detach of a detached or never-attached volume is 202 and changes nothing', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${volumeA}/detach`), 202)
@@ -332,7 +332,7 @@ test.describe.serial('volume', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs SnapshotQuotaUsage ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VolumeSnapshot/CreateVolumeSnapshotCommandHandler.cs HandleAsync
-  // (FindByIdForUpdateAsync, then TenantQuotaGate) — titan-ops features/volume/design.md#counting-and-billing
+  // (ComputeOwnership.RequireVolumeForUpdateAsync, then TenantQuotaGate) — titan-ops features/volume/design.md#counting-and-billing
   test('VOL-12 two snapshots asked at once for the last slot: one 202, one 422 VOLUME_SNAPSHOT_QUOTA_EXCEEDED, the volume holds the cap', async () => {
     const cap = (await adminRow()).maxVolumeSnapshotsPerVolume as number
     log(`VOL-12 cap ${cap}`)
@@ -464,7 +464,7 @@ test.describe.serial('volume', () => {
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/ComputeOwnership.cs RequireVolumeForUpdateAsync, RequireVolumeAsync ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/AttachVolumeCommandHandler.cs HandleAsync (the volume is looked up
   // before the VM) · OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VolumeSnapshot/CreateVolumeSnapshotCommandHandler.cs and
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VolumeSnapshot/RestoreVolumeSnapshotCommandHandler.cs HandleAsync (VOLUME_NOT_FOUND for another tenant's volume) — titan-ops architecture/tenancy-and-admin.md#tenant-isolation
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VolumeSnapshot/RestoreVolumeSnapshotCommandHandler.cs HandleAsync (through ComputeOwnership.RequireVolumeForUpdateAsync: VOLUME_NOT_FOUND for another tenant's volume) — titan-ops architecture/tenancy-and-admin.md#tenant-isolation
   test("VOL-19 another tenant's volume is not listed and every route on it is 404 VOLUME_NOT_FOUND; nothing changes", async () => {
     const volumeName = `rg-volc-${RUN}`
     const snapshotName = `rg-vcs-${RUN}`
@@ -495,8 +495,8 @@ test.describe.serial('volume', () => {
     expect(await newActionsOf(before, restoreName)).toEqual([])
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DetachVolumeCommandHandler.cs HandleAsync (detachIsWaiting) ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/AttachVolumeCommandHandler.cs HandleAsync (attachIsWaiting, toThisVm):
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DetachVolumeCommandHandler.cs HandleAsync (Volume.IsDetachWaitingOrDetached) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/AttachVolumeCommandHandler.cs HandleAsync (Volume.IsAttachWaitingOrAttachedTo):
   // a repeat is answered like the first, nothing recorded, nothing sent — titan-ops architecture/resource-lifecycle.md#repeat ·
   // titan-ops architecture/resource-lifecycle.md#one-key-per-request
   test('VOL-17 a detach repeated while Detaching and an attach repeated while Attaching are 202, one request and one outcome each', async () => {
@@ -565,7 +565,7 @@ test.describe.serial('volume', () => {
       422, 'VOLUME_QUOTA_EXCEEDED')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync (ListAttachedToVmLockedAsync, volume.ReleaseFromVmDelete),
+  // OpenViCloud/titan-control-plane:Titan.Domain/Services/VmDeletion.cs DeleteAsync (ListAttachedToVmLockedAsync, volume.ReleaseFromVmDelete),
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmReports.cs ApplyDoneAsync (volume.MarkDetachedByVmDelete).
   // The spec measures the end without desiredAttachedVmId; plan.md VOL-09 also expects the volume to stay Available while
   // the VM's delete waits, then no desired attachment and a delete that goes through, and the release that writes its spec tightens it.

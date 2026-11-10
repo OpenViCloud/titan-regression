@@ -235,8 +235,8 @@ test.describe.serial('load-balancer', () => {
     await deleted(secondLbId, 'second load balancer deleted')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/LoadBalancer/UpdateLoadBalancerCommandHandler.cs (HandleAsync: HasDesiredSpec —
-  // a repeat records nothing and sends nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs (Update:
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/LoadBalancer/UpdateLoadBalancerCommandHandler.cs (HandleAsync: LoadBalancer.IsUpdateWaitingOrDone —
+  // a repeat records nothing and sends nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.Update.cs (Update:
   // RestsOnIncus — another configuration while one waits is LOAD_BALANCER_INVALID_STATE) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/LoadBalancer/DeleteLoadBalancerCommandHandler.cs (HandleAsync: IsDeletedOrDeleting)
   // · titan-ops architecture/resource-lifecycle.md#repeat · titan-ops architecture/resource-lifecycle.md#one-key-per-request
@@ -365,7 +365,7 @@ test.describe.serial('load-balancer', () => {
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/LoadBalancer/CreateLoadBalancerCommandHandler.cs (HandleAsync: TenantQuotaGate) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Platform/Tenant/TenantQuotaGate.cs (EnsureHasRoom: count >= cap ⇒
   // LOAD_BALANCER_QUOTA_EXCEEDED) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/LoadBalancer/LoadBalancer.cs (OccupiesQuota) ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Platform/Tenant/UpdateTenantQuotaCommandHandler.cs (KeepOrReplace) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Platform/Tenant/UpdateTenantQuotaCommandHandler.cs (HandleAsync: an absent cap keeps its value) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Tenant/Contracts/AdminTenantQueryResult.cs (MaxLoadBalancers) ·
   // titan-ops features/load-balancer/design.md#lb-quota-and-billing · titan-ops architecture/code-structure.md#quota-gate
   test('LB-15 with maxLoadBalancers 1 and one load balancer alive, a create is 422 LOAD_BALANCER_QUOTA_EXCEEDED', async () => {

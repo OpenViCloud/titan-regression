@@ -378,7 +378,7 @@ test.describe.serial('concurrency-requests', () => {
 
   // titan-ops architecture/resource-lifecycle.md#one-key-per-request ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DetachVolumeCommandHandler.cs (HandleAsync:
-  // RequireVolumeForUpdateAsync, detachIsWaiting) · OpenViCloud/titan-control-plane:Titan.Tests/Infrastructure/Integration/VolumeRequestsDbTests.cs
+  // RequireVolumeForUpdateAsync, Volume.IsDetachWaitingOrDetached) · OpenViCloud/titan-control-plane:Titan.Tests/Infrastructure/Integration/VolumeRequestsDbTests.cs
   // (TwoDetaches_AtOnce_LeaveOneRequest_AndOneCommandRow)
   test('CC-07 two detaches of one attached volume at once: two 202, one volume.detach_requested, not attached, one volume.detached', async () => {
     const vm = await host()
@@ -399,7 +399,7 @@ test.describe.serial('concurrency-requests', () => {
 
   // titan-ops architecture/resource-lifecycle.md#one-key-per-request ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VmSnapshot/RevertVmSnapshotCommandHandler.cs (HandleAsync:
-  // RequireVmForUpdateAsync, alreadyReverting) · OpenViCloud/titan-control-plane:Titan.Tests/Infrastructure/Integration/VmSnapshotRequestsDbTests.cs
+  // RequireVmForUpdateAsync, VmSnapshot.IsReverting) · OpenViCloud/titan-control-plane:Titan.Tests/Infrastructure/Integration/VmSnapshotRequestsDbTests.cs
   // (TwoRevertsOfOneSnapshot_AtOnce_LeaveOneRequest_AndOneCommandRow)
   test('CC-10 two reverts of one snapshot at once: two 202, one vm_snapshot.revert_requested, at rest, one vm_snapshot.reverted', async () => {
     const vm = await host()

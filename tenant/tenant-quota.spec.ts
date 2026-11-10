@@ -50,7 +50,8 @@ test.describe.serial('tenant-quota', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Tenant/UpdateTenantQuotaEndpoint.cs (UpdateQuotaRequest) — an absent optional cap
-  // (UpdateTenantQuotaCommand.KeepOrReplace) is kept as it is; only maxVms/maxNetworks are mandatory.
+  // (OpenViCloud/titan-control-plane:Titan.Application/Commands/Platform/Tenant/UpdateTenantQuotaCommandHandler.cs HandleAsync: each optional
+  // cap is command.<cap> ?? current.<cap>) is kept as it is; only maxVms/maxNetworks are mandatory.
   test('TEN-08 PATCH quota with only maxVms and maxNetworks keeps the other 7 caps', async () => {
     const before = original!
     const changed = { maxVms: before.maxVms + 1, maxNetworks: before.maxNetworks }

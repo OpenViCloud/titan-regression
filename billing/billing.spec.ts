@@ -249,8 +249,9 @@ test.describe.serial('billing', () => {
     expect((await readInvoice(900000000)).status).toBe('New')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Billing/Invoice/GetTenantInvoiceQueryHandler.cs (HandleAsync) and
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Billing/Invoice/PayInvoiceFromWalletCommandHandler.cs (HandleAsync): another
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Billing/Invoice/GetTenantInvoiceQueryHandler.cs (HandleAsync, through InvoiceOwnership.RequireInvoiceAsync) and
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Billing/Invoice/PayInvoiceFromWalletCommandHandler.cs (HandleAsync, through
+  // InvoiceOwnership.RequireInvoiceForUpdateAsync): another
   // tenant's invoice and a missing one are the same INVOICE_NOT_FOUND; OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Billing/SettleInvoiceFromWalletAdminEndpoint.cs
   // and OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Billing/MarkInvoicePaidEndpoint.cs (Configure: Roles("platform-admin")) ⇒ 403;
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Billing/Invoice/SettleInvoiceFromWalletCommandHandler.cs (HandleAsync) and
@@ -287,7 +288,7 @@ test.describe.serial('billing', () => {
     await waitWallet('BIL-07 wallet', before - 2222)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Billing/Invoice/MarkInvoicePaidCommandHandler.cs HandleAsync (alreadyMarkedPaid: repeat),
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Billing/Invoice/MarkInvoicePaidCommandHandler.cs HandleAsync (Invoice.IsMarkedPaid: repeat),
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Invoice/Invoice.cs MarkPaid (INVOICE_ALREADY_PAID: paid by the wallet already);
   // the tenant's pay on a marked-paid invoice: OpenViCloud/titan-control-plane:Titan.Application/Services/Billing/Invoice/InvoiceWalletSettlement.cs
   // (IsAlreadyPaidFromWalletAsync: Paid is not a repeat) ⇒ OpenViCloud/titan-control-plane:Titan.Domain/Services/InvoiceWalletPayment.cs
