@@ -70,7 +70,15 @@ test.describe('catalog', () => {
   test('TFP-01..03, VM-31 several cases in one test', async () => {
     expect(vm.transition).toBe('Creating')
   })
+
+  test.afterAll(async () => {
+    await waitVm((v) => v.transition === null)
+  })
 })
+
+function cpuOf(offering: any): number {
+  return offering.cpu
+}
 """
 
 HELPER = """export function sizeOf(offering: any): number {
@@ -108,10 +116,14 @@ class MarkedCases(unittest.TestCase):
     def test_a_mark_outside_a_table_row_marks_nothing(self):
         self.assertNotIn("CAT-01", check.marked_cases(README))
 
+    def test_a_mark_in_another_cell_than_the_last_marks_nothing(self):
+        self.assertEqual(set(), check.marked_cases("| 2 | `x` | CAT-09 (extended) | yes | yes | yes |\n"))
+
 
 class CasesOfATitle(unittest.TestCase):
     def test_every_id_of_the_title_counts_and_a_dotted_range_is_expanded(self):
         self.assertEqual(["TFP-01", "VM-31", "TFP-02", "TFP-03"], check.cases_of("TFP-01..03, VM-31 several cases"))
+        self.assertEqual(["SSH-01", "SSH-02", "SSH-03"], check.cases_of("SSH-01…03 keys"))
 
     def test_a_title_without_an_id_has_no_case(self):
         self.assertEqual([], check.cases_of("a helper test"))
@@ -146,9 +158,11 @@ class Run(unittest.TestCase):
             ("ABSENT", "CON-11", "30"),      # names listed in a test that checks names for absence
             ("ABSENT", "CON-11", "30"),
             ("MARKED", "TFP-01,VM-31,TFP-02,TFP-03", "37"),   # one of the title's cases is marked
+            ("STALE", "-", "41"),            # a hook after a marked test is not that test
+            ("STALE", "-", "46"),            # nor is a helper below the last test
             ("STALE", "-", "2"),             # lib/sizes.ts: a helper has no case
         ], verdicts(lines))
-        self.assertEqual({"STALE": 5, "MARKED": 2, "ABSENT": 5, "CHECK": 1}, counts)
+        self.assertEqual({"STALE": 7, "MARKED": 2, "ABSENT": 5, "CHECK": 1}, counts)
 
     def test_a_comment_and_a_method_call_are_not_reads(self):
         _, _, lines = self.run_on()
@@ -159,7 +173,8 @@ class Run(unittest.TestCase):
     def test_marking_the_case_in_readme_clears_its_stale_reads(self):
         readme = README.replace("CAT-02 and CAT-03 (extended)", "CAT-01, CAT-02 and CAT-03 (extended)")
         _, counts, lines = self.run_on(readme=readme)
-        self.assertEqual([("STALE", "-", "3"), ("STALE", "CAT-04", "21"), ("STALE", "-", "2")],
+        self.assertEqual([("STALE", "-", "3"), ("STALE", "CAT-04", "21"), ("STALE", "-", "41"), ("STALE", "-", "46"),
+                          ("STALE", "-", "2")],
                          [verdict for verdict in verdicts(lines) if verdict[0] == "STALE"])
         self.assertEqual(4, counts["MARKED"])
 
@@ -168,6 +183,17 @@ class Run(unittest.TestCase):
         _, _, lines = self.run_on(readme=readme)
         self.assertIn(("ABSENT", "CAT-04", "18"), verdicts(lines))
         self.assertIn(("CHECK", "CAT-05", "25"), verdicts(lines))
+
+    def test_absence_wins_over_a_name_still_sent(self):
+        spec = "test('CAT-05 x', async () => {\n  expect(volume.sizeGb).toBeUndefined()\n})\n"
+        _, _, lines = self.run_on(spec=spec, helper="")
+        self.assertEqual([("ABSENT", "CAT-05", "2")], verdicts(lines))
+
+    def test_an_access_in_a_test_that_checks_names_for_absence_stays_stale(self):
+        spec = ("test('CON-11 x', async () => {\n  expect(field in row).toBe(false)\n"
+                "  expect(row.cpu).toBe(1)\n})\n")
+        _, _, lines = self.run_on(spec=spec, helper="")
+        self.assertEqual([("STALE", "CON-11", "3")], verdicts(lines))
 
     def test_node_modules_is_not_read(self):
         _, _, lines = self.run_on()
@@ -191,12 +217,12 @@ class Main(unittest.TestCase):
     def test_a_stale_read_exits_1_and_the_last_line_counts_every_verdict(self):
         code, last = self.main_on(SPEC, OLD, NEW)
         self.assertEqual(1, code)
-        self.assertEqual("FIELDS_RESULT=STALE stale=4 marked=2 absent=5 check=1 removed=cpu,sizeGb,transition", last)
+        self.assertEqual("FIELDS_RESULT=STALE stale=6 marked=2 absent=5 check=1 removed=cpu,sizeGb,transition", last)
 
     def test_marked_absent_and_check_lines_alone_exit_0(self):
         spec = "\n".join(line for line in SPEC.split("\n")
                          if "early" not in line and "CAT-01" not in line and "not.toBe" not in line
-                         and "toBeGreaterThan" not in line)
+                         and "toBeGreaterThan" not in line and "waitVm" not in line and "return offering" not in line)
         code, last = self.main_on(spec, OLD, NEW)
         self.assertEqual(0, code)
         self.assertEqual("FIELDS_RESULT=OK stale=0 marked=2 absent=5 check=1 removed=cpu,sizeGb,transition", last)

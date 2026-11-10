@@ -7,17 +7,19 @@ request) had in the old one and has no more in the new one is a removed field. E
 of the test it sits in:
 
   STALE    the field is in no schema of the new contract, and no case of the test is marked `(extended)`,
-           `(plan only)` or `(not covered)` in a table row of README: the line asserts or uses something the API
-           no longer sends. A read outside every test (a helper, `lib/`) has no case and stays STALE until it goes.
+           `(plan only)` or `(not covered)` in the last cell (the Spec column) of a table row of README: the line
+           asserts or uses something the API no longer sends. A test runs from its `test(` line to the `})` at the
+           same indentation; a read outside every test (a hook, a helper, `lib/`) has no case and stays STALE
+           until it goes.
   MARKED   the same read, in a test with a case README already marks
   ABSENT   the line asserts that the field is not there: `'field' in row` with `.toBe(false)`, `.toBeUndefined()`,
            `.not.toHaveProperty(`; or it only names the field, in a test that checks names with
            `expect(<name> in <row>…).toBe(false)`
   CHECK    another schema of the new contract still has a property of that name: read the line by hand
 
-What it does not see: a field read through destructuring or a computed key; an assertion split over two lines
-(its first line is judged alone); a field whose type or meaning changed while its name stayed. A test that both
-checks names for absence and reads one of them by its name is taken as ABSENT.
+What it does not see: a field read through destructuring or a computed key; an assertion split over several lines
+(each line is judged alone); a field whose type or meaning changed while its name stayed. A test that both checks
+names for absence and reads one of them by its name is taken as ABSENT.
 
 Usage:
   check-removed-fields.py --old <openapi json> --new <openapi json> [--root <checkout of this repo>]
@@ -32,7 +34,7 @@ import subprocess
 import sys
 
 CASE_ID = re.compile(r"\b([A-Z][A-Z0-9]*-\d+)\b")
-ID_RANGE = re.compile(r"\b([A-Z][A-Z0-9]*)-(\d+)\.\.(\d+)\b")
+ID_RANGE = re.compile(r"\b([A-Z][A-Z0-9]*)-(\d+)(?:\.\.|…)(\d+)\b")
 TEST_LINE = re.compile(r"""^\s*test(?:\.(?:only|skip|fixme|fail|slow))?\(\s*(['"`])(.*?)\1""")
 GROUP = re.compile(r"((?:[A-Z][A-Z0-9]*-\d+(?:\s+to\s+[A-Z][A-Z0-9]*-\d+)?(?:\s*,\s*|\s+and\s+)?)+)\s*\(([^)]*)\)")
 NAMES_CHECKED_ABSENT = re.compile(r"expect\(\s*[A-Za-z_$][\w$]*\s+in\s+[^)]*\)\s*\.toBe\(false\)")
@@ -62,9 +64,10 @@ def fields_still_sent(new):
 
 
 def marked_cases(readme_text):
-    """Case IDs a table row of README marks as extended, plan only or not covered (`X-1 to X-3` expanded)."""
+    """Case IDs the last cell of a table row of README marks as extended, plan only or not covered."""
     marked = set()
-    rows = "\n".join(line for line in readme_text.split("\n") if line.lstrip().startswith("|"))
+    rows = "\n".join(line.rstrip().rstrip("|").rsplit("|", 1)[-1]
+                     for line in readme_text.split("\n") if line.lstrip().startswith("|"))
     for ids, mark in GROUP.findall(rows):
         if not any(excuse in mark for excuse in EXCUSES):
             continue
@@ -78,7 +81,7 @@ def marked_cases(readme_text):
 
 
 def cases_of(title):
-    """Every case ID of a test title, a range `X-01..03` expanded."""
+    """Every case ID of a test title, a range `X-01..03` or `X-01…03` expanded."""
     cases = CASE_ID.findall(title)
     for prefix, first, last in ID_RANGE.findall(title):
         for number in range(int(first), int(last) + 1):
@@ -114,18 +117,23 @@ def asserts_absence(field, line):
 def scan(text, fields):
     """(case ids of the test, line number, field, kind, line, test checks names for absence) for every read."""
     lines = text.split("\n")
+    owner = [None] * len(lines)
     starts = [index for index, line in enumerate(lines) if TEST_LINE.match(line)]
-    bounds = [0] + starts + [len(lines)]
+    for begin, following in zip(starts, starts[1:] + [len(lines)]):
+        indent = re.match(r"\s*", lines[begin]).group(0)
+        closing = next((index for index in range(begin + 1, following) if lines[index].startswith(indent + "})")),
+                       following - 1)
+        cases = cases_of(TEST_LINE.match(lines[begin]).group(2))
+        names_checked = any(NAMES_CHECKED_ABSENT.search(code_of(line)) for line in lines[begin:closing + 1])
+        for index in range(begin, closing + 1):
+            owner[index] = (cases, names_checked)
     hits = []
-    for begin, end in zip(bounds, bounds[1:]):
-        title = TEST_LINE.match(lines[begin]) if begin in starts else None
-        cases = cases_of(title.group(2)) if title else []
-        names_checked = any(NAMES_CHECKED_ABSENT.search(code_of(line)) for line in lines[begin:end])
-        for index in range(begin, end):
-            for field in fields:
-                kind = read_kind(field, lines[index])
-                if kind:
-                    hits.append((cases, index + 1, field, kind, lines[index].strip(), names_checked))
+    for index, line in enumerate(lines):
+        cases, names_checked = owner[index] or ([], False)
+        for field in fields:
+            kind = read_kind(field, line)
+            if kind:
+                hits.append((cases, index + 1, field, kind, line.strip(), names_checked))
     return hits
 
 
