@@ -21,7 +21,7 @@ which signs in with the test accounts there, so no credential passes through the
 | `count-cases.py` | Counts `plan.md`'s IDs against the runner logs, for the report's first line |
 | `check-screenshots.py` | Fails when a browser case passed without its `<ID>-*.png` screenshot |
 | `trim-cp-log.py` | Drops the control plane's routine info lines from a saved log |
-| `check-removed-fields.py` | Fails when a spec still reads a response field that left the control plane's `/v1` contract and the Spec column below does not mark its case; run it with the two control plane commits a contract change lies between |
+| `check-removed-fields.py` | Fails when a spec or a helper under `lib/` still reads a field that left the control plane's `/v1` contract and the Spec column below does not mark a case of its test; run it with the two control plane commits a contract change lies between |
 | `run-lanes.py`, `lanes.json`, `lanes-dev.json`, `lanes-dev-sequential.json` | Runs the modules as lanes, one lane per test tenant, lanes side by side (below); the two dev plans cover the Dev column |
 | `patch-job.py` | Points a job's `specs` volume at a ConfigMap of its own, so jobs started together never read each other's specs |
 | `selftest/`, `test_*.py` | Tests of the helpers and scripts above |
@@ -141,6 +141,7 @@ node --test 'selftest/*.test.ts'
 python3 test_count_cases.py
 python3 test_check_screenshots.py
 python3 test_trim_cp_log.py
+python3 test_check_removed_fields.py
 python3 test_patch_job.py
 python3 test_run_module.py
 python3 test_run_lanes.py
