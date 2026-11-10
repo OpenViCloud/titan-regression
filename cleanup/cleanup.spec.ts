@@ -25,9 +25,9 @@ test.describe.serial('cleanup', () => {
     await closeSessions()
   })
 
-  // Rules go with their network (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs FinishOperation:
+  // Rules go with their network (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.Deletion.cs DeleteSucceeded:
   // the delete's Done ends every rule, the rule being the network's child entity), VM snapshots with their VM
-  // (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs FinishOperation: the delete's Done ends them, the snapshot
+  // (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Deletion.cs DeleteSucceeded: the delete's Done ends them, the snapshot
   // being the VM's child entity); lists hide Deleted (OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/VmRepository.cs ListByTenantAsync).
   // SSH keys and API tokens are hard deletes answered 204:
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/SshKey/DeleteSshKeyCommandHandler.cs (HandleAsync: repo.Remove),

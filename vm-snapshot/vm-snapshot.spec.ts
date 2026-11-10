@@ -5,9 +5,9 @@ import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, s
 import { cleanUp } from './clean-up'
 import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, getVm, runNetwork, runs, vmShape, waitVm } from './fixtures'
 
-// Cases VMS-01..13 and VMS-16 of plan.md, plus ACT-02/ACT-03 for VM snapshots (VMS-14, VMS-15, VMS-17, VMS-20 read the
-// Incus host). VMS-12, VMS-10 and VMS-11 use a second VM, which VMS-11 deletes; VMS-16 deletes the module's VM and VMS-07
-// reads what that delete did to its snapshots.
+// Cases VMS-01..13, VMS-16, VMS-18 and VMS-19 of plan.md, plus ACT-02/ACT-03 for VM snapshots (VMS-14, VMS-15, VMS-17,
+// VMS-20 read the Incus host). VMS-12, VMS-10 and VMS-11 use a second VM, which VMS-11 deletes; VMS-16 deletes the
+// module's VM and VMS-07 reads what that delete did to the snapshots it still held.
 
 // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Tenant/ValueObjects/TenantQuota.cs DefaultMaxVmSnapshotsPerVm — no API reads the cap
 const MAX_SNAPSHOTS_PER_VM = 3
@@ -33,6 +33,8 @@ test.describe.serial('vm-snapshot', () => {
   let tenantId = ''
   // The tenant's caps as the admin list shows them, restored in afterAll (VMS-12 changes one and restores it at once).
   let originalQuota: Record<string, number> | null = null
+  // The snapshots the VM held when VMS-16 asked its delete; VMS-07 reads them.
+  let leftWithTheVm: string[] | null = null
 
   function path(): string {
     return `/v1/tenant/vms/${vmId}/snapshots`
@@ -92,6 +94,30 @@ test.describe.serial('vm-snapshot', () => {
     return s.status === 'Available'
   }
 
+  async function countedOf(vm: string): Promise<any[]> {
+    return (await snapshotsOf(vm)).filter(countsTowardQuota)
+  }
+
+  // Deletes or adds snapshots of the module's VM, one at a time and each to rest, until `target` count toward the cap.
+  async function holdCountedAt(label: string, target: number): Promise<void> {
+    await pollUntil(`${label} nothing waits`, () => snapshotsOf(vmId),
+      (rows) => rows.every((s) => !['Creating', 'Reverting', 'Deleting'].includes(s.status)), (rows) => rows.map(snapshotShape).join(' | '))
+    let counted = await countedOf(vmId)
+    let i = 0
+    while (counted.length > target) {
+      const id = counted[counted.length - 1].id as string
+      expectStatus(await call('tenant', 'DELETE', `${path()}/${id}`), 202)
+      await waitSnapshot(`${label} free ${id}`, id, (s) => s.status === 'Deleted')
+      counted = await countedOf(vmId)
+    }
+    while (counted.length < target) {
+      const id = await createSnapshot(`${label.toLowerCase()}f${i++}`)
+      await waitSnapshot(`${label} fill`, id, exists)
+      counted = await countedOf(vmId)
+    }
+    log(`${label} snapshots counted: ${counted.length}`)
+  }
+
   test.beforeAll(async ({ browser }) => {
     test.setTimeout(10 * 60_000)
     startLog('vm-snapshot')
@@ -145,7 +171,7 @@ test.describe.serial('vm-snapshot', () => {
     expect(countOf(actions, 'vm_snapshot.created')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs EnsureSnapshottable — Running, Ready, Stopped or Frozen
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs EnsureSnapshottable — Running, Ready, Stopped or Frozen
   test('VMS-02 a snapshot of a stopped VM Exists too', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmId}/stop`), 202)
     await waitVm('VMS-02 stop', vmId, (v) => v.status === 'Stopped')
@@ -168,7 +194,7 @@ test.describe.serial('vm-snapshot', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/VmSnapshots/RevertSnapshotEndpoint.cs HandleAsync ·
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmSnapshot.Revert.cs RevertSucceeded (Done of the revert)
-  test('VMS-04 revert is 202, Reverting then settled, outcome reverted, desired unchanged', async () => {
+  test('VMS-04 revert is 202, Reverting then settled, outcome reverted, the VM status unchanged', async () => {
     const before = await getVm(vmId)
     const reply = await call('tenant', 'POST', `${path()}/${snapshots.s1}/revert`)
     expectStatus(reply, 202)
@@ -212,7 +238,7 @@ test.describe.serial('vm-snapshot', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VmSnapshot/CreateVmSnapshotCommandHandler.cs HandleAsync
-  // (TenantQuotaGate.EnsureHasRoom before vm.AddSnapshot) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs AddSnapshot
+  // (TenantQuotaGate.EnsureHasRoom before vm.AddSnapshot) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs AddSnapshot
   // (EnsureSnapshottable ⇒ VM_INVALID_STATUS) · OpenViCloud/titan-control-plane:Titan.Application/Services/Platform/Tenant/TenantQuotaGate.cs
   // EnsureHasRoom (count >= cap: a cap of 0 refuses the first) — titan-ops architecture/code-structure.md#quota-gate
   test('VMS-12 with maxVmSnapshotsPerVm 0, a snapshot of a VM not yet Running is 422 VM_SNAPSHOT_QUOTA_EXCEEDED, not VM_INVALID_STATUS', async () => {
@@ -341,12 +367,87 @@ test.describe.serial('vm-snapshot', () => {
     expect(rows.length).toBe(cap)
   })
 
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VmSnapshot/CreateVmSnapshotCommandHandler.cs HandleAsync (the VM row
+  // locked, then TenantQuotaGate, then vm.AddSnapshot: the second request finds the first one's snapshot counted, a slot still free, and the VM
+  // Snapshotting) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs AddSnapshot (EnsureSnapshottable ⇒ VM_INVALID_STATUS)
+  // — titan-ops features/vm/design.md#vm-snapshot
+  test('VMS-18 two snapshots asked at once with two slots free: one 202, one 422 VM_INVALID_STATUS, not VM_SNAPSHOT_QUOTA_EXCEEDED', async () => {
+    const cap = (await adminRow()).maxVmSnapshotsPerVm as number
+    log(`VMS-18 cap ${cap}`)
+    expect(cap, 'the race needs two free slots').toBeGreaterThan(1)
+    await waitVm('VMS-18 VM runs', vmId, (v) => runs(v))
+    await holdCountedAt('VMS-18', cap - 2)
+    const [first, second] = await Promise.all([
+      call('tenant', 'POST', path(), { name: `rg-s18x-${RUN}` }, newKey()),
+      call('tenant', 'POST', path(), { name: `rg-s18y-${RUN}` }, newKey()),
+    ])
+    log(`VMS-18 answers: ${first.status} ${first.text.slice(0, 200)} | ${second.status} ${second.text.slice(0, 200)}`)
+    const won = [first, second].filter((r) => r.status === 202)
+    for (const reply of won) {
+      const id = bodyOf(reply).snapshotId as string
+      await waitSnapshot('VMS-18 created', id, exists)
+    }
+    test.skip(won.length === 2, 'both answered 202: the first create had reported before the second request locked the VM row; this lap measures nothing')
+    expect([first.status, second.status].sort()).toEqual([202, 422])
+    const lost = first.status === 202 ? second : first
+    expectError(lost, 422, 'VM_INVALID_STATUS')
+    expect(Object.keys(bodyOf(won[0]))).toEqual(['snapshotId'])
+    const counted = await countedOf(vmId)
+    log(`VMS-18 snapshots after: ${counted.map(snapshotShape).join(' | ')}`)
+    expect(counted.length).toBe(cap - 1)
+  })
+
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs IsTransitionStatus (Snapshotting refuses stop, start and delete) ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Snapshots.cs EnsureSnapshottable (a snapshot or a revert),
+  // SnapshotCreateSucceeded (the VM back to the Incus status it holds) — titan-ops features/vm/design.md#vm-snapshot ·
+  // titan-ops features/vm/design.md#conflict-and-delete-wins
+  test('VMS-19 while Snapshotting, stop, start, snapshot, revert and delete are 422 VM_INVALID_STATUS; then Running again', async () => {
+    const cap = (await adminRow()).maxVmSnapshotsPerVm as number
+    expect(cap, 'the case needs one snapshot and room for two more').toBeGreaterThan(2)
+    await waitVm('VMS-19 VM runs', vmId, (v) => runs(v))
+    await holdCountedAt('VMS-19', 1)
+    const held = (await countedOf(vmId))[0]
+    expect(held.status).toBe('Available')
+    const before = await activityOf(vmName)
+    const id = await createSnapshot('s19')
+    const asks: Array<[string, () => Promise<Reply>]> = [
+      ['stop', () => call('tenant', 'POST', `/v1/tenant/vms/${vmId}/stop`)],
+      ['start', () => call('tenant', 'POST', `/v1/tenant/vms/${vmId}/start`)],
+      ['snapshot', () => call('tenant', 'POST', path(), { name: `rg-s19b-${RUN}` }, newKey())],
+      ['revert', () => call('tenant', 'POST', `${path()}/${held.id}/revert`)],
+      ['delete', () => call('tenant', 'DELETE', `/v1/tenant/vms/${vmId}`)],
+    ]
+    const skipped: string[] = []
+    for (const [label, ask] of asks) {
+      const vm = await getVm(vmId)
+      if (vm.status !== 'Snapshotting') {
+        skipped.push(`${label}: the create had ended (${vmShape(vm)})`)
+        continue
+      }
+      const reply = await ask()
+      log(`VMS-19 ${label} while Snapshotting: ${reply.status} ${reply.text.slice(0, 200)}`)
+      expectError(reply, 422, 'VM_INVALID_STATUS')
+    }
+    await waitSnapshot('VMS-19 created', id, exists)
+    const after = await waitVm('VMS-19 back to Running', vmId, (v) => v.status !== 'Snapshotting')
+    expect(after.status).toBe('Running')
+    const actions = await activityOf(vmName)
+    for (const action of ['vm.stopped', 'vm.started', 'vm.deleted']) {
+      expect(countOf(actions, action), action).toBe(countOf(before, action))
+    }
+    expect(countOf(await activityOf(`rg-s19b-${RUN}`), 'vm_snapshot.create_requested')).toBe(0)
+    for (const reason of skipped) {
+      log(`VMS-19 skipped ${reason}`)
+      test.info().annotations.push({ type: 'skipped lap', description: reason })
+    }
+    test.skip(skipped.length === asks.length, `the create ended before any request: ${skipped.join('; ')}`)
+  })
+
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Guards.cs IncusCanSnapshot (a VM that is Starting, Stopping or Deleting is refused:
   // VM_INVALID_STATUS) — titan-ops features/vm/design.md#conflict-and-delete-wins
-  test('VMS-16 a snapshot asked while the VM is Stopping or Deleting is 422 VM_INVALID_STATUS; stop and delete still end', async () => {
-    // Room under the cap first: VMS-09 left the VM at it.
-    expectStatus(await call('tenant', 'DELETE', `${path()}/${snapshots.s9}`), 202)
-    await waitSnapshot('VMS-16 free a slot', snapshots.s9, (s) => s.status === 'Deleted')
+  test('VMS-16 a snapshot asked while the VM is Stopping, Starting or Deleting is 422 VM_INVALID_STATUS; stop, start and delete still end', async () => {
+    // Room under the cap first.
+    await holdCountedAt('VMS-16', Math.min((await countedOf(vmId)).length, ((await adminRow()).maxVmSnapshotsPerVm as number) - 1))
     await waitVm('VMS-16 VM runs', vmId, (v) => runs(v))
     const skipped: string[] = []
 
@@ -364,8 +465,23 @@ test.describe.serial('vm-snapshot', () => {
     await waitVm('VMS-16 stopped', vmId, (v) => v.status === 'Stopped')
     expect(countOf(await activityOf(stopName), 'vm_snapshot.create_requested')).toBe(0)
 
+    const startName = `rg-s16c-${RUN}`
+    const beforeStart = (await snapshotsOf(vmId)).map((s) => s.id).sort()
+    expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmId}/start`), 202)
+    const starting = await getVm(vmId)
+    log(`VMS-16 start lap: ${vmShape(starting)}`)
+    if (starting.status === 'Starting') {
+      expectError(await call('tenant', 'POST', path(), { name: startName }, newKey()), 422, 'VM_INVALID_STATUS')
+      expect((await snapshotsOf(vmId)).map((s) => s.id).sort()).toEqual(beforeStart)
+    } else {
+      skipped.push('start lap: the start had already ended before the snapshot could be asked')
+    }
+    await waitVm('VMS-16 started', vmId, (v) => runs(v))
+    expect(countOf(await activityOf(startName), 'vm_snapshot.create_requested')).toBe(0)
+
     const deleteName = `rg-s16b-${RUN}`
     const beforeDelete = (await snapshotsOf(vmId)).map((s) => s.id).sort()
+    leftWithTheVm = beforeDelete
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/vms/${vmId}`), 202)
     const deleting = await getVm(vmId)
     log(`VMS-16 delete lap: ${vmShape(deleting)}`)
@@ -382,16 +498,18 @@ test.describe.serial('vm-snapshot', () => {
       log(`VMS-16 skipped ${reason}`)
       test.info().annotations.push({ type: 'skipped lap', description: reason })
     }
-    test.skip(skipped.length === 2, `both laps skipped: ${skipped.join('; ')}`)
+    test.skip(skipped.length === 3, `every lap skipped: ${skipped.join('; ')}`)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs FinishOperation (the delete's Done takes the VM's snapshots along) — the VM's
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Deletion.cs DeleteSucceeded (the delete's Done takes the VM's snapshots along) — the VM's
   // delete report marks its snapshots Deleted. The delete is VMS-16's; deleteVmAndWait only waits when VMS-16 did not send it.
   test('VMS-07 deleting the VM takes its remaining snapshots to Deleted', async () => {
+    const held = leftWithTheVm ?? (await snapshotsOf(vmId)).map((s) => s.id as string)
+    expect(held.length, 'the VM held a snapshot when it was deleted').toBeGreaterThan(0)
     await deleteVmAndWait(vmId)
-    for (const label of ['s1', 's5']) {
-      const snapshot = await readSnapshot(snapshots[label])
-      log(`VMS-07 ${label}: ${snapshotShape(snapshot)}`)
+    for (const id of held) {
+      const snapshot = await readSnapshot(id)
+      log(`VMS-07 ${id}: ${snapshotShape(snapshot)}`)
       expect(snapshot.status).toBe('Deleted')
     }
     vmId = ''

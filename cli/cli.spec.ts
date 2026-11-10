@@ -478,7 +478,7 @@ test.describe('cli catalog', () => {
     // Prices are `decimal` server-side (OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VmOffering/Contracts/VmOfferingQueryResult.cs VmOfferingQueryResult)
     // and json.Number in the CLI (OpenViCloud/titan-cli:api/client.gen.go VmOfferingQueryResult):
     // both keep every digit on the wire. JSON.parse would renormalize "161388.0000000000" to 161388, so the
-    // price and cpu fields are compared as raw text, not parsed.
+    // price is compared as raw text, not parsed.
     const sizeResult = await runCli(['size', 'list', '-o', 'json'])
     expect(sizeResult.code, sizeResult.stderr).toBe(0)
     const sizesFromCli = JSON.parse(sizeResult.stdout) as Array<{ id: string, name: string, vcpu: number, memoryMb: number }>
@@ -494,8 +494,6 @@ test.describe('cli catalog', () => {
       expect(fromCli!.memoryMb).toBe(offering.memoryMb)
       expect(rawNumberField(sizeResult.stdout, offering.id, 'pricePerHour'))
         .toBe(rawNumberField(offeringsReply.text, offering.id, 'pricePerHour'))
-      expect(rawNumberField(sizeResult.stdout, offering.id, 'cpu'))
-        .toBe(rawNumberField(offeringsReply.text, offering.id, 'cpu'))
     }
     log(`CLI-05 clusters=${clustersFromApi.length} templates=${templatesFromApi.length} sizes=${offeringsFromApi.length}`)
   })

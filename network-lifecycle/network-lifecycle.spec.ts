@@ -56,11 +56,11 @@ test.describe.serial('network-lifecycle', () => {
     expect(countOf(actions, 'network.deleted')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs FinishOperation (the delete's Done ends every live
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.Deletion.cs DeleteSucceeded (the delete's Done ends every live
   // rule of the network — the rule is the network's child entity); the rule list drops Deleted rows
   // (OpenViCloud/titan-control-plane:Titan.Infrastructure/Repositories/FirewallRuleRepository.cs ListByNetworkAsync).
   // No outcome row: one is recorded only for a rule whose own delete was waiting
-  // (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Entities/FirewallRule.cs EndWithItsNetwork returns DeleteIsWaiting).
+  // (OpenViCloud/titan-control-plane:Titan.Application/Services/Networking/Network/NetworkReports.cs FinishOperationAsync: rulesWaitingOnTheirDelete).
   test('NETL-02 the rule on the deleted network reaches Deleted with it', async () => {
     const rules = await get('tenant', `/v1/tenant/networks/${networkId}/firewall-rules`) as any[]
     log(`NETL-02 rules of the deleted network: ${rules.length}`)

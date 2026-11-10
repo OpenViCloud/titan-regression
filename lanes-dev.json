@@ -8,7 +8,16 @@
     "smoke",
     "cleanup"
   ],
-  "exclusive": [],
+  "exclusive": [
+    [
+      "billing",
+      "concurrency"
+    ],
+    [
+      "billing",
+      "admin"
+    ]
+  ],
   "same_lane": [],
   "lanes": {
     "a": {
@@ -39,6 +48,42 @@
           "module": "volume"
         },
         {
+          "module": "load-balancer"
+        },
+        {
+          "module": "tenant"
+        },
+        {
+          "module": "api-token"
+        },
+        {
+          "module": "cli"
+        },
+        {
+          "wait": "billing-done"
+        },
+        {
+          "module": "concurrency"
+        },
+        {
+          "external": "check-wallets"
+        },
+        {
+          "module": "admin"
+        },
+        {
+          "module": "backup"
+        },
+        {
+          "module": "tenant-suspend"
+        },
+        {
+          "module": "network-lifecycle"
+        },
+        {
+          "module": "login-page"
+        },
+        {
           "module": "cleanup",
           "always": true
         }
@@ -54,22 +99,13 @@
           "barrier": "smoke"
         },
         {
-          "module": "load-balancer"
+          "external": "seed-invoices"
         },
         {
-          "module": "tenant"
+          "module": "billing"
         },
         {
-          "module": "api-token"
-        },
-        {
-          "module": "cli"
-        },
-        {
-          "module": "network-lifecycle"
-        },
-        {
-          "module": "login-page"
+          "signal": "billing-done"
         },
         {
           "module": "cleanup",

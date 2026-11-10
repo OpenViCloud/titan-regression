@@ -407,7 +407,7 @@ test.describe.serial('volume', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VolumeSnapshot/CreateVolumeSnapshotCommandHandler.cs HandleAsync
-  // (TenantQuotaGate.EnsureHasRoom before volume.AddSnapshot) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.cs
+  // (TenantQuotaGate.EnsureHasRoom before volume.AddSnapshot) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Volume/Volume.Snapshots.cs
   // EnsureSnapshottable (VOLUME_INVALID_STATE) · OpenViCloud/titan-control-plane:Titan.Application/Services/Platform/Tenant/TenantQuotaGate.cs
   // EnsureHasRoom (count >= cap) — titan-ops architecture/code-structure.md#quota-gate
   test('VOL-15 with maxVolumeSnapshotsPerVolume 0, a snapshot of a volume not yet Exists is 422 VOLUME_SNAPSHOT_QUOTA_EXCEEDED, not VOLUME_INVALID_STATE', async () => {

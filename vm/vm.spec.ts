@@ -109,8 +109,8 @@ test.describe.serial('vm', () => {
       400, 'VALIDATION_ERROR')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync: clusters.Require
-  // (OpenViCloud/titan-control-plane:Titan.Application/Options/ClusterOptions.cs Require), VM_OFFERING_NOT_FOUND, TEMPLATE_NOT_FOUND
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync: clusters.ClusterOf
+  // (OpenViCloud/titan-control-plane:Titan.Application/Options/ClusterOptions.cs ClusterOf), VM_OFFERING_NOT_FOUND, TEMPLATE_NOT_FOUND
   test('VM-11 unknown offering, template, cluster are 404 with their codes', async () => {
     const { clusterId, templateId, smallTier } = await envOf()
     const base = { name: `rg-vmx-${RUN}`, networkId, vmOfferingId: smallTier, templateId, clusterId, diskSizeGb: null }
@@ -316,7 +316,7 @@ test.describe.serial('vm', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Stop.cs Stop · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/StopVmEndpoint.cs HandleAsync
-  test('VM-03 stop from Running is 202, then Stopped with desired Stopped', async () => {
+  test('VM-03 stop from Running is 202, then Stopped', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/stop`), 202)
     const vm = await waitVm('VM-03', vmA, (v) => v.status === 'Stopped')
     expect(vm.status).toBe('Stopped')
@@ -383,7 +383,7 @@ test.describe.serial('vm', () => {
     await waitVm('VM-17', vmB, (v) => v.status === 'Deleted')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs OccupiesQuota (VmRepository.CountActiveByTenantAsync writes the same condition in SQL) — counted: desired Exists and (Exists, or NotCreated with a request waiting)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs OccupiesQuota (VmRepository.CountActiveByTenantAsync writes the same condition in SQL) — counted: every status but Deleting, Deleted, NotFound and Failed
   test('VM-15 a create that gave up does not count: one more VM fits, the next is 422 VM_QUOTA_EXCEEDED', async () => {
     const vms = await get('tenant', '/v1/tenant/vms') as any[]
     // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs OccupiesQuota
@@ -436,7 +436,7 @@ test.describe.serial('vm', () => {
 
   // titan-ops features/vm/design.md#vm-delete-observes-done · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/DeleteVmEndpoint.cs HandleAsync ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/DeleteVmCommandHandler.cs HandleAsync (vm.IsDeletedOrDeleting: a Deleted VM answers 202) ·
-  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs FinishOperation (Done of the delete: Deleted)
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Deletion.cs DeleteSucceeded (Done of the delete: Deleted)
   test('VM-16 delete is 202, then Deleted; a repeat is 202; renaming the Deleted VM is 422 VM_INVALID_STATUS', async () => {
     const reply = await call('tenant', 'DELETE', `/v1/tenant/vms/${vmA}`)
     expectStatus(reply, 202)
