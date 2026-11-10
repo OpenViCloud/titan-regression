@@ -287,7 +287,7 @@ test.describe.serial('billing', () => {
     await waitWallet('BIL-07 wallet', before - 2222)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Billing/Invoice/MarkInvoicePaidCommandHandler.cs HandleAsync (alreadyMarkedPaid: repeat),
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Billing/Invoice/MarkInvoicePaidCommandHandler.cs HandleAsync (Invoice.IsMarkedPaid: repeat),
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Invoice/Invoice.cs MarkPaid (INVOICE_ALREADY_PAID: paid by the wallet already);
   // the tenant's pay on a marked-paid invoice: OpenViCloud/titan-control-plane:Titan.Application/Services/Billing/Invoice/InvoiceWalletSettlement.cs
   // (IsAlreadyPaidFromWalletAsync: Paid is not a repeat) ⇒ OpenViCloud/titan-control-plane:Titan.Domain/Services/InvoiceWalletPayment.cs

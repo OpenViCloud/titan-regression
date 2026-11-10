@@ -282,7 +282,7 @@ test.describe.serial('vm-snapshot', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VmSnapshot/RevertVmSnapshotCommandHandler.cs HandleAsync
-  // (alreadyReverting: answered like the first, nothing recorded, nothing sent) — titan-ops architecture/resource-lifecycle.md#repeat
+  // (VmSnapshot.IsReverting: answered like the first, nothing recorded, nothing sent) — titan-ops architecture/resource-lifecycle.md#repeat
   test('VMS-13 a revert repeated while Reverting is 202 and records one request and one outcome', async () => {
     const id = snapshots.s5
     const name = `rg-s5-${RUN}`

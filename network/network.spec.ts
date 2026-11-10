@@ -218,7 +218,7 @@ test.describe.serial('network', () => {
       422, 'NETWORK_CIDR_OVERLAP')
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs Block56Of — a
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs HandleAsync (ClusterConfig.HasPublicIpv6) — a
   // cluster that names no IPv6 block refuses; a cluster with one is skipped here
   test('NET-10 a network asking for public IPv6 in a cluster without an IPv6 block is 422 IPV6_NOT_AVAILABLE', async () => {
     const { clusterId } = await envOf()

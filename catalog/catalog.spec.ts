@@ -180,7 +180,7 @@ test.describe.serial('catalog', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/SyncTemplatesEndpoint.cs HandleAsync (202);
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs HandleAsync (NeedsASyncRequest, SyncIn)
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs HandleAsync (VmTemplate.NeedsSyncIn, SyncIn)
   // a template with no image for the cluster architecture gives up (titan-ops features/catalog/design.md#template-architecture)
   test('CAT-06 sync: every template ends Exists or gives up in the cluster, none stays Syncing', async () => {
     const { clusterId } = await envOf()
@@ -201,7 +201,7 @@ test.describe.serial('catalog', () => {
     expect(settled.some((r) => r.clusters.find((z: any) => z.clusterId === clusterId).status === 'Available')).toBe(true)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs HandleAsync (NeedsASyncRequest) — a cluster that has the alias asks for nothing
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs HandleAsync (VmTemplate.NeedsSyncIn) — a cluster that has the alias asks for nothing
   test('CAT-07 a second sync leaves the templates that Exist as they are', async () => {
     const { clusterId } = await envOf()
     const before = (await get('admin', '/v1/admin/templates') as any[])
@@ -241,7 +241,7 @@ test.describe.serial('catalog', () => {
   })
 
   // titan-ops architecture/resource-lifecycle.md#repeat · titan-ops features/catalog/design.md#template-sync-add-only ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs (NeedsASyncRequest: a cluster whose sync
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Catalog/VmTemplate/SyncTemplatesCommandHandler.cs (VmTemplate.NeedsSyncIn: a cluster whose sync
   // waits gets nothing) · OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VmTemplate/Contracts/AdminTemplateClusterQueryResult.cs
   // (Transition, RequestFailedAt)
   test('CAT-13 a second sync while a template is still Syncing sends nothing more: it comes to rest once', async () => {

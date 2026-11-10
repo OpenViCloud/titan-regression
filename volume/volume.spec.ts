@@ -237,7 +237,7 @@ test.describe.serial('volume', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Volume/DetachVolumeEndpoint.cs HandleAsync ·
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VolumeReports.cs ResolveAttachmentAsync ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DetachVolumeCommandHandler.cs HandleAsync (restsUnattached:
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DetachVolumeCommandHandler.cs HandleAsync (Volume.IsDetachWaitingOrDetached:
   // answered like the first, nothing recorded, nothing sent) — titan-ops architecture/resource-lifecycle.md#repeat
   test('VOL-04 detach is 202, then not attached; a detach of a detached or never-attached volume is 202 and changes nothing', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${volumeA}/detach`), 202)
@@ -495,8 +495,8 @@ test.describe.serial('volume', () => {
     expect(await newActionsOf(before, restoreName)).toEqual([])
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DetachVolumeCommandHandler.cs HandleAsync (detachIsWaiting) ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/AttachVolumeCommandHandler.cs HandleAsync (attachIsWaiting, toThisVm):
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/DetachVolumeCommandHandler.cs HandleAsync (Volume.IsDetachWaitingOrDetached) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Volume/AttachVolumeCommandHandler.cs HandleAsync (Volume.IsAttachWaitingOrAttachedTo):
   // a repeat is answered like the first, nothing recorded, nothing sent — titan-ops architecture/resource-lifecycle.md#repeat ·
   // titan-ops architecture/resource-lifecycle.md#one-key-per-request
   test('VOL-17 a detach repeated while Detaching and an attach repeated while Attaching are 202, one request and one outcome each', async () => {
