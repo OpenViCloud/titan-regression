@@ -325,7 +325,7 @@ test.describe.serial('vm', () => {
     expect(countOf(actions, 'vm.stopped')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/StopVmCommandHandler.cs HandleAsync (alreadyStopped) — already stopped answers like the first request
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/StopVmCommandHandler.cs HandleAsync (Vm.IsStopWaitingOrStopped) — already stopped answers like the first request
   test('VM-04 stop again on a Stopped VM is 202 and records nothing (ACT-03)', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/stop`), 202)
     const vm = await getVm(vmA)
@@ -348,8 +348,8 @@ test.describe.serial('vm', () => {
     expect(countOf(await activityOf(nameA), 'vm.start_requested')).toBe(1)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/StopVmCommandHandler.cs HandleAsync (stopIsWaiting: a stop repeated while it waits
-  // sends nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs Start (start while another request waits)
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/StopVmCommandHandler.cs HandleAsync (Vm.IsStopWaitingOrStopped: a stop repeated while it
+  // waits sends nothing) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Start.cs Start (start while another request waits)
   test('VM-07 start while a stop waits is 422 VM_INVALID_STATUS', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/stop`), 202)
     // VM-04, the other half: a stop repeated while it waits is 202 and records no second request.

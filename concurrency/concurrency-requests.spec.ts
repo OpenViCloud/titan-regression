@@ -460,7 +460,7 @@ test.describe.serial('concurrency-requests', () => {
 
   // titan-ops architecture/resource-lifecycle.md#one-key-per-request · titan-ops architecture/resource-lifecycle.md#invariants ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/StopVmCommandHandler.cs (HandleAsync: RequireVmForUpdateAsync,
-  // stopIsWaiting, alreadyStopped). Last of the VM's cases: its finally deletes the VM, its volume and its network.
+  // Vm.IsStopWaitingOrStopped). Last of the VM's cases: its finally deletes the VM, its volume and its network.
   test('CC-06 two stops of one running VM at once: two 202, one vm.stop_requested, Stopped, one vm.stopped', async () => {
     try {
       const vm = await host()
