@@ -181,10 +181,17 @@ test.describe.serial('portal-ui flows: IPv6 network, VM and load balancer', () =
     // (the networks query having landed) before reading the full list to check what is absent from it.
     await expect(networkSelect.locator('option', { hasText: networkName })).toHaveCount(1)
     const optionLabels = await networkSelect.locator('option').allTextContents()
-    const runNetworkRows = (await get('tenant', '/v1/tenant/networks') as any[]).filter((n) => n.name.startsWith('rg-net-'))
-    for (const n of runNetworkRows) {
-      expect(optionLabels).not.toContain(n.name)
+    // Every network of the tenant: one without a /64 is never an option, and every option (past the placeholder) is a
+    // network with a /64 (OpenViCloud/titan-cloud-console:portal/src/components/LoadBalancerFormModal.tsx, ipv6Networks).
+    const allNetworks = await get('tenant', '/v1/tenant/networks') as any[]
+    for (const n of allNetworks.filter((row) => row.publicIpv6Subnet === null)) {
+      expect(optionLabels, `${n.name} has no /64`).not.toContain(n.name)
     }
+    const withSubnet = new Set(allNetworks.filter((row) => row.publicIpv6Subnet !== null).map((row) => row.name as string))
+    for (const label of optionLabels.slice(1)) {
+      expect(withSubnet.has(label), `option ${label} is a network with a /64`).toBe(true)
+    }
+    log(`UI-17 network options: ${JSON.stringify(optionLabels.slice(1))} of ${allNetworks.length} networks`)
 
     await dialog.getByPlaceholder('e.g. web-lb').fill(lbName)
     await networkSelect.selectOption({ label: networkName })
