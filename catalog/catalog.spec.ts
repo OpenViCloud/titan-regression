@@ -4,7 +4,7 @@ import { call, expectError, expectStatus, get, log, newKey, pollUntil, sleep, st
 import { activityOf, envOf, RUN } from './fixtures'
 import { cleanUp } from './clean-up'
 
-// Cases CAT-01..08, CAT-10, CAT-12, CAT-13 and CAT-15 of plan.md (CAT-09 and CAT-16 read the Incus host: Phase 4 of
+// Cases CAT-01..08, CAT-10, CAT-12, CAT-13, CAT-15 and CAT-17 of plan.md (CAT-09 and CAT-16 read the Incus host: Phase 4 of
 // release:regression-prd; CAT-11 and CAT-14 are not covered).
 
 // The row of one template in one cluster, from GET /v1/admin/templates.
@@ -36,8 +36,9 @@ test.describe.serial('catalog', () => {
     await closeSessions()
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VmOffering/Contracts/VmOfferingQueryResult.cs (VmOfferingQueryResult)
-  test('CAT-01 vm offerings carry sizing and a price', async () => {
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VmOffering/Contracts/VmOfferingQueryResult.cs (VmOfferingQueryResult:
+  // no cpu field) · titan-ops architecture/money-and-wallet.md#price-belongs-to-offering
+  test('CAT-01 vm offerings carry sizing and a price, and no cpu', async () => {
     const offerings = await get('anonymous', '/v1/vm-offerings') as any[]
     log(`CAT-01 tiers ${offerings.map((o) => `${o.id}:${o.vcpu}vcpu/${o.memoryMb}MB/${o.pricePerHour}`).join(' ')}`)
     expect(offerings.map((o) => o.id).sort()).toEqual(['l', 'm', 's', 'xl'])
@@ -45,6 +46,25 @@ test.describe.serial('catalog', () => {
       expect(offering.vcpu, offering.id).toBeGreaterThan(0)
       expect(offering.memoryMb, offering.id).toBeGreaterThan(0)
       expect(offering.pricePerHour, offering.id).toBeGreaterThan(0)
+      expect('cpu' in offering, `${offering.id} carries cpu`).toBe(false)
+    }
+  })
+
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VolumeOffering/Contracts/VolumeOfferingQueryResult.cs
+  // (VolumeOfferingQueryResult: Id, Name, PricePerGbPerHour; the size is the volume's, sent at create) ·
+  // titan-ops features/catalog/design.md#volume-offering-catalog · titan-ops architecture/money-and-wallet.md#price-belongs-to-offering
+  test('CAT-17 volume offerings answer without a token: a standard tier, a price per GB-hour, no sizeGb or isCustomized', async () => {
+    const reply = await call('anonymous', 'GET', '/v1/volume-offerings')
+    expectStatus(reply, 200)
+    const offerings = JSON.parse(reply.text) as any[]
+    log(`CAT-17 tiers ${offerings.map((o) => `${o.id}:${o.name}:${o.pricePerGbPerHour}`).join(' ')}`)
+    expect(offerings.map((o) => o.id)).toContain('standard')
+    for (const offering of offerings) {
+      expect(typeof offering.id, 'id').toBe('string')
+      expect(typeof offering.name, `${offering.id} name`).toBe('string')
+      expect(offering.pricePerGbPerHour, offering.id).toBeGreaterThan(0)
+      expect('sizeGb' in offering, `${offering.id} carries sizeGb`).toBe(false)
+      expect('isCustomized' in offering, `${offering.id} carries isCustomized`).toBe(false)
     }
   })
 

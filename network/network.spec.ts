@@ -157,7 +157,7 @@ test.describe.serial('network', () => {
   // the create's Done carries the status Incus shows (titan-ops features/network/design.md#network-lifecycle); a body
   // without the two policies gets Allow for both (OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/Contracts/CreateNetworkCommand.cs
   // CreateNetworkCommand defaults; titan-ops features/network/design.md#firewall-default-policy)
-  test('NET-02 create with a key and a cidr is 202 {networkId}, then Created and Exists, both default policies Allow', async () => {
+  test('NET-02 create with a key and a cidr is 202 {networkId}, then Created, both default policies Allow', async () => {
     const { clusterId } = await envOf()
     const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name, clusterId, cidr: RUN_CIDR }, key)
     expectStatus(reply, 202)

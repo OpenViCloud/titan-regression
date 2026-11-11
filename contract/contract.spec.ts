@@ -7,7 +7,7 @@ import { ADMIN, PORTAL, closeSessions, headersOf, useBrowser } from './auth'
 import { API, bodyOf, call, expectError, expectStatus, get, log, startLog } from './api'
 import { startLocalProxyIfNeeded } from './local-proxy'
 
-// Cases CON-03..09 and CON-12 of plan.md. CON-01 (PUT/PATCH answer 204 with no body) and CON-02 (async POST
+// Cases CON-03..09, CON-12 and CON-14 of plan.md. CON-01 (PUT/PATCH answer 204 with no body) and CON-02 (async POST
 // actions answer 202 with no body) are asserted where each route runs: NET-06, VM-08, TEN-02, TEN-04, BIL-08 and
 // BIL-04, BIL-07, BIL-10, CAT-06.
 
@@ -150,6 +150,37 @@ test.describe.serial('contract', () => {
       log(`CON-07 ${path} → ${anonymous.status} / ${withUser.status}`)
       expect(anonymous.status).toBe(401)
       expect(withUser.status).toBe(401)
+    }
+  })
+
+  // titan-ops architecture/resource-lifecycle.md#rollout · titan-ops architecture/resource-lifecycle.md#callback-routes ·
+  // OpenViCloud/titan-control-plane:Titan.Tests/Api/InternalCallbackHostTests.cs (AnOldReportRoute_IsNotFound: no route matches,
+  // 404 with an empty body) · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Internal/ObserveVmEndpoint.cs
+  // (HandleAsync: InternalTokenAuth.Matches ⇒ SendUnauthorizedAsync). The live route answering 401 tells "no route" from
+  // "/internal/* not let out": an environment that does not let /internal/* out (CON-07) makes this case N/A.
+  test('CON-14 the nine removed report routes are 404 with an empty body; the live observation route is 401', async () => {
+    const id = () => randomUUID()
+    const probe = await raw('GET', '/internal/reconcile/vms?clusterId=x', {})
+    test.skip(probe.status !== 401, `N/A: /internal/* is not let out here (CON-07's probe answered ${probe.status})`)
+    const live = await raw('PATCH', `/internal/vms/${id()}/observation`, { 'Content-Type': 'application/json' }, '{}')
+    log(`CON-14 live PATCH /internal/vms/<uuid>/observation → ${live.status}`)
+    expect(live.status).toBe(401)
+    const removed = [
+      `/internal/vms/${id()}/status`,
+      `/internal/vms/${id()}/intents/${id()}/failed`,
+      `/internal/vms/${id()}/snapshots/${id()}/status`,
+      `/internal/volumes/${id()}/status`,
+      `/internal/volumes/${id()}/snapshots/${id()}/status`,
+      `/internal/networks/${id()}/status`,
+      `/internal/networks/${id()}/firewall-rules/${id()}`,
+      `/internal/load-balancers/${id()}/status`,
+      `/internal/templates/${id()}/status`,
+    ]
+    for (const path of removed) {
+      const reply = await raw('PATCH', path, { 'Content-Type': 'application/json' }, '{}')
+      log(`CON-14 PATCH ${path.replace(/[0-9a-f-]{36}/g, '<uuid>')} → ${reply.status} body=${JSON.stringify(reply.text.slice(0, 120))}`)
+      expect(reply.status, path).toBe(404)
+      expect(reply.text, path).toBe('')
     }
   })
 

@@ -125,10 +125,12 @@ test.describe.serial('backup', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Admin/Backup/ListDiskBackupsQueryHandler.cs (HandleAsync: one
-  // item per VM and volume that Exists and has an externalId, `name` is the resource's display name, the record is matched by its id),
+  // item per VM whose instance Incus holds (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs HasAnInstance: an externalId,
+  // not NotFound, not Deleted; a Creating or Failed VM has no externalId yet, so the status filter below is the same set) and per
+  // volume Incus holds as Available (also while it attaches, detaches or deletes; the test checks the Available ones), `name` is the resource's display name, the record is matched by its id),
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Backup/BackupHealthPolicy.cs (ForDisk). An environment with no VM or volume alive measures only the Postgres item: the disk
   // part is then NOT COVERED (plan.md), logged here for the report.
-  test('BAK-11 one item per VM and per volume of beta-user that Exists, with a tenant and a string health', async () => {
+  test('BAK-11 one item per VM Incus holds and per volume of beta-user Available, with a tenant and a string health', async () => {
     const vms = (await get('admin', '/v1/admin/vms') as any[]).filter((v) => !['Creating', 'NotFound', 'Failed', 'Deleted'].includes(v.status))
     const volumes = (await get('tenant', '/v1/tenant/volumes') as any[]).filter((v) => v.status === 'Available')
     const tenant = await get('tenant', '/v1/tenant')

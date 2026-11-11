@@ -495,6 +495,16 @@ test.describe('cli catalog', () => {
       expect(rawNumberField(sizeResult.stdout, offering.id, 'pricePerHour'))
         .toBe(rawNumberField(offeringsReply.text, offering.id, 'pricePerHour'))
     }
+
+    // The table form: OpenViCloud/titan-cli:command/catalog/catalog.go NewSize (Printer.Table headers ID, NAME, VCPU,
+    // MEMORY MB, PRICE/HOUR) · OpenViCloud/titan-cli:output/printer.go (Printer.Table: tabwriter, padding 2, so columns
+    // are two or more spaces apart while MEMORY MB holds one).
+    const tableResult = await runCli(['size', 'list'])
+    expect(tableResult.code, tableResult.stderr).toBe(0)
+    const tableLines = tableResult.stdout.split('\n').filter((line) => line.trim() !== '')
+    log(`CLI-05 size list table header: ${tableLines[0]}`)
+    expect(tableLines[0].trim().split(/\s{2,}/)).toEqual(['ID', 'NAME', 'VCPU', 'MEMORY MB', 'PRICE/HOUR'])
+    expect(tableLines.length - 1).toBe(offeringsFromApi.length)
     log(`CLI-05 clusters=${clustersFromApi.length} templates=${templatesFromApi.length} sizes=${offeringsFromApi.length}`)
   })
 })

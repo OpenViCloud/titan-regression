@@ -207,11 +207,11 @@ test.describe.serial('contract-spec', () => {
   })
 
   // titan-ops features/public-api/design.md#state-enums — every status (VM, network, firewall rule, VM snapshot,
-  // volume, volume snapshot, load balancer, and tenant/invoice/topup) is null or a value the spec's enum declares
-  // for that field, and the old currentState/desiredState/currentExistence/desiredExistence/transition fields are
+  // volume, volume snapshot, load balancer, and tenant/invoice/topup) is a value the spec's enum declares for that
+  // field (null only where the spec marks the field nullable: assertEnumField), and the old currentState/desiredState/currentExistence/desiredExistence/transition fields are
   // gone from every one of those rows. Lists may be empty elsewhere in the run, but the run network + a fresh rule
   // make the network and firewall-rule checks non-empty here.
-  test('CON-11 every status field read back is null or a declared enum value, and the old existence fields are gone', async () => {
+  test('CON-11 every status field read back is a value the spec declares for it, and no row carries the old state fields', async () => {
     const spec = await fetchSpec()
     const oldFields = ['currentState', 'desiredState', 'currentExistence', 'desiredExistence', 'transition']
 
@@ -276,17 +276,20 @@ test.describe.serial('contract-spec', () => {
 
     const tenant = await get('tenant', '/v1/tenant')
     assertEnumField(spec, 'TenantQueryResult', 'status', tenant)
+    assertNoOldFields('TenantQueryResult', tenant)
 
     const invoices = await get('tenant', '/v1/tenant/billing/invoices') as any[]
     log(`CON-11 invoices: ${invoices.length} row(s)`)
     for (const row of invoices) {
       assertEnumField(spec, 'InvoiceQueryResult', 'status', row)
+      assertNoOldFields('InvoiceQueryResult', row)
     }
 
     const topups = await get('tenant', '/v1/tenant/topups') as any[]
     log(`CON-11 topups: ${topups.length} row(s)`)
     for (const row of topups) {
       assertEnumField(spec, 'TopUpQueryResult', 'status', row)
+      assertNoOldFields('TopUpQueryResult', row)
     }
   })
 
