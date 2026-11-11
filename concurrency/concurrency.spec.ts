@@ -4,8 +4,9 @@ import { type Reply, bodyOf, call, get, log, newKey, pollUntil, sleep, startLog 
 import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, runNetwork, waitVm, waitVolume } from './fixtures'
 
 // Cases CC-01..04 of plan.md: two identical requests at the same moment (CC-05..12: concurrency-requests.spec.ts). CC-03
-// pays the 4444 invoice seed-invoices.sql left on admin-test (run it before this module, as for billing). CC-04's
-// "one delete command" is the agent's SQL read after the module (plan.md): no API lists core.provider_commands.
+// pays the 4444 invoice seed-invoices.sql left on admin-test (run it before this module, as for billing). CC-01's
+// "one delete command" is read through its activity (one vm.delete_requested); CC-04's is the agent's SQL read after
+// the module (plan.md). No API lists core.provider_commands.
 
 function statusOf(reply: Reply): string {
   return `${reply.status} ${bodyOf(reply).code || ''}`.trim()
