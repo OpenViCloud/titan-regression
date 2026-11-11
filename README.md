@@ -168,9 +168,9 @@ create a network and beta-user may hold one.
 | 10 | `api-token` | API tokens: create, call the API with one, duplicate name/secret, delete ⇒ `401`, unknown token | yes | yes | yes |
 | 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes |
 | 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | yes | yes | yes, except BIL-18 (not covered); BIL-16's per-record part read by the agent in SQL |
-| 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no: CON-09 reads the TLS certificates; dev serves plain HTTP | yes | yes, except CON-15, CON-17 (not covered), CON-16 (plan only) |
+| 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS; the metrics host behind Cloudflare Access | no: CON-09 reads the TLS certificates; dev serves plain HTTP | yes | yes, except CON-15, CON-17 (not covered), CON-16 (plan only) |
 | 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once | yes | yes | yes; CC-04's command count read by the agent in SQL |
-| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | yes | yes | yes (API), except ADM-15 (`L-x`, a job of its own measured at the release environment's run: `run-module.sh` on `admin/stuck-requests`, with `REGRESSION_WORKER_APPS`), ADM-17, ADM-18 (plan only), ADM-19 (not covered) |
+| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices; the operator metrics tier (targets, alert rules) and the admin portal's Metrics link (other admin portal screens: deferred) | yes | yes | yes (API), except ADM-15 (`L-x`, a job of its own measured at the release environment's run: `run-module.sh` on `admin/stuck-requests`, with `REGRESSION_WORKER_APPS`), ADM-17, ADM-18 (plan only), ADM-19 (not covered) |
 | 16 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: Keycloak's database `keycloak` as a `Database` object, ArgoCD's health checks, schema `public` for its owner only, the name CNPG archives under and `ContinuousArchiving` (`kubectl` reads) | yes | yes | yes (API and admin portal screens); `(host)`, `L-x` and `kubectl` cases in Phase 4 of the release |
 | 17 | `portal-ui` | customer portal end to end, signed in | no: UI-28 needs a portal without `topUpEnabled`, as the release environment's; dev's sets it (UI-07 and UI-18, which need it set, are N/A at the release environment's run) | yes | yes, except UI-33 (extended): the CPU card's decimal mark in Vietnamese is not checked yet |
 | 18 | `tenant-suspend` | suspended ⇒ writes refused, reads allowed; reactivated | yes | yes | yes |
@@ -193,7 +193,7 @@ every tenant of the cluster feels it, so on the release environment it runs only
 hand: without it the spec skips as N/A after 10 minutes), and only in the sequential run, never beside another module.
 
 Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — state changed on the Incus host outside
-OpenViCloud, needs an approved `L-x` command; `site` — the public site through Playwright MCP on the agent's machine;
+OpenViCloud, needs an approved `L-x` command (OBS-13 only reads the host's trust list); `site` — the public site through Playwright MCP on the agent's machine;
 `worker`, `control-plane-image` — read-only `gh`/`curl`/`kubectl` and `go test` of a worker clone on the agent's machine.
 
 Four things change state every tenant of the environment shares: ADM-06 (a global price), ADM-15 (the cluster's
