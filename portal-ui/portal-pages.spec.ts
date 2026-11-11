@@ -121,7 +121,8 @@ test.describe.serial('portal-ui pages', () => {
       await page.getByRole('tab', { name: view.tab }).click()
       await expect(page.getByText(/No data yet|Chưa có số liệu/)).toHaveCount(0)
       const card = (title: string) => page.getByRole('region', { name: title, exact: true })
-      await expect(card(view.cpu).getByText(/^\d+([.,]\d)?%$/)).toBeVisible()
+      // The header value (MetricCard's first <p>), not the chart's axis ticks, which also read <n>%.
+      await expect(card(view.cpu).locator('p').first()).toHaveText(/^\d+([.,]\d)?%$/)
       for (const title of [view.memory, view.disk]) {
         const header = card(title).locator('p').first()
         await expect(header).toContainText(view.of)
