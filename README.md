@@ -156,7 +156,7 @@ create a network and beta-user may hold one.
 
 | # | Module | Measures | Dev | Release | Spec |
 |---|---|---|---|---|---|
-| 1 | `smoke` | health, clusters, anonymous catalog, clean test account | yes | yes | yes |
+| 1 | `smoke` | health, clusters, anonymous catalog, clean test account, no metrics on the API host | yes | yes | yes, except SMOKE-07 (plan only) |
 | 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-14 (host, not covered), CAT-16 (host) |
 | 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21, NET-27 (host, not covered), NET-25 (host) |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-14 (host, not covered) |
@@ -168,9 +168,9 @@ create a network and beta-user may hold one.
 | 10 | `api-token` | API tokens: create, call the API with one, duplicate name/secret, delete ⇒ `401`, unknown token | yes | yes | yes |
 | 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes |
 | 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | yes | yes | yes, except BIL-18 (not covered); BIL-16's per-record part read by the agent in SQL |
-| 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no: CON-09 reads the TLS certificates; dev serves plain HTTP | yes | yes, except CON-15 (not covered) |
+| 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS | no: CON-09 reads the TLS certificates; dev serves plain HTTP | yes | yes, except CON-15, CON-17 (not covered), CON-16 (plan only) |
 | 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once | yes | yes | yes; CC-04's command count read by the agent in SQL |
-| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | yes | yes | yes (API), except ADM-15 (`L-x`, a job of its own measured at the release environment's run: `run-module.sh` on `admin/stuck-requests`, with `REGRESSION_WORKER_APPS`) |
+| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices (admin portal screens: deferred) | yes | yes | yes (API), except ADM-15 (`L-x`, a job of its own measured at the release environment's run: `run-module.sh` on `admin/stuck-requests`, with `REGRESSION_WORKER_APPS`), ADM-17, ADM-18 (plan only), ADM-19 (not covered) |
 | 16 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: Keycloak's database `keycloak` as a `Database` object, ArgoCD's health checks, schema `public` for its owner only, the name CNPG archives under and `ContinuousArchiving` (`kubectl` reads) | yes | yes | yes (API and admin portal screens); `(host)`, `L-x` and `kubectl` cases in Phase 4 of the release |
 | 17 | `portal-ui` | customer portal end to end, signed in | no: UI-28 needs a portal without `topUpEnabled`, as the release environment's; dev's sets it (UI-07 and UI-18, which need it set, are N/A at the release environment's run) | yes | yes, except UI-33 (extended): the CPU card's decimal mark in Vietnamese is not checked yet |
 | 18 | `tenant-suspend` | suspended ⇒ writes refused, reads allowed; reactivated | yes | yes | yes |
