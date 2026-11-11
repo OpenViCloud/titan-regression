@@ -204,9 +204,11 @@ test.describe.serial('network', () => {
       }
     }
     const networkStatuses = enumOf('NetworkQueryResult')
-    const listed = (await listNetworks()).find((n) => n.id === networkId)
-    expect(listed, `run network ${networkId} in GET /v1/tenant/networks`).toBeDefined()
-    assertShape('list row', listed, networkStatuses)
+    const rows = await listNetworks()
+    expect(rows.find((n) => n.id === networkId), `run network ${networkId} in GET /v1/tenant/networks`).toBeDefined()
+    for (const row of rows) {
+      assertShape(`list row ${row.name}`, row, networkStatuses)
+    }
     assertShape('network', await get('tenant', `/v1/tenant/networks/${networkId}`), networkStatuses)
 
     const rulesPath = `/v1/tenant/networks/${networkId}/firewall-rules`
@@ -218,17 +220,23 @@ test.describe.serial('network', () => {
     try {
       const rule = await pollUntil('NET-26 rule at rest', ruleOf, (r) => r.status !== 'Creating' && r.status !== 'Deleting',
         (r) => `status=${r.status}`)
-      assertShape('rule', rule, enumOf('FirewallRuleQueryResult'))
+      const ruleStatuses = enumOf('FirewallRuleQueryResult')
+      assertShape('rule', rule, ruleStatuses)
+      for (const row of await get('tenant', rulesPath) as any[]) {
+        assertShape(`rule row ${row.id}`, row, ruleStatuses)
+      }
     } finally {
       // A rule whose create still waits refuses its delete (FIREWALL_RULE_NOT_READY): the poll above waited it out.
       expectStatus(await call('tenant', 'DELETE', `${rulesPath}/${ruleId}`), 204)
       await pollUntil('NET-26 rule gone', ruleOf, (r) => r.status === 'Gone' || r.status === 'Deleted', (r) => `status=${r.status}`)
     }
 
-    const adminRow = (await get('admin', `/v1/admin/networks?tenantId=${tenantId}`) as any[]).find((n) => n.id === networkId)
-    expect(adminRow, `run network ${networkId} in GET /v1/admin/networks?tenantId=`).toBeDefined()
-    assertShape('admin row', adminRow, null)
-    expect(Object.keys(adminRow), 'admin row requestFailureDetail').toContain('requestFailureDetail')
+    const adminRows = await get('admin', `/v1/admin/networks?tenantId=${tenantId}`) as any[]
+    expect(adminRows.find((n) => n.id === networkId), `run network ${networkId} in GET /v1/admin/networks?tenantId=`).toBeDefined()
+    for (const row of adminRows) {
+      assertShape(`admin row ${row.name}`, row, null)
+      expect(Object.keys(row), `admin row ${row.name} requestFailureDetail`).toContain('requestFailureDetail')
+    }
   })
 
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Auth/IdempotencyMiddleware.cs InvokeAsync (IdempotencyDecision.Replay) — the same key and body replay the stored answer

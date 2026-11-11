@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test'
 import { PORTAL, closeSessions, pageOf, useBrowser } from './auth'
-import { RESULTS, get, log, startLog } from './api'
+import { RESULTS, get, log, pollUntil, startLog } from './api'
 import { cleanUp } from './clean-up'
 import { createVm, deleteVmAndWait, envOf, nameOf, runNetwork, runs, waitVm } from './fixtures'
 
-// Cases UI-12..UI-14 and UI-29 of plan.md: the VM page, the top-bar search, the quota card and the run network's
-// row while the VM lives on it. One small VM, created through the API, is the subject of all four; the page reads
+// Cases UI-12..UI-14, UI-29 and UI-33 of plan.md: the VM page, the top-bar search, the quota card, the run network's
+// row while the VM lives on it, and the VM page's Monitoring tab. One small VM, created through the API, is the subject of all five; the page reads
 // what the API reads.
 test.describe.serial('portal-ui pages', () => {
 
@@ -34,7 +34,7 @@ test.describe.serial('portal-ui pages', () => {
           await deleteVmAndWait(vmId)
         }
       }],
-      // UI-29 switches the language; leave none picked, so the next spec starts from the default.
+      // UI-29 and UI-33 switch the language; leave none picked, so the next spec starts from the default.
       ['language', async () => {
         const page = await pageOf('tenant')
         await page.evaluate(() => localStorage.removeItem('ovc-lang'))
@@ -93,6 +93,57 @@ test.describe.serial('portal-ui pages', () => {
     log(`UI-14 vms ${vms}/${tenant.maxVms} networks ${networks}/${tenant.maxNetworks} volumes ${volumes}/${tenant.maxVolumes} ipv6 cap ${tenant.maxPublicIpv6}`)
   })
 
+  // titan-ops features/vm/design.md#vm-page (tab Monitoring: 1h · 24h · 7d, 1h by default with aria-pressed; three cards CPU,
+  // Memory, Disk; header the latest value) · titan-ops features/vm/design.md#vm-metrics ·
+  // OpenViCloud/titan-cloud-console:portal/src/components/vm/VmMetricsPanel.tsx (VmMetricsPanel, MetricCard: section aria-label = title) ·
+  // OpenViCloud/titan-cloud-console:portal/src/lib/vmMetrics.ts (formatBytes, formatPercent: one decimal, locale) ·
+  // OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts, OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts
+  // (vmDetail.tabMonitoring, vmMetrics.cpu, memory, disk, usedOf, noData). CPU has a number once two samples follow
+  // each other, so the case waits for a 1h point with CPU and memory first.
+  test('UI-33 the Monitoring tab shows CPU, Memory and Disk with numbers, 24h asks for range=24h, and Vietnamese reads Giám sát', async () => {
+    test.setTimeout(12 * 60_000)
+    await pollUntil('UI-33 a 1h point with CPU and memory', () => get('tenant', `/v1/tenant/vms/${vmId}/metrics`),
+      (m: any) => Array.isArray(m.points) && m.points.some((p: any) => p.cpuPercent !== null && p.memoryTotalBytes !== null),
+      (m: any) => `points ${Array.isArray(m.points) ? m.points.length : '?'}`, 10 * 60_000, 20_000)
+    const page = await pageOf('tenant')
+    const asked: string[] = []
+    page.on('request', (req) => {
+      if (req.url().includes(`/v1/tenant/vms/${vmId}/metrics`)) asked.push(req.url())
+    })
+    const views = [
+      { lang: 'en', tab: 'Monitoring', cpu: 'CPU', memory: 'Memory', disk: 'Disk', range1h: '1h', range24h: '24h', of: ' of ', decimal: '.' },
+      { lang: 'vi', tab: 'Giám sát', cpu: 'CPU', memory: 'Bộ nhớ', disk: 'Ổ đĩa', range1h: '1 giờ', range24h: '24 giờ', of: ' trên ', decimal: ',' },
+    ]
+    for (const view of views) {
+      await page.goto(PORTAL + `/vms/${vmId}`, { waitUntil: 'networkidle' })
+      await page.evaluate((lang) => localStorage.setItem('ovc-lang', lang), view.lang)
+      await page.reload({ waitUntil: 'networkidle' })
+      await page.getByRole('tab', { name: view.tab }).click()
+      await expect(page.getByText(/No data yet|Chưa có số liệu/)).toHaveCount(0)
+      const card = (title: string) => page.getByRole('region', { name: title, exact: true })
+      // The header value (MetricCard's first <p>), not the chart's axis ticks, which also read <n>%.
+      await expect(card(view.cpu).locator('p').first()).toHaveText(/^\d+([.,]\d)?%$/)
+      for (const title of [view.memory, view.disk]) {
+        const header = card(title).locator('p').first()
+        await expect(header).toContainText(view.of)
+        const text = (await header.textContent()) ?? ''
+        log(`UI-33 ${view.lang} ${title}: ${text}`)
+        if (/\d[.,]\d/.test(text)) {
+          expect(text, `${view.lang} decimal mark`).toMatch(view.lang === 'vi' ? /\d,\d/ : /\d\.\d/)
+        }
+      }
+      await expect(page.getByRole('button', { name: view.range1h, exact: true })).toHaveAttribute('aria-pressed', 'true')
+      if (view.lang === 'en') {
+        await page.getByRole('button', { name: view.range24h, exact: true }).click()
+        await expect(page.getByRole('button', { name: view.range24h, exact: true })).toHaveAttribute('aria-pressed', 'true')
+        await expect.poll(() => asked.some((u) => u.includes('range=24h'))).toBe(true)
+      }
+      await page.screenshot({ path: `${RESULTS}/UI-33-monitoring-${view.lang}.png` })
+      log(`UI-33 ${view.lang}: tab ${view.tab}, three cards with numbers`)
+    }
+    expect(asked.some((u) => u.includes('range=24h')), 'a request with range=24h').toBe(true)
+  })
+
   // titan-ops features/network/user-stories.md#us-p07 · titan-ops features/network/user-stories.md#us-p09
   // OpenViCloud/titan-cloud-console:portal/src/pages/NetworkListPage.tsx (NetworkListPage: row name, incusLabel badge, `cidr ?? '—'`,
   // `gateway ?? '—'`, clusterMap name · networks.createdOn(f.date(createdAt)); Delete disabled while attachedNetworkIds holds the
@@ -104,6 +155,8 @@ test.describe.serial('portal-ui pages', () => {
     const network = await get('tenant', `/v1/tenant/networks/${networkId}`)
     // NetworkStatus: Creating, Deleting are in flight; the run network, long in use, must rest in one of the others.
     expect(['Creating', 'Deleting'], 'the run network rests, so its badge is the Incus word').not.toContain(network.status)
+    // The plan row expects Created (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Enums/NetworkStatus.cs: one of the five Incus statuses).
+    expect(network.status, 'the run network is Created').toBe('Created')
     const clusters = await get('anonymous', '/v1/clusters') as Array<{ id: string, name: string }>
     const clusterName = clusters.find((c) => c.id === network.clusterId)?.name
     expect(clusterName, `GET /v1/clusters lists ${network.clusterId}`).toBeTruthy()

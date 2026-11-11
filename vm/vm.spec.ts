@@ -4,12 +4,12 @@ import * as http from 'node:http'
 import * as https from 'node:https'
 import type { Socket } from 'node:net'
 import { closeSessions, headersOf, useBrowser } from './auth'
-import { API, bodyOf, call, expectError, expectStatus, get, log, newKey, sleep, startLog } from './api'
+import { API, bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, sleep, startLog } from './api'
 import { startLocalProxyIfNeeded } from './local-proxy'
 import { cleanUp } from './clean-up'
 import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, getVm, runNetwork, runs, waitVm } from './fixtures'
 
-// Cases VM-01..19, VM-21, VM-22, VM-26, VM-27, VM-29, VM-31 and SSH-08 of plan.md, plus ACT-01/ACT-03/ACT-04 for VMs. VM-14 is
+// Cases VM-01..19, VM-21, VM-22, VM-26, VM-27, VM-29, VM-31..33 and SSH-08 of plan.md, plus ACT-01/ACT-03/ACT-04 for VMs. VM-14 is
 // NOT COVERED, VM-20 and VM-28 read the Incus host. Create checks run in this order
 // (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync): quota (TenantQuotaGate), cluster,
 // name, network, offering, template — so the error cases run below the quota.
@@ -372,6 +372,64 @@ test.describe.serial('vm', () => {
     expectError(await call('tenant', 'PATCH', `/v1/tenant/vms/${vmA}`, { name: nameB }), 409, 'VM_NAME_TAKEN')
     expectError(await call('tenant', 'PATCH', `/v1/tenant/vms/${vmA}`, { name: 'rg-' + 'x'.repeat(62) }), 400, 'VALIDATION_ERROR')
     expect((await getVm(vmA)).name).toBe(renamed)
+  })
+
+  // titan-ops features/vm/design.md#vm-metrics · OpenViCloud/titan-control-plane:Titan.Application/Queries/Compute/Vm/VmMetricPoints.cs
+  // (StepSecondsFor: 1h 60, 24h 300, 7d 1800; From: used = total - available, CPU clamped to [0, 100], null on the first sample) ·
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/GetVmMetricsEndpoint.cs (HandleAsync: no range reads 1h) ·
+  // OpenViCloud/titan-incus-worker:resource/vm/metrics.go (aggregateMetrics). vmB has run since VM-02; the worker posts one batch a
+  // minute, so the first point with memory and root filesystem comes within a few minutes of the VM starting.
+  test('VM-32 a running VM\'s metrics are 200 for 1h, 24h and 7d with their steps, and 1h holds a point with memory and disk', async () => {
+    test.setTimeout(10 * 60_000)
+    const path = `/v1/tenant/vms/${vmB}/metrics`
+    const filled = (p: any) => typeof p.memoryTotalBytes === 'number' && p.memoryTotalBytes > 0 &&
+      typeof p.rootFsSizeBytes === 'number' && p.rootFsSizeBytes > 0
+    const hour = await pollUntil('VM-32 1h point with memory and disk', () => get('tenant', path),
+      (m: any) => Array.isArray(m.points) && m.points.some(filled),
+      (m: any) => `${m.range} step ${m.stepSeconds} points ${Array.isArray(m.points) ? m.points.length : '?'} filled ${Array.isArray(m.points) ? m.points.filter(filled).length : '?'}`,
+      8 * 60_000, 15_000)
+    const byRange: Array<[string, any, number]> = [
+      ['', hour, 60],
+      ['24h', await get('tenant', `${path}?range=24h`), 300],
+      ['7d', await get('tenant', `${path}?range=7d`), 1800],
+    ]
+    for (const [asked, reply, step] of byRange) {
+      const range = asked === '' ? '1h' : asked
+      expect(reply.range, `range of ${asked || 'no range'}`).toBe(range)
+      expect(reply.stepSeconds, `stepSeconds of ${range}`).toBe(step)
+      expect(Array.isArray(reply.points), `points of ${range}`).toBe(true)
+      for (const p of reply.points) {
+        if (p.cpuPercent !== null) {
+          expect(p.cpuPercent, `${range} cpuPercent at ${p.at}`).toBeGreaterThanOrEqual(0)
+          expect(p.cpuPercent, `${range} cpuPercent at ${p.at}`).toBeLessThanOrEqual(100)
+        }
+        for (const field of ['memoryUsedBytes', 'memoryTotalBytes', 'rootFsUsedBytes', 'rootFsSizeBytes', 'diskReadBytesPerSecond', 'diskWriteBytesPerSecond']) {
+          if (p[field] !== null) {
+            expect(p[field], `${range} ${field} at ${p.at}`).toBeGreaterThanOrEqual(0)
+          }
+        }
+        if (p.memoryUsedBytes !== null && p.memoryTotalBytes !== null) {
+          expect(p.memoryUsedBytes, `${range} memory at ${p.at}`).toBeLessThanOrEqual(p.memoryTotalBytes)
+        }
+        if (p.rootFsUsedBytes !== null && p.rootFsSizeBytes !== null) {
+          expect(p.rootFsUsedBytes, `${range} root fs at ${p.at}`).toBeLessThanOrEqual(p.rootFsSizeBytes)
+        }
+      }
+      log(`VM-32 ${range}: step ${reply.stepSeconds}, ${reply.points.length} points`)
+    }
+    const last = hour.points.filter(filled).at(-1)
+    log(`VM-32 1h last filled point: ${JSON.stringify(last)}`)
+  })
+
+  // titan-ops features/vm/design.md#vm-metrics · titan-ops architecture/tenancy-and-admin.md#tenant-isolation ·
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/GetVmMetricsEndpoint.cs (GetVmMetricsValidator: range 1h, 24h or 7d) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Compute/Vm/GetVmMetricsQueryHandler.cs (HandleAsync: ComputeOwnership.RequireVmAsync)
+  test("VM-33 metrics of another range are 400; another tenant's VM and an unknown id are 404 VM_NOT_FOUND without points", async () => {
+    expectError(await call('tenant', 'GET', `/v1/tenant/vms/${vmB}/metrics?range=2h`), 400, 'VALIDATION_ERROR')
+    const foreign = await call('admin', 'GET', `/v1/tenant/vms/${vmB}/metrics`)
+    expectError(foreign, 404, 'VM_NOT_FOUND')
+    expect(bodyOf(foreign)?.points, 'no points in the 404 body').toBeUndefined()
+    expectError(await call('tenant', 'GET', `/v1/tenant/vms/${randomUUID()}/metrics`), 404, 'VM_NOT_FOUND')
   })
 
   // titan-ops features/vm/design.md#conflict-and-delete-wins: a delete does not take over a waiting stop; it is refused until the stop ends

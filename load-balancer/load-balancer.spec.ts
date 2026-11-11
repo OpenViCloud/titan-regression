@@ -364,9 +364,16 @@ test.describe.serial('load-balancer', () => {
       expect(countOf(await timelineOf(name), 'load_balancer.update_requested'), 'update_requested').toBe(0)
     }
 
+    // The PUT after DELETE repeats the configuration the load balancer has now, whichever way the first PUT went: a repeat
+    // of the current configuration is still no repeat once the delete was taken.
+    const current = await pollUntil('LB-17 configuration at rest', () => readLb(id), (row) => row.status === 'Available', existenceShape)
+    const same = {
+      listeners: (current.listeners as any[]).map((l) => ({ protocol: l.protocol, port: l.port, targetPort: l.targetPort })),
+      backends: (current.backends as any[]).map((b) => ({ vmId: b.vmId })),
+    }
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/load-balancers/${id}`), 202)
-    const late = await call('tenant', 'PUT', `/v1/tenant/load-balancers/${id}`, { listeners: [http], backends: [{ vmId }] })
-    log(`LB-17 PUT after DELETE → ${late.status} ${late.text.slice(0, 200)}`)
+    const late = await call('tenant', 'PUT', `/v1/tenant/load-balancers/${id}`, same)
+    log(`LB-17 PUT after DELETE of the current configuration ${JSON.stringify(same)} → ${late.status} ${late.text.slice(0, 200)}`)
     expectError(late, 422, 'LOAD_BALANCER_INVALID_STATE')
     await deleted(id, 'LB-17 load balancer deleted')
   })
