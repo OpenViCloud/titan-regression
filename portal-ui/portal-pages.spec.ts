@@ -5,7 +5,7 @@ import { cleanUp } from './clean-up'
 import { createVm, deleteVmAndWait, envOf, nameOf, runNetwork, runs, waitVm } from './fixtures'
 
 // Cases UI-12..UI-14, UI-29 and UI-33 of plan.md: the VM page, the top-bar search, the quota card, the run network's
-// row while the VM lives on it, and the VM page's Monitoring tab. One small VM, created through the API, is the subject of all four; the page reads
+// row while the VM lives on it, and the VM page's Monitoring tab. One small VM, created through the API, is the subject of all five; the page reads
 // what the API reads.
 test.describe.serial('portal-ui pages', () => {
 
@@ -34,7 +34,7 @@ test.describe.serial('portal-ui pages', () => {
           await deleteVmAndWait(vmId)
         }
       }],
-      // UI-29 switches the language; leave none picked, so the next spec starts from the default.
+      // UI-29 and UI-33 switch the language; leave none picked, so the next spec starts from the default.
       ['language', async () => {
         const page = await pageOf('tenant')
         await page.evaluate(() => localStorage.removeItem('ovc-lang'))
@@ -155,7 +155,7 @@ test.describe.serial('portal-ui pages', () => {
     const network = await get('tenant', `/v1/tenant/networks/${networkId}`)
     // NetworkStatus: Creating, Deleting are in flight; the run network, long in use, must rest in one of the others.
     expect(['Creating', 'Deleting'], 'the run network rests, so its badge is the Incus word').not.toContain(network.status)
-    // A network Incus holds and reports is Created (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Enums/NetworkStatus.cs).
+    // The plan row expects Created (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Enums/NetworkStatus.cs: one of the five Incus statuses).
     expect(network.status, 'the run network is Created').toBe('Created')
     const clusters = await get('anonymous', '/v1/clusters') as Array<{ id: string, name: string }>
     const clusterName = clusters.find((c) => c.id === network.clusterId)?.name
