@@ -9,7 +9,7 @@ import { startLocalProxyIfNeeded } from './local-proxy'
 import { cleanUp } from './clean-up'
 import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, getVm, runNetwork, runs, waitVm } from './fixtures'
 
-// Cases VM-01..19, VM-21, VM-22, VM-26, VM-27, VM-29 and SSH-08 of plan.md, plus ACT-01/ACT-03/ACT-04 for VMs. VM-14 is
+// Cases VM-01..19, VM-21, VM-22, VM-26, VM-27, VM-29, VM-31 and SSH-08 of plan.md, plus ACT-01/ACT-03/ACT-04 for VMs. VM-14 is
 // NOT COVERED, VM-20 and VM-28 read the Incus host. Create checks run in this order
 // (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync): quota (TenantQuotaGate), cluster,
 // name, network, offering, template — so the error cases run below the quota.

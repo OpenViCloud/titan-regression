@@ -365,7 +365,8 @@ test.describe.serial('load-balancer', () => {
     }
 
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/load-balancers/${id}`), 202)
-    const late = await call('tenant', 'PUT', `/v1/tenant/load-balancers/${id}`, { listeners: [http], backends: [{ vmId }] })
+    // The configuration it rests on, so the 422 measures that a PUT matching it is no repeat once the delete is asked.
+    const late = await call('tenant', 'PUT', `/v1/tenant/load-balancers/${id}`, { listeners: rested.listeners, backends: [{ vmId }] })
     log(`LB-17 PUT after DELETE → ${late.status} ${late.text.slice(0, 200)}`)
     expectError(late, 422, 'LOAD_BALANCER_INVALID_STATE')
     await deleted(id, 'LB-17 load balancer deleted')

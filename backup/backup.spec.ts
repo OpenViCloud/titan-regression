@@ -127,7 +127,7 @@ test.describe.serial('backup', () => {
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Admin/Backup/ListDiskBackupsQueryHandler.cs (HandleAsync: one
   // item per VM whose instance Incus holds (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs HasAnInstance: an externalId,
   // not NotFound, not Deleted; a Creating or Failed VM has no externalId yet, so the status filter below is the same set) and per
-  // volume Available, `name` is the resource's display name, the record is matched by its id),
+  // volume Incus holds as Available (also while it attaches, detaches or deletes; the test checks the Available ones), `name` is the resource's display name, the record is matched by its id),
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Backup/BackupHealthPolicy.cs (ForDisk). An environment with no VM or volume alive measures only the Postgres item: the disk
   // part is then NOT COVERED (plan.md), logged here for the report.
   test('BAK-11 one item per VM Incus holds and per volume of beta-user Available, with a tenant and a string health', async () => {
