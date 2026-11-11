@@ -368,9 +368,11 @@ test.describe.serial('load-balancer', () => {
     const late = await call('tenant', 'PUT', `/v1/tenant/load-balancers/${id}`, { listeners: [http], backends: [{ vmId }] })
     log(`LB-17 PUT after DELETE → ${late.status} ${late.text.slice(0, 200)}`)
     expectError(late, 422, 'LOAD_BALANCER_INVALID_STATE')
-    if (!measured) {
+    if (early.status === 204) {
       // The early PUT was accepted, so the load balancer rested on another configuration: this PUT did not repeat it.
-      test.info().annotations.push({ type: 'skip', description: 'N/A second PUT: the configuration it sent was not the one the load balancer rested on' })
+      const reason = 'N/A second PUT: the early PUT was accepted, so TCP 80 → 8080 was not the configuration it rested on'
+      log(`LB-17 ${reason}`)
+      test.info().annotations.push({ type: 'skip', description: reason })
     }
     await deleted(id, 'LB-17 load balancer deleted')
   })
