@@ -387,7 +387,7 @@ Hoá đơn để trả do `billing/seed-invoices.sql` tạo trên tenant `admin-
 | CC-11 | snapshot VM `Available`: hai `DELETE …/snapshots/{id}` cùng lúc | hai `202`; đúng một `vm_snapshot.delete_requested`; snapshot tới `Deleted`, đúng một `vm_snapshot.deleted` | `titan-ops architecture/resource-lifecycle.md#one-key-per-request` · `OpenViCloud/titan-control-plane:Titan.Tests/Infrastructure/Integration/VmSnapshotRequestsDbTests.cs` (`TwoDeletesOfOneSnapshot_AtOnce_LeaveOneRequest_AndOneCommandRow`) |
 | CC-12 | cluster có khối IPv6, `beta-user` nâng `maxNetworks` thêm một (trả lại ở `afterAll`): network IPv6 `rg-*`, một VM `rg-*` trên nó, load balancer `rg-*` `TCP 80 → 8080` `Available`: hai `DELETE /v1/tenant/load-balancers/{id}` cùng lúc | hai `202`; đúng một `load_balancer.delete_requested`; load balancer tới `Deleted`, đúng một `load_balancer.deleted`; VM và network xoá trong `finally` | `titan-ops architecture/resource-lifecycle.md#one-key-per-request` · `OpenViCloud/titan-control-plane:Titan.Tests/Infrastructure/Integration/LoadBalancerRequestsDbTests.cs` (`TwoDeletesOfOneLoadBalancer_AtOnce_LeaveOneRequest_AndOneCommandRow`) |
 
-## admin — spec đo phần API; ADM-15 đo ở lượt env của release; màn admin portal hoãn tới sau PORTAL-REDESIGN, trừ link Metrics (ADM-18)
+## admin — spec đo phần API; ADM-15 đo ở lượt env của release; màn admin portal hoãn tới sau PORTAL-REDESIGN
 
 | ID | Khi | Kỳ vọng | Nguồn |
 |---|---|---|---|
