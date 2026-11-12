@@ -42,7 +42,12 @@ FAKE_KUBECTL = textwrap.dedent('''\
     elif args[:2] == ["get", "deployment"]:
         items("control-plane")
     elif args[:2] == ["get", "pods"]:
-        items("regression-mod-t1-pod") if any(a.startswith("job-name=") for a in args) else items()
+        if any(a.startswith("job-name=") for a in args):
+            items("regression-mod-t1-pod")
+        elif "app=incus-worker-inventory" in args and os.environ.get("FAKE_INVENTORY"):
+            print(json.dumps({"items": [{"metadata": {"name": "incus-worker-inventory-pod"}, "status": {"containerStatuses": []}}]}))
+        else:
+            items()
     elif args[:2] == ["get", "pod"]:
         counter = state / "phase-reads"
         n = int(counter.read_text()) if counter.exists() else 0
@@ -83,6 +88,9 @@ FAKE_KUBECTL = textwrap.dedent('''\
         print(json.dumps({"spec": {"syncPolicy": {"automated": automated}}}))
     elif args[:3] == ["get", "deploy", "incus-worker"]:
         print("1")
+    elif args[:3] == ["get", "deploy", "incus-worker-inventory"]:
+        # FAKE_INVENTORY: the worker runs one inventory pod beside its command pods.
+        print("1" if os.environ.get("FAKE_INVENTORY") else "")
 ''')
 
 
@@ -164,6 +172,7 @@ class WorkerStopTest(unittest.TestCase):
         code, out, calls = run("Running", done_reads=7, FAKE_LOGS=f"{STOP};{START}", **APPS)
         self.assertEqual(worker_calls(calls), [
             "-n regression get deploy incus-worker -o jsonpath={.spec.replicas}",
+            "-n regression get deploy incus-worker-inventory --ignore-not-found -o jsonpath={.spec.replicas}",
             "-n argocd get application root-local -o json",
             '-n argocd patch application root-local --type merge -p {"spec":{"syncPolicy":{"automated":null}}}',
             "-n argocd get application incus-worker-local -o json",
@@ -179,6 +188,21 @@ class WorkerStopTest(unittest.TestCase):
         ])
         self.assertIn("worker stopped", out)
         self.assertIn("worker started", out)
+        self.assertEqual(code, 0, out)
+
+    def test_with_an_inventory_pod_the_runner_stops_and_starts_it_too_and_keeps_its_log(self):
+        code, out, calls = run("Running", done_reads=7, FAKE_LOGS=f"{STOP};{START}", FAKE_INVENTORY="1", **APPS)
+        steps = worker_calls(calls)
+        stop = [s for s in steps if "scale" in s or "wait --for=delete" in s]
+        self.assertEqual(stop, [
+            "-n regression scale deploy/incus-worker --replicas=0",
+            "-n regression scale deploy/incus-worker-inventory --replicas=0",
+            "-n regression wait --for=delete pod -l app=incus-worker --timeout=5m",
+            "-n regression wait --for=delete pod -l app=incus-worker-inventory --timeout=5m",
+            "-n regression scale deploy/incus-worker --replicas=1",
+            "-n regression scale deploy/incus-worker-inventory --replicas=1",
+        ])
+        self.assertIn("logs incus-worker-inventory-pod", calls)
         self.assertEqual(code, 0, out)
 
     def test_without_the_applications_named_the_runner_leaves_the_worker_alone(self):

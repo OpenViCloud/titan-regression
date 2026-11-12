@@ -76,7 +76,7 @@ app_log_filter() {
   fi
 }
 
-# Every pod of an app (control-plane, incus-worker) from $since on; a restarted pod adds its previous container.
+# Every pod of an app (control-plane, incus-worker, incus-worker-inventory) from $since on; a restarted pod adds its previous container.
 save_app_logs() {
   local app="$1" file="$logs_dir/$1.log" note=""
   if [ "$app" = "control-plane" ]; then note=" | python3 trim-cp-log.py"; fi
@@ -102,14 +102,17 @@ for p in json.load(sys.stdin)["items"]:
 # root-local,incus-worker-local · prd: incus-worker-prd), the runner answers both; unset, the agent may answer by hand
 # on dev only (on the release environment nobody does: the spec skips as N/A after 10 minutes).
 # Auto-sync and replicas go back as they were: on WORKER_START_WAIT or ADM15_GAVE_UP, on a stop that fails, and on any
-# exit while the worker is down.
+# exit while the worker is down. Where the worker runs as command pods and one inventory pod (Deployment
+# incus-worker-inventory, titan-ops architecture/worker-structure.md#worker-roles), both stop: the inventory pod is the
+# one that reports reconciler polls.
 worker_apps="${REGRESSION_WORKER_APPS:-}"
-worker="up"; worker_replicas=""
+worker="up"; worker_replicas=""; inventory_replicas=""
 stop_worker() {
   local app
   worker="stopping"
   rm -f "${out:?}"/worker-autosync-*.json
   worker_replicas="$(k -n "$app_ns" get deploy incus-worker -o 'jsonpath={.spec.replicas}')" || return 1
+  inventory_replicas="$(k -n "$app_ns" get deploy incus-worker-inventory --ignore-not-found -o 'jsonpath={.spec.replicas}')" || return 1
   for app in ${worker_apps//,/ }; do
     k -n argocd get application "$app" -o json \
       | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin)["spec"].get("syncPolicy", {}).get("automated")))' \
@@ -117,13 +120,22 @@ stop_worker() {
     k -n argocd patch application "$app" --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}' >/dev/null || return 1
   done
   k -n "$app_ns" scale deploy/incus-worker --replicas=0 >/dev/null || return 1
+  if [ -n "$inventory_replicas" ]; then
+    k -n "$app_ns" scale deploy/incus-worker-inventory --replicas=0 >/dev/null || return 1
+  fi
   k -n "$app_ns" wait --for=delete pod -l app=incus-worker --timeout=5m >/dev/null || return 1
+  if [ -n "$inventory_replicas" ]; then
+    k -n "$app_ns" wait --for=delete pod -l app=incus-worker-inventory --timeout=5m >/dev/null || return 1
+  fi
   worker="stopped"
 }
 start_worker() {
   local app apps=""
   for app in ${worker_apps//,/ }; do apps="$app $apps"; done
   if [ -n "$worker_replicas" ]; then k -n "$app_ns" scale deploy/incus-worker --replicas="$worker_replicas" >/dev/null; fi
+  if [ -n "$inventory_replicas" ]; then
+    k -n "$app_ns" scale deploy/incus-worker-inventory --replicas="$inventory_replicas" >/dev/null
+  fi
   for app in $apps; do
     if [ -s "$out/worker-autosync-$app.json" ]; then
       k -n argocd patch application "$app" --type merge \
@@ -220,6 +232,10 @@ done
 
 save_app_logs control-plane
 save_app_logs incus-worker
+# The inventory pod logs the reconciler's reports; only where the worker runs one.
+if [ "$(k -n "$app_ns" get pods -l app=incus-worker-inventory -o json | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["items"]))')" != "0" ]; then
+  save_app_logs incus-worker-inventory
+fi
 k -n "$ns" logs "$pod" > "$out/runner.log" 2>&1
 grep -E 'REGRESSION_EXIT=|passed|failed|skipped|flaky|NO_SPECS' "$out/runner.log" | tail -8
 status=1
