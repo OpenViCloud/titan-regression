@@ -164,7 +164,7 @@ create a network and beta-user may hold one.
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-14 (host, not covered) |
 | 5 | `vm` | VMs: create per tier (cluster named or taken from the network), stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered) |
 | 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-14, VMS-15, VMS-20 (host, not covered), VMS-17 (host) |
-| 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes, except VOL-18 (host, not covered), VOL-21 (not covered) |
+| 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes, except VOL-18 (host, not covered), VOL-21, VOL-22 (not covered) |
 | 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: only the negative cases that need no IPv6 network) | yes | yes | yes, except LB-12 and LB-16 (host, not covered) |
 | 9 | `tenant` | tenant, quota, terms consent, approval on sign-in, the admin status route's error order | yes | yes | yes |
 | 10 | `api-token` | API tokens: create, call the API with one, duplicate name/secret, delete ⇒ `401`, unknown token | yes | yes | yes |
