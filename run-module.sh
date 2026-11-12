@@ -215,7 +215,7 @@ while true; do
         k -n "$ns" exec "$pod" -- touch /work/adm-15/worker-started
         echo "ADM-15 worker started: replicas $worker_replicas${inventory_replicas:+, inventory $inventory_replicas}, auto-sync back"
       else
-        echo "WORKER_START_FAILED — incus-worker not rolled out in 10 minutes"
+        echo "WORKER_START_FAILED — the worker (incus-worker, or incus-worker-inventory) not rolled out in 10 minutes"
       fi
     fi
   fi

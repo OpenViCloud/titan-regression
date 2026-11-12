@@ -203,6 +203,20 @@ class WorkerStopTest(unittest.TestCase):
             "-n regression scale deploy/incus-worker-inventory --replicas=1",
         ])
         self.assertIn("logs incus-worker-inventory-pod", calls)
+        self.assertIn("-n regression rollout status deploy/incus-worker-inventory --timeout=10m", steps)
+        self.assertEqual(code, 0, out)
+
+    def test_with_an_inventory_pod_a_rollout_that_fails_is_reported_and_tried_again_at_exit(self):
+        code, out, calls = run("Running", done_reads=7, FAKE_LOGS=f"{STOP};{START}", FAKE_INVENTORY="1",
+                               FAKE_FAIL="rollout status deploy/incus-worker-inventory", **APPS)
+        self.assertIn("WORKER_START_FAILED", out)
+        self.assertIn("worker still stopped at exit", out)
+        self.assertEqual(calls.count("rollout status deploy/incus-worker-inventory"), 2)
+
+    def test_a_failed_read_of_the_inventory_pods_keeps_no_inventory_log(self):
+        code, out, calls = run("Running", done_reads=7, FAKE_INVENTORY="1", FAKE_FAIL="get pods -l app=incus-worker-inventory")
+        # One read, the one that failed: no log of the inventory pod is started.
+        self.assertEqual(calls.count("get pods -l app=incus-worker-inventory"), 1)
         self.assertEqual(code, 0, out)
 
     def test_with_an_inventory_pod_a_stop_that_fails_puts_both_back(self):
