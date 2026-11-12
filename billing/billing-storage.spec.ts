@@ -1,13 +1,14 @@
 import { test, expect } from '@playwright/test'
 import { closeSessions, useBrowser } from './auth'
 import { bodyOf, call, expectStatus, get, log, newKey, pollUntil, sleep, startLog } from './api'
+import { meterTickMs } from './meter'
 import { RUN, envOf, runNetwork, waitVolume } from './fixtures'
 
 // Case BIL-16 of plan.md. Metered on the lane's tenant, like BIL-01..03 (billing.spec.ts): money moves only
 // on admin-test (CLAUDE.md), and storage usage here produces no invoice or wallet movement.
 //
-// OpenViCloud/titan-control-plane:Titan.Application/Options/BillingMeterOptions.cs (IntervalMinutes) — one tick every 10 minutes by default.
-const TICK_MS = 10 * 60_000
+// One meter tick of the environment under test (meter.ts): 10 minutes unless METER_INTERVAL_MINUTES says otherwise.
+const TICK_MS = meterTickMs(process.env.METER_INTERVAL_MINUTES)
 
 // OpenViCloud/titan-control-plane:Titan.Application/Queries/Billing/UsageRecord/GetTenantBillingSummaryQueryHandler.cs
 // HandleAsync (storageCost) — the only API-readable storage figure is storageCost = DISK + SNAPSHOT combined; there

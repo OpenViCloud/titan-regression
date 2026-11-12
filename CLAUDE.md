@@ -40,6 +40,7 @@ Repo này không có hệ thống nào để chạy: spec chạy bằng runner `
 │   ├── fixtures.ts  #   tên rg-<loại>-<lượt>, chọn cluster/template/tier theo env, tìm-hoặc-tạo network của lượt
 │   ├── token.ts     #   newSecret(): bí mật token API ovc_…; callWithToken(): gọi API bằng token thay JWT
 │   ├── portal-config.ts  # topUpEnabledOf(PORTAL): đọc <portal>/config.json một lần; đọc không được ⇒ ném (case đỏ, không N/A)
+│   ├── meter.ts     #   meterTickMs(METER_INTERVAL_MINUTES): một tick meter của env (trống ⇒ 10 phút, mặc định của control plane); sai hình ⇒ ném
 │   └── local-proxy.ts  # tự bật khi URL là *.localhost (cụm dev `local`: issuer Keycloak mang cổng 8080)
 └── <module>/*.spec.ts
 ```

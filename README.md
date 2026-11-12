@@ -74,9 +74,9 @@ Around the job, some modules need more:
 
 - `billing` and `concurrency`: before `billing`, run `billing/seed-invoices.sql` with
   `kubectl exec -i <postgres pod> -- psql -U postgres -d titan -v ON_ERROR_STOP=1 < billing/seed-invoices.sql`; after
-  `concurrency`, run `billing/check-wallets.sql` (read only): every row it prints is a finding (BIL-14). `billing` takes
-  about 35 minutes (it waits for 10-minute meter ticks), longer than one command of an agent lasts: start it in the
-  background and wait for `.done` as in step 3.
+  `concurrency`, run `billing/check-wallets.sql` (read only): every row it prints is a finding (BIL-14). `billing` waits for
+  meter ticks: about 35 minutes where the meter ticks every 10 minutes (prd), longer than one command of an agent
+  lasts: start it in the background and wait for `.done` as in step 3.
 - `cli`: build `openvicloud` for the node's architecture (`kubectl get nodes -o json` → `status.nodeInfo.architecture`)
   from the CLI commit the release pinned: in a clone of `OpenViCloud/titan-cli` at that commit,
   `GOOS=linux GOARCH=<arch> CGO_ENABLED=0 go build -o <out> ./cmd/openvicloud`, and pass `<out>` as `[binary]`. When
@@ -91,8 +91,9 @@ Around the job, some modules need more:
   there is no manual path.
 
 Specs read their URLs from `PORTAL_BASE_URL`, `ADMIN_BASE_URL` and `API_BASE_URL`, credentials from `BETA_USER_*` and
-`ADMIN_TEST_*`, and write screenshots to `RESULTS_DIR` as `<ID>-<what>.png`; they never print or write a credential or
-a bearer token. An access token lives about 10 minutes, so every call goes through `headersOf()` of `lib/auth.ts`
+`ADMIN_TEST_*`, the control plane's meter tick from `METER_INTERVAL_MINUTES` (unset: 10, the control plane's default;
+dev's overlay sets it with the control plane's `BillingMeter__IntervalMinutes`, `lib/meter.ts`), and write screenshots
+to `RESULTS_DIR` as `<ID>-<what>.png`; they never print or write a credential or a bearer token. An access token lives about 10 minutes, so every call goes through `headersOf()` of `lib/auth.ts`
 (it signs in again with under 2 minutes left, and on `401`), the cleanup in `finally` included. A new Playwright
 version of the runner changes the image tag in `cronjob.yaml` and `cronjob-lane-b.yaml` of titan-local-cluster's
 `base/regression-runner/` together with `@playwright/test@x.y.z` in `run.sh`.

@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { closeSessions, headersOf, useBrowser } from './auth'
 import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, sleep, startLog } from './api'
+import { meterTickMs } from './meter'
 import { RUN, createVm, deleteVmAndWait, envOf, runNetwork, runs, waitVm, waitVolume } from './fixtures'
 import { callWithToken } from './token'
 
@@ -10,8 +11,8 @@ import { callWithToken } from './token'
 // Usage (BIL-01..03, BIL-19) is metered on the lane's tenant (beta-user-2 in lane b): metering moves no money; the
 // lane's tenant only reads invoices (BIL-17) and is refused on admin-test's (BIL-20).
 
-// OpenViCloud/titan-control-plane:Titan.Application/Options/BillingMeterOptions.cs (IntervalMinutes) — one tick every 10 minutes by default
-const TICK_MS = 10 * 60_000
+// One meter tick of the environment under test (meter.ts): 10 minutes unless METER_INTERVAL_MINUTES says otherwise.
+const TICK_MS = meterTickMs(process.env.METER_INTERVAL_MINUTES)
 
 // A usage record keeps the raw product; whole VND happens once, on the invoice line
 // (titan-ops architecture/money-and-wallet.md#round-once). Any size bills; 10 GB makes the storage step easy to read in the log.
