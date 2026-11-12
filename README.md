@@ -200,7 +200,7 @@ OpenViCloud, needs an approved `L-x` command (OBS-13 only reads the host's trust
 `worker`, `control-plane-image` — read-only `gh`/`curl`/`kubectl` and `go test` of a worker clone on the agent's machine.
 
 Four things change state every tenant of the environment shares: ADM-06 (a global price), ADM-15 (the cluster's
-`incus-worker` stopped), `billing/seed-invoices.sql` (written straight into the database) and the `L-x` writes on the
+`incus-worker` stopped, and `incus-worker-inventory` where it runs), `billing/seed-invoices.sql` (written straight into the database) and the `L-x` writes on the
 Incus host. On prd they run only until the first real customer is approved
 (`titan-ops status/known-state.md#first-real-customer`).
 Until the specs are split or skip themselves, that stops the whole `admin` module (ADM-03 shares the serial

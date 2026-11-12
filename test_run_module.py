@@ -205,6 +205,19 @@ class WorkerStopTest(unittest.TestCase):
         self.assertIn("logs incus-worker-inventory-pod", calls)
         self.assertEqual(code, 0, out)
 
+    def test_with_an_inventory_pod_a_stop_that_fails_puts_both_back(self):
+        code, out, calls = run("Running", done_reads=7, FAKE_LOGS=STOP, FAKE_INVENTORY="1",
+                               FAKE_FAIL="wait --for=delete pod -l app=incus-worker-inventory", **APPS)
+        self.assertIn("WORKER_STOP_FAILED", out)
+        steps = worker_calls(calls)
+        self.assertIn("-n regression scale deploy/incus-worker --replicas=1", steps)
+        self.assertIn("-n regression scale deploy/incus-worker-inventory --replicas=1", steps)
+
+    def test_without_an_inventory_pod_no_inventory_log_is_kept(self):
+        code, out, calls = run("Running", done_reads=7)
+        self.assertNotIn("logs incus-worker-inventory", calls)
+        self.assertEqual(code, 0, out)
+
     def test_without_the_applications_named_the_runner_leaves_the_worker_alone(self):
         code, out, calls = run("Running", done_reads=7, FAKE_LOGS=f"{STOP};{START}")
         self.assertEqual(worker_calls(calls), [])
