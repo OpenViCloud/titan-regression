@@ -63,7 +63,8 @@ up by hand.
 5. **Delete the job and its ConfigMap** once every file matched. A mismatch (or `NO_POD`, `POD_NOT_STARTED`,
    `BINARY_SHA_MISMATCH`, a phase unreadable 21 times in a row) exits 1 and keeps both for a look: delete both by hand when done.
 
-The script also leaves in `<log dir>`: `control-plane.log` and `incus-worker.log` since the job was created, of the
+The script also leaves in `<log dir>`: `control-plane.log` and `incus-worker.log` (and `incus-worker-inventory.log`
+where the worker runs an inventory pod, which logs the reconciler's reports) since the job was created, of the
 pods alive when the module ended (a pod replaced mid-run has none) — for diagnosis; the verdict comes from the specs —
 and the UI cases' screenshots (`results/*.png`, first level only), followed by the `SCREENSHOT_RESULT=` line of
 `check-screenshots.py`. Its stdout line `runner: … blob=<id>` names the version of the script that ran
@@ -187,7 +188,8 @@ database; on the release environment an approved `L-x`), after `concurrency` it 
 modules `cli` and `terraform-provider` need the agent to copy a binary into the pod when the spec logs `BINARY_WAIT`
 (`cli`: the CLI built for the node's architecture; `terraform-provider`: `GOOS=linux GOARCH=<node> CGO_ENABLED=0 go test -c`
 of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud`); `admin/stuck-requests` (ADM-15) needs the
-`incus-worker` stopped and started when the spec logs `WORKER_STOP_WAIT` and `WORKER_START_WAIT`: `run-module.sh` does it
+`incus-worker` stopped and started when the spec logs `WORKER_STOP_WAIT` and `WORKER_START_WAIT` (and `incus-worker-inventory`,
+where the worker runs one, since it reports the reconciler polls): `run-module.sh` does it
 when `REGRESSION_WORKER_APPS` lists the ArgoCD Applications that would bring the worker back, root first (dev
 `root-local,incus-worker-local`, release environment `incus-worker-prd`), and puts their auto-sync and the replicas back;
 every tenant of the cluster feels it, so on the release environment it runs only under an approved `L-x` (never by
@@ -198,7 +200,7 @@ OpenViCloud, needs an approved `L-x` command (OBS-13 only reads the host's trust
 `worker`, `control-plane-image` — read-only `gh`/`curl`/`kubectl` and `go test` of a worker clone on the agent's machine.
 
 Four things change state every tenant of the environment shares: ADM-06 (a global price), ADM-15 (the cluster's
-`incus-worker` stopped), `billing/seed-invoices.sql` (written straight into the database) and the `L-x` writes on the
+`incus-worker` stopped, and `incus-worker-inventory` where it runs), `billing/seed-invoices.sql` (written straight into the database) and the `L-x` writes on the
 Incus host. On prd they run only until the first real customer is approved
 (`titan-ops status/known-state.md#first-real-customer`).
 Until the specs are split or skip themselves, that stops the whole `admin` module (ADM-03 shares the serial

@@ -47,7 +47,7 @@ async function waitForFile(paths: string[], timeoutMs: number): Promise<string |
 }
 
 async function waitWorkerStarted(when: string): Promise<void> {
-  log(`WORKER_START_WAIT (${when}) scale deploy/incus-worker back, turn auto-sync on, wait for the pod Ready, then touch ${STARTED}`)
+  log(`WORKER_START_WAIT (${when}) scale deploy/incus-worker (and deploy/incus-worker-inventory where it exists) back, turn auto-sync on, wait for the pods Ready, then touch ${STARTED}`)
   const found = await waitForFile([STARTED], 15 * 60_000)
   if (found === null) {
     throw new Error(`the agent never touched ${STARTED}: the incus-worker may still be at 0 replicas`)
@@ -130,7 +130,7 @@ test.describe.serial('admin-worker-down', () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${volumeId}/attach`, { vmId: otherVmId }), 202)
     await waitVolume('ADM-15 volume attached', volumeId, (v) => v.currentAttachedVmId === otherVmId && v.status === 'Available')
 
-    log(`WORKER_STOP_WAIT turn off auto-sync of the worker's Application, scale deploy/incus-worker to 0, wait until no worker pod is left, then touch ${STOPPED} (or ${SKIP}: no L-x)`)
+    log(`WORKER_STOP_WAIT turn off auto-sync of the worker's Application, scale deploy/incus-worker (and deploy/incus-worker-inventory where it exists) to 0, wait until no worker pod is left, then touch ${STOPPED} (or ${SKIP}: no L-x)`)
     const answer = await waitForFile([STOPPED, SKIP], 10 * 60_000)
     if (answer !== STOPPED) {
       fs.writeFileSync(GAVE_UP, '')
