@@ -261,9 +261,9 @@ test.describe.serial('vm', () => {
   })
 
   // titan-ops features/vm/design.md#ssh-session · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/OpenVmSshEndpoint.cs
-  // HandleAsync (limiter.TryAcquire before request.HandleAsync: a refusal records no vm.ssh_requested) ·
-  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Sessions/ShellSessionLimiter.cs MaxSessionsPerTenant (5, counted in the process:
-  // right with one control plane replica, which this case assumes) · the guest's sshd ends an unauthenticated session after its
+  // HandleAsync (limiter.TryAcquireAsync before request.HandleAsync: a refusal records no vm.ssh_requested) ·
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Sessions/ShellSessionLimiter.cs MaxSessionsPerTenant (5, one row each in
+  // core.shell_sessions, so every control plane replica counts the same) · the guest's sshd ends an unauthenticated session after its
   // LoginGraceTime (120 s by default), so the sixth is opened while the five are surely still held.
   test('SSH-08 five SSH sessions open (101), the sixth is 422 VM_SESSION_LIMIT_REACHED; one opens again after they close', async () => {
     test.setTimeout(10 * 60_000)
