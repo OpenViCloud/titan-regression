@@ -1,13 +1,15 @@
 import { test, expect } from '@playwright/test'
 import { closeSessions, useBrowser } from './auth'
 import { bodyOf, call, expectStatus, get, log, newKey, pollUntil, startLog } from './api'
-import { RUN_CIDR, activityOf, countOf, envOf, listNetworks, networkUsable, runNetwork, waitNetwork } from './fixtures'
+import { RUN_CIDR, activityIds, activityOf, activitySince, countOf, envOf, listNetworks, networkUsable, runNetwork, waitNetwork } from './fixtures'
 
 // Cases NETL-01..03 of plan.md. Runs after every module that uses the run network: it deletes it.
 test.describe.serial('network-lifecycle', () => {
   test.describe.configure({ timeout: 10 * 60_000 })
 
+  // The same CIDR every run: NETL-02 counts only the feed's rows since this module began (activitySince of fixtures.ts).
   const ruleCidr = '10.89.0.0/24'
+  let feedAtStart = new Set<string>()
   let networkId = ''
   let networkName = ''
   let recreatedId = ''
@@ -16,6 +18,7 @@ test.describe.serial('network-lifecycle', () => {
     test.setTimeout(10 * 60_000)
     startLog('network-lifecycle')
     useBrowser(browser)
+    feedAtStart = await activityIds()
     const network = await runNetwork()
     networkId = network.id
     networkName = network.name
@@ -65,8 +68,8 @@ test.describe.serial('network-lifecycle', () => {
     const rules = await get('tenant', `/v1/tenant/networks/${networkId}/firewall-rules`) as any[]
     log(`NETL-02 rules of the deleted network: ${rules.length}`)
     expect(rules).toEqual([])
-    const rows = await get('tenant', '/v1/tenant/activity?limit=50') as Array<{ action: string, resourceName: string }>
-    const actions = rows.filter((r) => r.resourceName.includes(ruleCidr)).map((r) => r.action)
+    const actions = await activitySince(feedAtStart, ruleCidr)
+    log(`ACT-02 rule ${ruleCidr}, rows since the module began: ${actions.join(', ')}`)
     expect(countOf(actions, 'firewall_rule.deleted')).toBe(0)
   })
 
