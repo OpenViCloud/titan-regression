@@ -3,7 +3,7 @@ import { closeSessions, useBrowser } from './auth'
 import { call, expectStatus, get, log, startLog } from './api'
 import { RUN_NETWORK_PREFIX } from './fixtures'
 
-// Cases SMOKE-01..06 of plan.md. Runs first: a red here means the env, not a feature.
+// Cases SMOKE-01..07 of plan.md. Runs first: a red here means the env, not a feature.
 test.describe.serial('smoke', () => {
   test.beforeAll(async ({ browser }) => {
     startLog('smoke')
@@ -93,5 +93,14 @@ test.describe.serial('smoke', () => {
     log(`SMOKE-06 /healthz/meters ${meters.status} ${meters.text.slice(0, 300)}`)
     expectStatus(meters, 200)
     expect(meters.text.trim()).toBe('Healthy')
+  })
+
+  // titan-ops architecture/operator-metrics.md#control-plane-metrics (the numbers are on their own server on Metrics:Port, which no
+  // Service the ingress or cloudflared points at serves) · OpenViCloud/titan-control-plane:Titan.Tests/Api/MetricsHostTests.cs
+  // (MainListener_DoesNotServeMetrics_WhateverTheHost)
+  test('SMOKE-07 /metrics on the API host without a token is 404', async () => {
+    const metrics = await call('anonymous', 'GET', '/metrics')
+    log(`SMOKE-07 /metrics ${metrics.status} ${metrics.text.slice(0, 120)}`)
+    expectStatus(metrics, 404)
   })
 })

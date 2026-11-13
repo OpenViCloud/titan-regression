@@ -7,7 +7,7 @@ import {
   vmShape, volumeShape, waitNetwork, waitVm, waitVolume,
 } from './fixtures'
 
-// Cases CC-05..12 of plan.md: two requests on one resource at the same moment. A file of its own, so a red CC-03 (the
+// Cases CC-05..13 of plan.md: two requests on one resource at the same moment (CC-13: two creates of one tenant). A file of its own, so a red CC-03 (the
 // seeded invoice) does not skip them. One VM at a time: CC-07, CC-10, CC-11, CC-12 and CC-06 share one small VM, on an
 // IPv6 network of the module when the cluster names an IPv6 block (CC-12's load balancer needs one), else on the run
 // network. Every extra network raises maxNetworks for its create only: the cap is given back as soon as the create is
@@ -474,6 +474,34 @@ test.describe.serial('concurrency-requests', () => {
       await expectOneRequestOneOutcome('CC-06', before, (n) => n === vmName, 'vm.stop_requested', 'vm.stopped')
     } finally {
       await deleteHost()
+    }
+  })
+
+  // titan-ops features/provider/design.md#tenant-lane · titan-ops architecture/worker-structure.md#worker-roles — the API part; that the two
+  // vm.create commands never ran at once is the agent's read of the worker log after the module (plan.md). maxVms is raised by two for the
+  // creates only (the quota gate reads it at create) and given back right after, and again in afterAll.
+  test('CC-13 two VM creates of one tenant at once: both 202, both Running', async () => {
+    const { smallTier } = await envOf()
+    const networkId = (await runNetwork()).id
+    const names = [`rg-vm-lane-x-${RUN}`, `rg-vm-lane-y-${RUN}`]
+    const ids: string[] = []
+    try {
+      const body = { maxVms: original!.maxVms + 2, maxNetworks: original!.maxNetworks }
+      log(`quota ← ${JSON.stringify(body)}`)
+      expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/quota`, body), 204)
+      try {
+        ids.push(...await Promise.all(names.map((name) => createVm(name, smallTier, networkId))))
+      } finally {
+        await restoreQuota()
+      }
+      log(`CC-13 vms ${names.map((n, i) => `${n}=${ids[i]}`).join(' ')}`)
+      for (const id of ids) {
+        await waitVm(`CC-13 ${id} runs`, id, runs)
+      }
+    } finally {
+      for (const id of ids) {
+        await deleteVmAndWait(id)
+      }
     }
   })
 })

@@ -6,7 +6,7 @@ import { meterTickMs } from './meter'
 import { RUN, createVm, deleteVmAndWait, envOf, runNetwork, runs, waitVm, waitVolume } from './fixtures'
 import { callWithToken } from './token'
 
-// Cases BIL-01..13, BIL-15, BIL-17 and BIL-19..23 of plan.md. Money moves only on admin-test's tenant, through
+// Cases BIL-01..13, BIL-15, BIL-17 and BIL-19..24 of plan.md (BIL-24: its invoice part). Money moves only on admin-test's tenant, through
 // invoices seed-invoices.sql made before this job (the agent runs it); BIL-14 is check-wallets.sql, run after.
 // Usage (BIL-01..03, BIL-19) is metered on the lane's tenant (beta-user-2 in lane b): metering moves no money; the
 // lane's tenant only reads invoices (BIL-17) and is refused on admin-test's (BIL-20).
@@ -522,6 +522,26 @@ test.describe.serial('billing', () => {
     expectError(await call('tenant', 'GET', `/v1/tenant/vms/${unknown}/cost?month=abc`), 404, 'VM_NOT_FOUND')
   })
 
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Billing/GetVmCostEndpoint.cs and GetTenantBillingSummaryEndpoint.cs
+  // (TryParseYearMonth: year 1..9999, month 1..12, else 400) · OpenViCloud/titan-control-plane:Titan.Application/Services/Billing/BillingInput.cs
+  // (a month whose first day is before now − 90 days ⇒ 422 USAGE_PERIOD_EXPIRED) · titan-ops features/billing/metering/design.md#usage-retention
+  test('BIL-03 a year outside 1..9999 is 400; the month before is 200; a month past 90 days is 422 USAGE_PERIOD_EXPIRED; the VM is checked before the month', async () => {
+    expect(vmId, 'the VM of the metering case').not.toBe('')
+    for (const month of ['10000-01', '0-05']) {
+      expectError(await call('tenant', 'GET', `/v1/tenant/vms/${vmId}/cost?month=${month}`), 400, 'VALIDATION_ERROR')
+      expectError(await call('tenant', 'GET', `/v1/tenant/billing/summary?month=${month}`), 400, 'VALIDATION_ERROR')
+    }
+    const previous = previousUtcMonth(new Date()).query
+    log(`BIL-03 previous UTC month ${previous}`)
+    expectStatus(await call('tenant', 'GET', `/v1/tenant/vms/${vmId}/cost?month=${previous}`), 200)
+    expectStatus(await call('tenant', 'GET', `/v1/tenant/billing/summary?month=${previous}`), 200)
+    expectError(await call('tenant', 'GET', `/v1/tenant/vms/${vmId}/cost?month=2020-01`), 422, 'USAGE_PERIOD_EXPIRED')
+    expectError(await call('tenant', 'GET', '/v1/tenant/billing/summary?month=2020-01'), 422, 'USAGE_PERIOD_EXPIRED')
+    const unknown = randomUUID()
+    expectError(await call('admin', 'GET', `/v1/tenant/vms/${vmId}/cost?month=2020-01`), 404, 'VM_NOT_FOUND')
+    expectError(await call('tenant', 'GET', `/v1/tenant/vms/${unknown}/cost?month=2020-01`), 404, 'VM_NOT_FOUND')
+  })
+
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Billing/UsageRecord/GetTenantBillingSummaryQueryHandler.cs (HandleAsync: perVm groups the
   // month's usage records, named from the record's snapshot, never the vms table) · titan-ops features/billing/metering/user-stories.md#us-b07 ·
   // titan-ops features/billing/metering/design.md#usage-read. Reads the month BIL-03 read, so a run across a month end still finds the VM.
@@ -534,5 +554,20 @@ test.describe.serial('billing', () => {
     expect(line).toBeDefined()
     expect(line.vmName).toBe(`rg-billvm-${RUN}`)
     expect(line.totalCost).toBeGreaterThanOrEqual(vmCostAtBil03)
+  })
+
+  // titan-ops features/billing/metering/design.md#usage-retention (usage records go after 90 days; an invoice keeps its lines) ·
+  // titan-ops architecture/money-and-wallet.md#invoice-frozen-snapshot · OpenViCloud/titan-control-plane:Titan.Application/Queries/Billing/Invoice/Contracts/InvoiceDetailQueryResult.cs
+  // (Items, Total) — the count of core.usage_records older than the window is the agent's SQL read after the module, not this spec.
+  test('BIL-24 an invoice of a period that began more than 90 days ago still opens, with its lines summing to its total', async () => {
+    const cutoff = Date.now() - 90 * DAY_MS
+    const all = await get('tenant', '/v1/tenant/billing/invoices') as Invoice[]
+    const old = all.filter((i) => Date.UTC(i.periodYear, i.periodMonth - 1, 1) < cutoff)
+    log(`BIL-24 lane tenant invoices ${all.length}, of a period that began before ${new Date(cutoff).toISOString()}: ${old.length}`)
+    test.skip(old.length === 0, 'no invoice of a period that began more than 90 days ago on this tenant')
+    const invoice = await get('tenant', `/v1/tenant/billing/invoices/${old[0].id}`) as Invoice & { items: Array<{ amount: number }> }
+    log(`BIL-24 invoice ${invoice.id} ${invoice.periodYear}-${invoice.periodMonth} total=${invoice.total} items=${invoice.items.length}`)
+    expect(invoice.items.length).toBeGreaterThan(0)
+    expect(invoice.total).toBe(invoice.items.reduce((s, i) => s + i.amount, 0))
   })
 })
