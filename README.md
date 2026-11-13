@@ -78,6 +78,16 @@ Around the job, some modules need more:
   `concurrency`, run `billing/check-wallets.sql` (read only): every row it prints is a finding (BIL-14). `billing` waits for
   meter ticks: about 35 minutes where the meter ticks every 10 minutes (prd), longer than one command of an agent
   lasts: start it in the background and wait for `.done` as in step 3.
+- `billing`, BIL-25 and BIL-26 (the sequential run on dev; `lanes-dev-sequential.json`): its `module_env` gives
+  `billing` `REGRESSION_CP_ROLL_SECONDS=180`, three meter cycles of dev. When the spec logs `CP_ROLL_WAIT`, the script
+  touches `/work/bil-25/rolling`, runs `rollout restart` + `rollout status` of `deployment/control-plane` back to back for
+  that long, writes every Job of CronJob `control-plane-job-meter` it saw to `<log dir>/meter-jobs.log`, prints the
+  window (`BIL-25 roll window start/end` in `run.log`) and touches `/work/bil-25/rolled`; without the variable nobody
+  answers and the spec skips as N/A after 10 minutes. After the module, two external steps: `meter-buckets` runs
+  `billing/meter-buckets.sql` with the VM of the `BIL-25 vm` line and the window (every bucket reads `rows = 1`), and
+  `sweep-credit` runs `billing/sweep-credit.sql` (a write: a Credit of 1 on admin-test nobody announced), waits one
+  schedule of CronJob `control-plane-job-wallet-sweep` (2 minutes) and 30 s, then `billing/sweep-credit-check.sql` with
+  the ref it printed: `Applied`, the wallet one more than before, one `TopUp` line.
 - `cli`: build `openvicloud` for the node's architecture (`kubectl get nodes -o json` → `status.nodeInfo.architecture`)
   from the CLI commit the release pinned: in a clone of `OpenViCloud/titan-cli` at that commit,
   `GOOS=linux GOARCH=<arch> CGO_ENABLED=0 go build -o <out> ./cmd/openvicloud`, and pass `<out>` as `[binary]`. When

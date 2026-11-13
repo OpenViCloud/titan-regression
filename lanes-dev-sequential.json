@@ -7,6 +7,11 @@
   "per_lane": [],
   "exclusive": [],
   "same_lane": [],
+  "module_env": {
+    "billing": {
+      "REGRESSION_CP_ROLL_SECONDS": "180"
+    }
+  },
   "lanes": {
     "a": {
       "cronjob": "titan-regression",
@@ -49,6 +54,12 @@
         },
         {
           "module": "billing"
+        },
+        {
+          "external": "meter-buckets"
+        },
+        {
+          "external": "sweep-credit"
         },
         {
           "module": "concurrency"

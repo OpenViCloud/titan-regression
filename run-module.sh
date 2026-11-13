@@ -28,6 +28,8 @@
 # REGRESSION_WORKER_APPS (ADM-15 only): the ArgoCD Applications that would bring incus-worker back, root first; the runner
 # then stops and starts the worker when the spec asks (below). It is a write every tenant of the cluster feels: on prd an
 # approved L-x.
+# REGRESSION_CP_ROLL_SECONDS (BIL-25 only, set by lanes-dev-sequential.json): how long the runner rolls the control plane
+# when the spec asks (below).
 set -uo pipefail
 
 if [ "$#" -lt 6 ] || [ "$#" -gt 7 ]; then
@@ -151,6 +153,43 @@ start_worker() {
 }
 trap 'if [ "$worker" != up ]; then echo "worker still stopped at exit — putting it back"; start_worker; fi' EXIT
 
+# BIL-25 (billing) asks for the control plane rolled while its VM runs, by the log line CP_ROLL_WAIT. With
+# REGRESSION_CP_ROLL_SECONDS (only lanes-dev-sequential.json sets it: a roll while other modules run would turn them red)
+# the runner touches /work/bil-25/rolling, runs `rollout restart` + `rollout status` of deployment/control-plane back to back
+# until that many seconds passed (at least once), and touches /work/bil-25/rolled. Each Job of CronJob
+# control-plane-job-meter seen meanwhile goes to <log dir>/meter-jobs.log (the CronJob keeps one finished Job, so a read
+# after the module would miss them). Unset ⇒ nobody answers, and the spec skips as N/A after 10 minutes.
+cp_roll_seconds="${REGRESSION_CP_ROLL_SECONDS:-}"
+if [ -n "$cp_roll_seconds" ] && ! [[ "$cp_roll_seconds" =~ ^[0-9]+$ && "$cp_roll_seconds" -le 1800 ]]; then
+  echo "REGRESSION_CP_ROLL_SECONDS must be whole seconds, 0 to 1800: $cp_roll_seconds" >&2
+  exit 2
+fi
+meter_jobs() {
+  k -n "$app_ns" get jobs -o json | python3 -c '
+import json, sys
+for j in json.load(sys.stdin)["items"]:
+    if j["metadata"]["name"].startswith("control-plane-job-meter-"):
+        s = j.get("status", {})
+        done = [c["type"] for c in s.get("conditions", []) if c.get("status") == "True"]
+        print(j["metadata"]["name"], s.get("startTime", "-"), s.get("completionTime", "-"), ",".join(done) or "Running")'
+}
+roll_control_plane() {
+  local start end rolls=0 file="$logs_dir/meter-jobs.log"
+  echo "# kubectl get jobs -n $app_ns (control-plane-job-meter-*: name startTime completionTime conditions) after each roll (lane $lane) · $(k config view --minify -o 'jsonpath={.clusters[0].cluster.server}') · $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$file"
+  start="$(date -u +%s)"; end=$((start + cp_roll_seconds))
+  k -n "$ns" exec "$pod" -- sh -c 'mkdir -p /work/bil-25 && touch /work/bil-25/rolling' || return 1
+  echo "BIL-25 roll window start $(date -u -d "@$start" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$start" +%Y-%m-%dT%H:%M:%SZ)"
+  while true; do
+    k -n "$app_ns" rollout restart deployment/control-plane >/dev/null || return 1
+    k -n "$app_ns" rollout status deployment/control-plane --timeout=10m >/dev/null || return 1
+    rolls=$((rolls + 1))
+    meter_jobs >> "$file"
+    if [ "$(date -u +%s)" -ge "$end" ]; then break; fi
+  done
+  k -n "$ns" exec "$pod" -- touch /work/bil-25/rolled || return 1
+  echo "BIL-25 roll window end $(date -u +%Y-%m-%dT%H:%M:%SZ): $rolls roll(s) of deployment/control-plane; meter Jobs seen: $(awk '!/^#/{print $1}' "$file" | sort -u | wc -l | tr -d ' ')"
+}
+
 runner_dir="$(cd "$(dirname "$0")" && pwd)"
 runner_state="clean"
 if ! git -C "$runner_dir" diff --quiet HEAD -- "$runner_dir/run-module.sh"; then runner_state="dirty"; fi
@@ -180,7 +219,7 @@ echo "pod: $pod phase: $phase"
 if [ -z "$pod" ]; then echo "NO_POD after 10 minutes — job kept for a look"; exit 1; fi
 case "$phase" in Running|Failed|Succeeded) ;; *) echo "POD_NOT_STARTED phase=$phase after 10 minutes — job kept for a look"; exit 1 ;; esac
 
-copied=0; unreadable=0; answered=""
+copied=0; unreadable=0; answered=""; rolled=""
 while true; do
   # A failing kubectl prints nothing: an empty phase is a read that failed, not a pod that ended.
   phase="$(phase_of "$pod" 2>/dev/null)"
@@ -192,9 +231,16 @@ while true; do
   unreadable=0
   if [ "$phase" != "Running" ]; then echo "pod ended: $phase (no .done)"; break; fi
   if k -n "$ns" exec "$pod" -- test -f /work/results/.done 2>/dev/null; then break; fi
-  if { [ -n "$bin" ] && [ "$copied" = 0 ]; } || { [ -n "$worker_apps" ] && [ "$answered" != start ]; }; then
+  if { [ -n "$bin" ] && [ "$copied" = 0 ]; } || { [ -n "$worker_apps" ] && [ "$answered" != start ]; } \
+    || { [ -n "$cp_roll_seconds" ] && [ -z "$rolled" ]; }; then
     # Logs into a variable first: `kubectl logs | grep -q` under pipefail turns false when grep exits early.
     logs="$(k -n "$ns" logs "$pod" 2>/dev/null)"
+  fi
+  if [ -n "$cp_roll_seconds" ] && [ -z "$rolled" ] && grep -q CP_ROLL_WAIT <<< "$logs"; then
+    rolled=yes
+    if ! roll_control_plane; then
+      echo "CP_ROLL_FAILED — a rollout of deployment/control-plane did not finish, or a marker was not written; the spec gives up after 10 minutes, or 30 once rolling"
+    fi
   fi
   if [ -n "$worker_apps" ]; then
     if [ -z "$answered" ] && grep -q WORKER_STOP_WAIT <<< "$logs"; then

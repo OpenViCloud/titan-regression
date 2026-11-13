@@ -1,12 +1,13 @@
 import { test, expect } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
+import * as fs from 'node:fs'
 import { closeSessions, headersOf, useBrowser } from './auth'
 import { WALLET_APPLIED_WITHIN_MS, bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, sleep, startLog } from './api'
 import { meterTickMs } from './meter'
 import { RUN, createVm, deleteVmAndWait, envOf, runNetwork, runs, waitVm, waitVolume } from './fixtures'
 import { callWithToken } from './token'
 
-// Cases BIL-01..13, BIL-15, BIL-17 and BIL-19..24 of plan.md (BIL-24: its invoice part). Money moves only on admin-test's tenant, through
+// Cases BIL-01..13, BIL-15, BIL-17, BIL-19..25 of plan.md (BIL-24: its invoice part; BIL-25: the roll, its bucket count is the agent's SQL). Money moves only on admin-test's tenant, through
 // invoices seed-invoices.sql made before this job (the agent runs it); BIL-14 is check-wallets.sql, run after.
 // Usage (BIL-01..03, BIL-19) is metered on the lane's tenant (beta-user-2 in lane b): metering moves no money; the
 // lane's tenant only reads invoices (BIL-17) and is refused on admin-test's (BIL-20).
@@ -409,11 +410,14 @@ test.describe.serial('billing', () => {
     expect(await wallet()).toBe(before)
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Host/Program.cs (MapHealthChecks("/healthz/wallet"))
+  // OpenViCloud/titan-control-plane:Titan.Host/Program.cs (MapHealthChecks("/healthz/wallet"): the default writer, the status as text) ·
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Hosting/WalletMutationHealthCheck.cs (Evaluate: Healthy, else Unhealthy; no Degraded) ·
+  // titan-ops features/billing/wallet/design.md#healthz-wallet
   test('BIL-13 /healthz/wallet is Healthy', async () => {
     const reply = await call('anonymous', 'GET', '/healthz/wallet')
     log(`BIL-13 ${reply.status} ${reply.text.slice(0, 200)}`)
     expectStatus(reply, 200)
+    expect(reply.text.trim()).toBe('Healthy')
   })
 
   // Read only, on the lane's tenant. The CronJob control-plane-invoice-generation ("0 2 1 * *", Etc/UTC) bills the previous UTC month
@@ -570,4 +574,47 @@ test.describe.serial('billing', () => {
     expect(invoice.items.length).toBeGreaterThan(0)
     expect(invoice.total).toBe(invoice.items.reduce((s, i) => s + i.amount, 0))
   })
+
+  // titan-ops architecture/background-jobs.md#background-jobs (the meter is a CronJob calling any control plane pod, its ticks a row in
+  // Postgres) · titan-ops features/billing/metering/design.md#meter-liveness · OpenViCloud/titan-control-plane:Titan.Infrastructure/Hosting/MeterJob.cs
+  // (RunAsync). Only the sequential run on dev answers CP_ROLL_WAIT: run-module.sh rolls deployment/control-plane back to back for
+  // REGRESSION_CP_ROLL_SECONDS (three meter cycles), touching ROLLING at the start and ROLLED at the end, and logs the window and the meter
+  // Jobs it saw. Unanswered (no variable, or a lane run beside other modules) ⇒ N/A after 10 minutes. The bucket count of the VM's
+  // RUNNING_VM rows in the window is the agent's SQL read after the module, not this spec.
+  test('BIL-25 the control plane rolling for three meter cycles: the VM stays metered and /healthz/meters is 200 after the window', async () => {
+    const { smallTier } = await envOf()
+    const networkId = (await runNetwork()).id
+    const rollVmId = await createVm(`rg-rollvm-${RUN}`, smallTier, networkId)
+    try {
+      await waitVm('BIL-25 vm runs', rollVmId, runs)
+      log(`BIL-25 vm ${rollVmId} Running at ${new Date().toISOString()}`)
+      log(`CP_ROLL_WAIT roll deployment/control-plane back to back for three meter cycles, touch ${CP_ROLLING} at the start and ${CP_ROLLED} at the end`)
+      const started = await waitForFile([CP_ROLLING], 10 * 60_000)
+      test.skip(started === null, 'N/A — nobody answered CP_ROLL_WAIT within 10 minutes (only the sequential run on dev rolls the control plane)')
+      const ended = await waitForFile([CP_ROLLED], 30 * 60_000)
+      expect(ended, `${CP_ROLLED} after the roll window`).not.toBeNull()
+      log(`BIL-25 window over at ${new Date().toISOString()}`)
+      const meters = await call('anonymous', 'GET', '/healthz/meters')
+      log(`BIL-25 /healthz/meters ${meters.status} ${meters.text.slice(0, 300)}`)
+      expectStatus(meters, 200)
+    } finally {
+      await deleteVmAndWait(rollVmId)
+    }
+  })
 })
+
+const CP_ROLL_MARKERS = '/work/bil-25'
+const CP_ROLLING = `${CP_ROLL_MARKERS}/rolling`
+const CP_ROLLED = `${CP_ROLL_MARKERS}/rolled`
+
+async function waitForFile(paths: string[], timeoutMs: number): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const found = paths.find((p) => fs.existsSync(p))
+    if (found !== undefined) {
+      return found
+    }
+    await sleep(5_000)
+  }
+  return null
+}

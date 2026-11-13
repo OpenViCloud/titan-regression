@@ -365,7 +365,7 @@ class EvidenceDirTest(unittest.TestCase):
 class ClusterRunnerTest(unittest.TestCase):
     """What the job script is told: the CronJob of the lane and the lane's name (its evidence logs carry it)."""
 
-    def call(self, lane, cronjob):
+    def call(self, lane, cronjob, module="billing", module_env=None):
         seen = {}
 
         def fake_run(command, **kw):
@@ -373,11 +373,11 @@ class ClusterRunnerTest(unittest.TestCase):
             return type("Done", (), {"returncode": 0})()
 
         with tempfile.TemporaryDirectory() as tmp:
-            runner = run_lanes.ClusterRunner("kc", "src", tmp, tmp, "r1", {}, set())
+            runner = run_lanes.ClusterRunner("kc", "src", tmp, tmp, "r1", {}, set(), module_env)
             original = run_lanes.subprocess.run
             run_lanes.subprocess.run = fake_run
             try:
-                runner(lane, cronjob, "billing", "")
+                runner(lane, cronjob, module, "")
             finally:
                 run_lanes.subprocess.run = original
         return seen["env"]
@@ -386,6 +386,32 @@ class ClusterRunnerTest(unittest.TestCase):
         env = self.call("b", "titan-regression-b")
         self.assertEqual(env["REGRESSION_CRONJOB"], "titan-regression-b")
         self.assertEqual(env["REGRESSION_LANE"], "b")
+
+    def test_the_plans_module_env_reaches_that_module_only(self):
+        module_env = {"billing": {"REGRESSION_CP_ROLL_SECONDS": "180"}}
+        self.assertEqual(self.call("a", "titan-regression", "billing", module_env)["REGRESSION_CP_ROLL_SECONDS"], "180")
+        self.assertNotIn("REGRESSION_CP_ROLL_SECONDS", self.call("a", "titan-regression", "vm", module_env))
+
+
+class ModuleEnvTest(unittest.TestCase):
+    """Who rolls the control plane for BIL-25: the variable run-module.sh reads lives in one plan only."""
+
+    def plan(self, module_env):
+        return {"lanes": {"a": {"cronjob": "titan-regression", "steps": [{"module": "billing"}]}}, "module_env": module_env}
+
+    def test_a_variable_that_is_not_regression_star_is_refused(self):
+        with self.assertRaises(run_lanes.PlanError):
+            run_lanes.load_plan(self.plan({"billing": {"PATH": "/tmp"}}))
+
+    def test_a_value_that_is_not_a_string_is_refused(self):
+        with self.assertRaises(run_lanes.PlanError):
+            run_lanes.load_plan(self.plan({"billing": {"REGRESSION_CP_ROLL_SECONDS": 180}}))
+
+    def test_only_the_sequential_dev_plan_rolls_the_control_plane_and_only_in_billing(self):
+        for name in ("lanes.json", "lanes-dev.json", "lanes-dev-sequential.json"):
+            plan = run_lanes.load_plan(json.loads((HERE / name).read_text()))
+            rolling = {m for m, v in plan.module_env.items() if "REGRESSION_CP_ROLL_SECONDS" in v}
+            self.assertEqual(rolling, {"billing"} if name == "lanes-dev-sequential.json" else set(), name)
 
 
 class JobScriptTest(unittest.TestCase):

@@ -8,7 +8,8 @@ lanes.json says which lane runs which module and where lanes wait for each other
   {"wait": "billing-done"}    waits for that signal
   {"external": "seed"}        work the agent does outside the runner; the lane waits for <external dir>/seed.done
 A module step may carry "always" (runs although the lane failed: cleanup), "label" (names a second run of a module)
-and "only_if_failed": "<module>" (runs only when that module of the lane was red).
+and "only_if_failed": "<module>" (runs only when that module of the lane was red). "module_env" maps a module to the
+REGRESSION_* variables its run-module.sh gets in this plan only (lanes-dev-sequential.json: the control plane roll of BIL-25).
 
 A red module skips the rest of its lane except "always" steps and signals. A red module listed in "abort_on" (smoke)
 stops every lane. "exclusive" lists groups of modules that must never overlap in time (same wallet, same shared list):
@@ -66,6 +67,12 @@ class Plan:
         self.per_lane = set(body.get("per_lane", []))
         self.exclusive = [list(g) for g in body.get("exclusive", [])]
         self.same_lane = [list(g) for g in body.get("same_lane", [])]
+        self.module_env = {}
+        for module, variables in body.get("module_env", {}).items():
+            for name, value in variables.items():
+                if not name.startswith("REGRESSION_") or not isinstance(value, str):
+                    raise PlanError(f"module_env of {module}: {name!r} must be a REGRESSION_* variable with a string value")
+            self.module_env[module] = dict(variables)
         self.cronjob = {}
         self.lanes = {}
         for name, lane in body["lanes"].items():
@@ -284,11 +291,13 @@ def log_dir(logs, lane, module, label, per_lane):
 
 
 class ClusterRunner:
-    """One module = `bash run-module.sh …` with REGRESSION_CRONJOB naming the lane's CronJob and REGRESSION_LANE its name."""
+    """One module = `bash run-module.sh …` with REGRESSION_CRONJOB naming the lane's CronJob and REGRESSION_LANE its name,
+    plus the plan's module_env of that module."""
 
-    def __init__(self, kubeconfig, src, out, logs, label, binaries, per_lane):
+    def __init__(self, kubeconfig, src, out, logs, label, binaries, per_lane, module_env=None):
         self.kubeconfig, self.src, self.out, self.logs = kubeconfig, src, pathlib.Path(out), pathlib.Path(logs)
         self.label, self.binaries, self.per_lane = label, binaries, per_lane
+        self.module_env = module_env or {}
 
     def __call__(self, lane, cronjob, module, label):
         suffix = f"-{label}" if label else ""
@@ -303,7 +312,8 @@ class ClusterRunner:
         print(f"[{lane}] {module}{suffix} start {started} UTC", flush=True)
         with open(work / "run.log", "w") as log:
             code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
-                                  env={**os.environ, "REGRESSION_CRONJOB": cronjob, "REGRESSION_LANE": lane}).returncode
+                                  env={**os.environ, **self.module_env.get(module, {}),
+                                       "REGRESSION_CRONJOB": cronjob, "REGRESSION_LANE": lane}).returncode
         print(f"[{lane}] {module}{suffix} exit {code} end {time.strftime('%H:%M:%S', time.gmtime())} UTC", flush=True)
         return code
 
@@ -343,7 +353,8 @@ def main(argv):
     external = pathlib.Path(args.external_dir or pathlib.Path(args.out) / "external")
     external.mkdir(parents=True, exist_ok=True)
     binaries = dict(item.split("=", 1) for item in args.binary)
-    runner = ClusterRunner(args.kubeconfig, args.src, args.out, args.logs, args.label, binaries, plan.per_lane)
+    runner = ClusterRunner(args.kubeconfig, args.src, args.out, args.logs, args.label, binaries, plan.per_lane,
+                           plan.module_env)
     result = execute(plan, runner, external, max_pods=args.max_pods,
                      external_timeout=args.external_timeout_minutes * 60)
     for key, code in sorted(result.codes.items()):
