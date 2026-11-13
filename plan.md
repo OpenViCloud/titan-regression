@@ -225,7 +225,7 @@ Network của lượt không bật IPv6 ⇒ LB-03..07, LB-09..11, LB-13..15 và 
 
 ## activity (không phải module runner — đo trong module sở hữu tài nguyên)
 
-Feed chỉ trả 50 dòng mới nhất và không mang id tài nguyên (`titan-ops features/activity/design.md#activity-data-and-route`), nên mỗi module đếm dòng theo tên tài nguyên của chính nó, ngay sau thao tác.
+Feed chỉ trả 50 dòng mới nhất và không mang id tài nguyên (`titan-ops features/activity/design.md#activity-data-and-route`), nên mỗi module đếm dòng theo tên tài nguyên của chính nó, ngay sau thao tác. Tên không mang `<lượt>` (rule firewall mang tên là nhãn chứa CIDR, cùng một CIDR mỗi lượt: FW-01, FW-03, NETL-02) ⇒ chỉ đếm dòng xuất hiện sau ảnh id của feed chụp trước thao tác đầu tiên trên tài nguyên đó (`lib/fixtures.ts` `activitySince`): dòng của lượt trước có thể còn trong 50 dòng.
 
 | ID | Khi | Kỳ vọng | Nguồn |
 |---|---|---|---|

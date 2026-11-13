@@ -152,6 +152,20 @@ export async function activityOf(resourceName: string): Promise<string[]> {
   return rows.filter((r) => r.resourceName === resourceName).map((r) => r.action)
 }
 
+// The ids of the feed's 50 newest rows now. A module whose resource has the same name in every run (a firewall rule is named
+// by a label holding its CIDR) counts with activitySince: rows of an earlier run may still sit in the window, and the feed returns no
+// resource id (OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/ActivityEvent/Contracts/ActivityEventQueryResult.cs).
+export async function activityIds(): Promise<Set<string>> {
+  const rows = await get('tenant', '/v1/tenant/activity?limit=50') as Array<{ id: string }>
+  return new Set(rows.map((r) => r.id))
+}
+
+// The actions of the rows that appeared since `before` and whose resource name holds `nameHolds`, newest first.
+export async function activitySince(before: Set<string>, nameHolds: string): Promise<string[]> {
+  const rows = await get('tenant', '/v1/tenant/activity?limit=50') as Array<{ id: string, action: string, resourceName: string }>
+  return rows.filter((r) => !before.has(r.id) && r.resourceName.includes(nameHolds)).map((r) => r.action)
+}
+
 export function countOf(actions: string[], action: string): number {
   return actions.filter((a) => a === action).length
 }
