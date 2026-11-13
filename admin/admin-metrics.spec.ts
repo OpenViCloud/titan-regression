@@ -72,7 +72,7 @@ test.describe.serial('admin-metrics', () => {
 
     const link = page.getByRole('link', { name: /Metrics/ })
     await expect(link).toHaveCount(1)
-    await page.screenshot({ path: `${RESULTS}/ADM-18-metrics-link.png`, fullPage: true })
+    await page.screenshot({ path: `${RESULTS}/ADM-18-metrics-link.png` })
     const href = await link.getAttribute('href')
     const target = await link.getAttribute('target')
     const rel = await link.getAttribute('rel')

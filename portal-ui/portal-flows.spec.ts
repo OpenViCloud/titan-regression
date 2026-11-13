@@ -586,7 +586,7 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
       for (const vm of previous.perVm) {
         await expect(main.getByRole('row', { name: new RegExp(vm.vmName) })).toContainText(money(vm.totalCost))
       }
-      await page.screenshot({ path: `${RESULTS}/UI-34-previous-${view.lang}.png`, fullPage: true })
+      await page.screenshot({ path: `${RESULTS}/UI-34-previous-${view.lang}.png` })
 
       for (let k = 2; k <= clicks!; k++) {
         await back.click()
@@ -598,7 +598,7 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
       await expect(main.getByRole('table')).toHaveCount(0)
       expect(await main.textContent(), 'no ₫ on the expired month').not.toContain('₫')
       await expect(back).toBeDisabled()
-      await page.screenshot({ path: `${RESULTS}/UI-34-expired-${view.lang}.png`, fullPage: true })
+      await page.screenshot({ path: `${RESULTS}/UI-34-expired-${view.lang}.png` })
       log(`UI-34 ${view.lang}: previous month ${money(previous.totalCost)}, month ${monthOf(clicks!).key} shows the 90-day sentence`)
     }
     // The cases of this group compare English formatting; leave it English for any case added after this one.
