@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { closeSessions, headersOf, useBrowser } from './auth'
-import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, sleep, startLog } from './api'
+import { WALLET_APPLIED_WITHIN_MS, bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, sleep, startLog } from './api'
 import { meterTickMs } from './meter'
 import { RUN, createVm, deleteVmAndWait, envOf, runNetwork, runs, waitVm, waitVolume } from './fixtures'
 import { callWithToken } from './token'
@@ -72,7 +72,7 @@ test.describe.serial('billing', () => {
   }
 
   async function waitWallet(label: string, expected: number): Promise<void> {
-    await pollUntil(label, () => wallet(), (b) => b === expected, (b) => `balance=${b}`, 2 * 60_000, 3_000)
+    await pollUntil(label, () => wallet(), (b) => b === expected, (b) => `balance=${b}`, WALLET_APPLIED_WITHIN_MS, 3_000)
   }
 
   test.beforeAll(async ({ browser }) => {
@@ -226,7 +226,7 @@ test.describe.serial('billing', () => {
     const reply = await call('admin', 'POST', `/v1/tenant/billing/invoices/${invoices[1111]}/pay`)
     expectStatus(reply, 202)
     expect(reply.text).toBe('')
-    const settled = await pollUntil('BIL-04', () => readInvoice(1111), (i) => i.status === 'Settled', invoiceShape, 2 * 60_000, 3_000)
+    const settled = await pollUntil('BIL-04', () => readInvoice(1111), (i) => i.status === 'Settled', invoiceShape, WALLET_APPLIED_WITHIN_MS, 3_000)
     expect(settled.paymentState).toBe('Settled')
     await waitWallet('BIL-04 wallet', before - 1111)
     const statement = await get('admin', '/v1/tenant/wallet/statement')
@@ -285,7 +285,7 @@ test.describe.serial('billing', () => {
     const reply = await call('admin', 'POST', `/v1/admin/invoices/${invoices[2222]}/settle-from-wallet`)
     expectStatus(reply, 202)
     expect(reply.text).toBe('')
-    await pollUntil('BIL-07', () => readInvoice(2222), (i) => i.status === 'Settled', invoiceShape, 2 * 60_000, 3_000)
+    await pollUntil('BIL-07', () => readInvoice(2222), (i) => i.status === 'Settled', invoiceShape, WALLET_APPLIED_WITHIN_MS, 3_000)
     await waitWallet('BIL-07 wallet', before - 2222)
   })
 

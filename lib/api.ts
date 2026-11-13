@@ -96,6 +96,11 @@ export async function get(as: As, path: string): Promise<any> {
 // plus the provider work itself.
 export const OBSERVED_WITHIN_MS = 6 * 60_000
 
+// A wallet command whose NATS notify was lost waits for the sweeper's CronJob: StaleAfterSeconds (10) + one 2-minute
+// schedule, about 130 s, past a 2-minute wait (titan-ops features/billing/wallet/design.md#wallet-sweeper). Five minutes
+// covers one missed schedule; the fast path takes seconds.
+export const WALLET_APPLIED_WITHIN_MS = 5 * 60_000
+
 export async function pollUntil<T>(label: string, read: () => Promise<T>, done: (value: T) => boolean,
   shape: (value: T) => string, timeoutMs: number = OBSERVED_WITHIN_MS, everyMs: number = 5_000): Promise<T> {
   const started = Date.now()
