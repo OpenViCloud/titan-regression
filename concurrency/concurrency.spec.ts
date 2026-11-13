@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { closeSessions, useBrowser } from './auth'
-import { type Reply, bodyOf, call, get, log, newKey, pollUntil, sleep, startLog } from './api'
+import { type Reply, WALLET_APPLIED_WITHIN_MS, bodyOf, call, get, log, newKey, pollUntil, sleep, startLog } from './api'
 import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, runNetwork, waitVm, waitVolume } from './fixtures'
 
 // Cases CC-01..04 of plan.md: two identical requests at the same moment (CC-05..12: concurrency-requests.spec.ts). CC-03
@@ -110,7 +110,7 @@ test.describe.serial('concurrency', () => {
       expect(['202', '409 INVOICE_PAYMENT_CONFLICT']).toContain(statusOf(reply))
     }
     await pollUntil('CC-03 settled', () => get('admin', `/v1/tenant/billing/invoices/${invoiceId}`),
-      (i) => i.status === 'Settled', (i) => `status=${i.status} paymentState=${i.paymentState}`, 2 * 60_000, 3_000)
+      (i) => i.status === 'Settled', (i) => `status=${i.status} paymentState=${i.paymentState}`, WALLET_APPLIED_WITHIN_MS, 3_000)
     await sleep(10_000)
     const after = (await get('admin', '/v1/tenant/wallet')).balance as number
     log(`CC-03 wallet ${before} → ${after}`)
