@@ -1,66 +1,15 @@
 import { test, expect } from '@playwright/test'
-import { randomBytes, randomUUID } from 'node:crypto'
-import * as http from 'node:http'
-import * as https from 'node:https'
-import type { Socket } from 'node:net'
-import { closeSessions, headersOf, useBrowser } from './auth'
-import { API, bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, sleep, startLog } from './api'
-import { startLocalProxyIfNeeded } from './local-proxy'
+import { randomUUID } from 'node:crypto'
+import { closeSessions, useBrowser } from './auth'
+import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, startLog } from './api'
 import { cleanUp } from './clean-up'
+import { fiveSessionsThenRefused } from './ssh'
 import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, getVm, runNetwork, runs, waitVm } from './fixtures'
 
 // Cases VM-01..19, VM-21, VM-22, VM-26, VM-27, VM-29, VM-31..33 and SSH-08 of plan.md, plus ACT-01/ACT-03/ACT-04 for VMs. VM-14 is
 // NOT COVERED, VM-20 and VM-28 read the Incus host. Create checks run in this order
 // (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync): quota (TenantQuotaGate), cluster,
 // name, network, offering, template — so the error cases run below the quota.
-// A websocket upgrade over HTTP/1.1, as the CLI sends it (fetch cannot send Upgrade). An accepted one (101) hands back
-// its socket, kept open until the caller destroys it; a refused one answers the usual JSON error.
-type Upgrade = { status: number, code: string, socket: Socket | null }
-
-async function upgrade(path: string): Promise<Upgrade> {
-  await startLocalProxyIfNeeded(API)
-  const headers = await headersOf('tenant')
-  const url = new URL(`${API}${path}`)
-  const client = url.protocol === 'https:' ? https : http
-  return new Promise((resolve, reject) => {
-    const request = client.request(url, {
-      method: 'GET',
-      headers: {
-        ...headers,
-        Connection: 'Upgrade',
-        Upgrade: 'websocket',
-        'Sec-WebSocket-Version': '13',
-        'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
-      },
-    })
-    request.on('upgrade', (res, socket) => {
-      // The request's 30 s timeout must not end a session held open on purpose.
-      socket.setTimeout(0)
-      socket.removeAllListeners('timeout')
-      socket.on('data', () => {})
-      socket.on('error', () => {})
-      resolve({ status: res.statusCode ?? 0, code: '', socket: socket as Socket })
-    })
-    request.on('response', (res) => {
-      let text = ''
-      res.setEncoding('utf8')
-      res.on('data', (chunk) => { text += chunk })
-      res.on('end', () => {
-        let code = ''
-        try {
-          code = JSON.parse(text).code ?? ''
-        } catch {
-          code = `(not JSON: ${text.slice(0, 120)})`
-        }
-        resolve({ status: res.statusCode ?? 0, code, socket: null })
-      })
-    })
-    request.on('error', reject)
-    request.setTimeout(30_000, () => request.destroy(new Error('upgrade timed out')))
-    request.end()
-  })
-}
-
 test.describe.serial('vm', () => {
   test.describe.configure({ timeout: 15 * 60_000 })
 
@@ -260,59 +209,10 @@ test.describe.serial('vm', () => {
     expect(vm.publicIpv6Address).toBeNull()
   })
 
-  // titan-ops features/vm/design.md#ssh-session · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/OpenVmSshEndpoint.cs
-  // HandleAsync (limiter.TryAcquireAsync before request.HandleAsync: a refusal records no vm.ssh_requested) ·
-  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Sessions/ShellSessionLimiter.cs MaxSessionsPerTenant (5, one row each in
-  // core.shell_sessions, so every control plane replica counts the same) · the guest's sshd ends an unauthenticated session after its
-  // LoginGraceTime (120 s by default), so the sixth is opened while the five are surely still held.
+  // The body is lib/ssh.ts fiveSessionsThenRefused, shared with vm/ssh-sessions/ssh-sessions.spec.ts.
   test('SSH-08 five SSH sessions open (101), the sixth is 422 VM_SESSION_LIMIT_REACHED; one opens again after they close', async () => {
-    test.setTimeout(10 * 60_000)
-    const path = `/v1/tenant/vms/${vmA}/ssh`
-    // The guest agent may still be starting: probe until one upgrade is accepted, then let it end before counting.
-    const started = Date.now()
-    let probe = await upgrade(path)
-    while (probe.status !== 101) {
-      log(`SSH-08 probe → ${probe.status} ${probe.code}`)
-      expect(Date.now() - started, 'the guest agent answers within 5 minutes').toBeLessThan(5 * 60_000)
-      await sleep(10_000)
-      probe = await upgrade(path)
-    }
-    probe.socket!.destroy()
-    await sleep(15_000)
-
-    const before = countOf(await activityOf(nameA), 'vm.ssh_requested')
-    const held: Socket[] = []
-    try {
-      const firstOpened = Date.now()
-      for (let i = 1; i <= 5; i++) {
-        const reply = await upgrade(path)
-        log(`SSH-08 session ${i} → ${reply.status} ${reply.code}`)
-        if (reply.socket !== null) {
-          held.push(reply.socket)
-        }
-        expect(reply.status, `session ${i}`).toBe(101)
-      }
-      const sixth = await upgrade(path)
-      log(`SSH-08 session 6 → ${sixth.status} ${sixth.code} (+${Math.round((Date.now() - firstOpened) / 1000)}s)`)
-      if (sixth.socket !== null) {
-        held.push(sixth.socket)
-      }
-      expect(Date.now() - firstOpened, 'the sixth is opened within 2 minutes of the first').toBeLessThan(2 * 60_000)
-      // Not part of the expectation; tells a 101 sixth caused by a session the server already ended from a limiter fault.
-      log(`SSH-08 sessions still open on the client side: ${held.filter((s) => !s.destroyed).length}`)
-      expect(sixth.status).toBe(422)
-      expect(sixth.code).toBe('VM_SESSION_LIMIT_REACHED')
-      expect(countOf(await activityOf(nameA), 'vm.ssh_requested') - before).toBe(5)
-    } finally {
-      for (const socket of held) {
-        socket.destroy()
-      }
-    }
-    await sleep(15_000)
-    const again = await upgrade(path)
-    log(`SSH-08 after closing → ${again.status} ${again.code}`)
-    again.socket?.destroy()
-    expect(again.status).toBe(101)
+    test.setTimeout(15 * 60_000)
+    await fiveSessionsThenRefused(vmA, nameA)
   })
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Stop.cs Stop · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/StopVmEndpoint.cs HandleAsync

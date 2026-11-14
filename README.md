@@ -197,7 +197,14 @@ Steps outside the runner: before `billing` the agent runs `billing/seed-invoices
 database; on the release environment an approved `L-x`), after `concurrency` it runs `billing/check-wallets.sql` (read only, BIL-14);
 modules `cli` and `terraform-provider` need the agent to copy a binary into the pod when the spec logs `BINARY_WAIT`
 (`cli`: the CLI built for the node's architecture; `terraform-provider`: `GOOS=linux GOARCH=<node> CGO_ENABLED=0 go test -c`
-of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud`); `admin/stuck-requests` (ADM-15) needs the
+of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud`; job `cli/edge` the same as `cli`);
+`cli/edge` (CLI-06..11 through the edge of the release environment, the CLI on an API token) logs `HOLD cli10 {…}` and
+waits for the agent: it copies `/work/cli-10/token` and `/work/cli-10/key` out of the pod into files only it can read,
+runs `vm ssh <vmName> -- … 'sleep 330; echo alive'` on its own machine with `OPENVICLOUD_TOKEN` read from that file
+(never on the command line), deletes both files, then touches `/work/results/go-cli10` (or `skip-cli10`: N/A); the
+agent's log of that command is CLI-10's verdict; `cli/edge` and `vm/ssh-sessions` (SSH-08) count beta-user's SSH
+sessions, so on the release environment they run in the sequential run, one at a time, beside no module that opens
+one; `admin/stuck-requests` (ADM-15) needs the
 `incus-worker` stopped and started when the spec logs `WORKER_STOP_WAIT` and `WORKER_START_WAIT` (and `incus-worker-inventory`,
 where the worker runs one, since it reports the reconciler polls): `run-module.sh` does it
 when `REGRESSION_WORKER_APPS` lists the ArgoCD Applications that would bring the worker back, root first (dev
