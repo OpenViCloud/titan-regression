@@ -16,7 +16,7 @@ export const GUEST_START_WAIT_MS = 10 * 60_000
 
 // A websocket upgrade over HTTP/1.1, as the CLI sends it (fetch cannot send Upgrade). An accepted one (101) hands back
 // its socket, kept open until the caller destroys it; a refused one answers the usual JSON error.
-export type Upgrade = { status: number, code: string, socket: Socket | null }
+export type Upgrade = { status: number, code: string, socket: Socket | null, firstByte: Promise<void> }
 
 export async function upgrade(path: string): Promise<Upgrade> {
   await startLocalProxyIfNeeded(API)
@@ -34,13 +34,18 @@ export async function upgrade(path: string): Promise<Upgrade> {
         'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
       },
     })
-    request.on('upgrade', (res, socket) => {
+    request.on('upgrade', (res, socket, head) => {
       // The request's 30 s timeout must not end a session held open on purpose.
       socket.setTimeout(0)
       socket.removeAllListeners('timeout')
-      socket.on('data', () => {})
+      let gotByte = (): void => {}
+      const firstByte = new Promise<void>((done) => { gotByte = done })
+      if (head.length > 0) {
+        gotByte()
+      }
+      socket.on('data', () => gotByte())
       socket.on('error', () => {})
-      resolve({ status: res.statusCode ?? 0, code: '', socket: socket as Socket })
+      resolve({ status: res.statusCode ?? 0, code: '', socket: socket as Socket, firstByte })
     })
     request.on('response', (res) => {
       let text = ''
@@ -53,7 +58,7 @@ export async function upgrade(path: string): Promise<Upgrade> {
         } catch {
           code = `(not JSON: ${text.slice(0, 120)})`
         }
-        resolve({ status: res.statusCode ?? 0, code, socket: null })
+        resolve({ status: res.statusCode ?? 0, code, socket: null, firstByte: new Promise<void>(() => {}) })
       })
     })
     request.on('error', reject)
@@ -72,18 +77,29 @@ export async function upgrade(path: string): Promise<Upgrade> {
 // still held.
 export async function fiveSessionsThenRefused(vmId: string, vmName: string): Promise<void> {
   const path = `/v1/tenant/vms/${vmId}/ssh`
-  // The guest may still be starting (422 VM_AGENT_NOT_READY, then 422 VM_SSH_NOT_READY until its sshd listens): probe
-  // until one upgrade is accepted, then let it end before counting.
+  // The guest may still be starting (422 VM_AGENT_NOT_READY, then 422 VM_SSH_NOT_READY until its sshd listens). Right
+  // after sshd first listens it can still hold its banner past the control plane's 5 s wait and drop connections
+  // (measured on dev 2026-11-14 on a VM just made: two of six sessions ended with no byte, which freed a place and let
+  // the sixth open). So counting starts only after three probes in a row got the banner within 2 s of their 101.
   const started = Date.now()
-  let probe = await upgrade(path)
-  while (probe.status !== 101) {
-    log(`SSH-08 probe → ${probe.status} ${probe.code}`)
-    expect(['VM_AGENT_NOT_READY', 'VM_SSH_NOT_READY'], `probe ${probe.status} ${probe.code}`).toContain(probe.code)
+  let quickInARow = 0
+  while (quickInARow < 3) {
+    const probe = await upgrade(path)
+    if (probe.status === 101) {
+      const quick = await Promise.race([probe.firstByte.then(() => true), sleep(2_000).then(() => false)])
+      probe.socket!.destroy()
+      log(`SSH-08 probe → 101, banner ${quick ? 'within 2 s' : 'not within 2 s'}`)
+      quickInARow = quick ? quickInARow + 1 : 0
+    } else {
+      log(`SSH-08 probe → ${probe.status} ${probe.code}`)
+      expect(['VM_AGENT_NOT_READY', 'VM_SSH_NOT_READY'], `probe ${probe.status} ${probe.code}`).toContain(probe.code)
+      quickInARow = 0
+    }
     expect(Date.now() - started, 'the guest agent and sshd answer within GUEST_START_WAIT_MS').toBeLessThan(GUEST_START_WAIT_MS)
-    await sleep(10_000)
-    probe = await upgrade(path)
+    if (quickInARow < 3) {
+      await sleep(10_000)
+    }
   }
-  probe.socket!.destroy()
   await sleep(15_000)
 
   const before = countOf(await activityOf(vmName), 'vm.ssh_requested')
