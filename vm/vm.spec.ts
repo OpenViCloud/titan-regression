@@ -209,12 +209,6 @@ test.describe.serial('vm', () => {
     expect(vm.publicIpv6Address).toBeNull()
   })
 
-  // The body is lib/ssh.ts fiveSessionsThenRefused, shared with vm/ssh-sessions/ssh-sessions.spec.ts.
-  test('SSH-08 five SSH sessions open (101), the sixth is 422 VM_SESSION_LIMIT_REACHED; one opens again after they close', async () => {
-    test.setTimeout(15 * 60_000)
-    await fiveSessionsThenRefused(vmA, nameA)
-  })
-
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Stop.cs Stop · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/StopVmEndpoint.cs HandleAsync
   test('VM-03 stop from Running is 202, then Stopped', async () => {
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/stop`), 202)
@@ -339,6 +333,19 @@ test.describe.serial('vm', () => {
     await waitVm('VM-17 stopped', vmB, (v) => v.status === 'Stopped')
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/vms/${vmB}`), 202)
     await waitVm('VM-17', vmB, (v) => v.status === 'Deleted')
+  })
+
+  // The body is lib/ssh.ts fiveSessionsThenRefused, shared with vm/ssh-sessions/ssh-sessions.spec.ts. Runs once vmB is gone
+  // (VM-17), with vmA the only VM of the module running: two VMs booting together on dev's Incus host left a guest's sshd
+  // coming and going, once in emergency mode (dev 2026-11-14). VM-07 left vmA stopped: this case starts it and stops it
+  // again, as the cases after it expect.
+  test('SSH-08 five SSH sessions open (101), the sixth is 422 VM_SESSION_LIMIT_REACHED; one opens again after they close', async () => {
+    test.setTimeout(25 * 60_000)
+    expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/start`), 202)
+    await waitVm('SSH-08 vmA running', vmA, (v) => runs(v))
+    await fiveSessionsThenRefused(vmA, renamed)
+    expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmA}/stop`), 202)
+    await waitVm('SSH-08 vmA stopped again', vmA, (v) => v.status === 'Stopped')
   })
 
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs OccupiesQuota (VmRepository.CountActiveByTenantAsync writes the same condition in SQL) — counted: every status but Deleting, Deleted, NotFound and Failed
