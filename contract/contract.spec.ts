@@ -6,8 +6,9 @@ import * as tls from 'node:tls'
 import { ADMIN, PORTAL, closeSessions, headersOf, useBrowser } from './auth'
 import { API, bodyOf, call, expectError, expectStatus, get, log, startLog } from './api'
 import { startLocalProxyIfNeeded } from './local-proxy'
+import { portalConfigOf } from './portal-config'
 
-// Cases CON-03..09, CON-12 and CON-14 of plan.md. CON-01 (PUT/PATCH answer 204 with no body) and CON-02 (async POST
+// Cases CON-03..09, CON-12, CON-14 and CON-16 of plan.md. CON-01 (PUT/PATCH answer 204 with no body) and CON-02 (async POST
 // actions answer 202 with no body) are asserted where each route runs: NET-06, VM-08, TEN-02, TEN-04, BIL-08 and
 // BIL-04, BIL-07, BIL-10, CAT-06.
 
@@ -208,6 +209,26 @@ test.describe.serial('contract', () => {
     expect(reply.status).toBe(404)
     expect(reply.contentType).toContain('application/json')
     expect(JSON.parse(reply.text).code).toBe('VM_NOT_FOUND')
+  })
+
+  // titan-ops architecture/operator-metrics.md#vmui-access — the metrics host answers nothing of VictoriaMetrics without a
+  // Cloudflare Access identity. The host is the admin portal's metricsUrl (ADM-18 reads the same field), redirects are
+  // not followed: the first answer is the edge's.
+  test('CON-16 the metrics host sends a caller without an Access identity to the Access login or a 403, for the UI and the import route', async () => {
+    const metricsUrl = (await portalConfigOf(ADMIN)).metricsUrl
+    test.skip(typeof metricsUrl !== 'string' || !metricsUrl.startsWith('https:'), 'N/A: this env has no metrics host behind Access (dev)')
+    const origin = new URL(metricsUrl as string).origin
+    for (const [method, path] of [['GET', '/vmui/'], ['POST', '/prometheus/api/v1/import']]) {
+      const reply = await fetch(origin + path, { method, redirect: 'manual', body: method === 'POST' ? '' : undefined })
+      const location = reply.headers.get('location') ?? ''
+      log(`CON-16 ${method} ${origin}${path} → ${reply.status} location=${location.split('?')[0]}`)
+      expect([200, 204], `${method} ${path} answered by VictoriaMetrics`).not.toContain(reply.status)
+      if (reply.status === 403) {
+        continue
+      }
+      expect([301, 302, 303, 307, 308], `${method} ${path} status`).toContain(reply.status)
+      expect(new URL(location).hostname, `${method} ${path} redirect host`).toMatch(/\.cloudflareaccess\.com$/)
+    }
   })
 
   test('CON-09 TLS certificates are valid for the api, portal and admin names, with more than 14 days left', async () => {

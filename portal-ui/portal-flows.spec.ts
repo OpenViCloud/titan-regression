@@ -4,8 +4,8 @@ import { RESULTS, bodyOf, call, expectStatus, get, log, pollUntil, startLog } fr
 import { activityOf, countOf, envOf, nameOf, runNetwork, runs, waitVm, waitVolume } from './fixtures'
 import { topUpEnabledOf } from './portal-config'
 
-// Cases UI-01..08 of plan.md: dashboard gate, VM create/snapshot/volume/stop-start-delete, billing,
-// wallet, buy-credit and the static account pages. Two independent describe.serial groups so a slow VM boot
+// Cases UI-01..08 and UI-34 of plan.md: dashboard gate, VM create/snapshot/volume/stop-start-delete, billing,
+// wallet, buy-credit, the static account pages and the billing page's past months. Two independent describe.serial groups so a slow VM boot
 // (group A) cannot erase the billing/wallet/account coverage (group B), which needs no VM. UI-07 is N/A where the
 // portal config has no topUpEnabled: true.
 
@@ -55,6 +55,25 @@ function currentMonth(): string {
 // Mirrors OpenViCloud/titan-cloud-console:portal/src/lib/money.ts formatMoney for 'en' + 'VND': Math.round(amount).toLocaleString('en-US') + ' ₫'.
 function moneyEn(amount: number): string {
   return `${Math.round(amount).toLocaleString('en-US')} ₫`
+}
+
+// The month's cost shown on a page against the API's, read before and after the page: metering can tick a VM's usage up
+// between the two reads (titan-ops features/billing/metering/design.md#meter-liveness), so either value is accepted, and a
+// tick that falls between the two reads and the page (a third value) shows the page again, up to three times.
+async function costShownMatches(label: string, read: () => Promise<number>, show: () => Promise<string | null>): Promise<string | null> {
+  let last = ''
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const before = await read()
+    const shown = await show()
+    const after = await read()
+    const expectedOneOf = [moneyEn(before), moneyEn(after)]
+    if (shown !== null && expectedOneOf.includes(shown)) {
+      return shown
+    }
+    last = `attempt ${attempt}: shown "${shown}", API before ${expectedOneOf[0]} after ${expectedOneOf[1]}`
+    log(`${label} ${last}`)
+  }
+  throw new Error(`${label} the cost shown never matched the API (${last})`)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -117,23 +136,27 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
     await expect(page.getByTestId('consent-gate')).toHaveCount(0)
 
-    const [vms, networks, volumes, before] = await Promise.all([
+    const [vms, networks, volumes] = await Promise.all([
       get('tenant', '/v1/tenant/vms') as Promise<any[]>,
       get('tenant', '/v1/tenant/networks') as Promise<any[]>,
       get('tenant', '/v1/tenant/volumes') as Promise<any[]>,
-      get('tenant', `/v1/tenant/billing/summary?month=${currentMonth()}`),
     ])
     await expect(page.getByTestId('vm-count')).toHaveText(String(vms.length))
     await expect(page.getByTestId('network-count')).toHaveText(String(networks.length))
     await expect(page.getByTestId('volume-count')).toHaveText(String(volumes.length))
 
-    // The month's cost is read again right after the page: metering can tick a VM's usage up between the
-    // two reads (titan-ops features/billing/metering/design.md), so either value is accepted.
-    const shown = await page.getByTestId('month-cost').textContent()
-    await page.screenshot({ path: `${RESULTS}/UI-01-dashboard.png` })
-    const after = await get('tenant', `/v1/tenant/billing/summary?month=${currentMonth()}`)
-    const expectedOneOf = [moneyEn(before.totalCost), moneyEn(after.totalCost)]
-    expect(expectedOneOf, `month-cost shown "${shown}"`).toContain(shown)
+    let shownOnce = false
+    const shown = await costShownMatches('UI-01',
+      async () => (await get('tenant', `/v1/tenant/billing/summary?month=${currentMonth()}`)).totalCost,
+      async () => {
+        if (shownOnce) {
+          await page.reload({ waitUntil: 'networkidle' })
+        }
+        shownOnce = true
+        const text = await page.getByTestId('month-cost').textContent()
+        await page.screenshot({ path: `${RESULTS}/UI-01-dashboard.png` })
+        return text
+      })
     log(`UI-01 vms=${vms.length} networks=${networks.length} volumes=${volumes.length} monthCost=${shown}`)
   })
 
@@ -382,13 +405,19 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
     log(`UI-05 summary.totalCost=${before.totalCost} perVm=${before.perVm.length} invoices=${invoices.length}`)
 
     const page = await pageOf('tenant')
-    await page.goto(PORTAL + '/billing', { waitUntil: 'networkidle' })
-    await expect(page.getByRole('heading', { level: 1, name: 'Billing' })).toBeVisible()
-    const totalShown = await page.getByText('Total this month').locator('xpath=following-sibling::p[1]').textContent()
-    await page.screenshot({ path: `${RESULTS}/UI-05-billing.png` })
-    const after = await get('tenant', `/v1/tenant/billing/summary?month=${currentMonth()}`)
-    // Metering can tick the total up between the first read and the page load; either value is accepted.
-    expect([moneyEn(before.totalCost), moneyEn(after.totalCost)], `shown "${totalShown}"`).toContain(totalShown)
+    let after = before
+    await costShownMatches('UI-05',
+      async () => {
+        after = await get('tenant', `/v1/tenant/billing/summary?month=${currentMonth()}`)
+        return after.totalCost
+      },
+      async () => {
+        await page.goto(PORTAL + '/billing', { waitUntil: 'networkidle' })
+        await expect(page.getByRole('heading', { level: 1, name: 'Billing' })).toBeVisible()
+        const text = await page.getByText('Total this month').locator('xpath=following-sibling::p[1]').textContent()
+        await page.screenshot({ path: `${RESULTS}/UI-05-billing.png` })
+        return text
+      })
     for (const vm of after.perVm) {
       await expect(page.getByRole('row', { name: new RegExp(vm.vmName) })).toContainText(moneyEn(vm.totalCost))
     }
@@ -520,5 +549,59 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
     expect(version).toContain(document.version)
     await legalPage.screenshot({ path: `${RESULTS}/UI-08-legal-terms.png` })
     log(`UI-08 legal ${version}`)
+  })
+
+  // titan-ops features/billing/metering/design.md#usage-retention · OpenViCloud/titan-cloud-console:portal/src/pages/BillingPage.tsx (isExpired) ·
+  // OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts (usage.expired, usage.expiredInvoices) · OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts (usage.expired, usage.expiredInvoices)
+  test('UI-34 Billing shows last month as the API holds it and a month past 90 days as kept on the invoices only, in English then Vietnamese', async () => {
+    const monthOf = (back: number): { key: string, first: Date } => {
+      const now = new Date()
+      const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1))
+      return { key: `${first.getUTCFullYear()}-${String(first.getUTCMonth() + 1).padStart(2, '0')}`, first }
+    }
+    const cutoff = Date.now() - 90 * 86_400_000
+    const clicks = [1, 2, 3, 4].find((k) => monthOf(k).first.getTime() < cutoff)
+    expect(clicks, 'a month starting before now − 90 days within four clicks back').toBeDefined()
+    const previous = await get('tenant', `/v1/tenant/billing/summary?month=${monthOf(1).key}`)
+    const expired = await call('tenant', 'GET', `/v1/tenant/billing/summary?month=${monthOf(clicks!).key}`)
+    log(`UI-34 previous ${monthOf(1).key} totalCost=${previous.totalCost} perVm=${previous.perVm.length}; expired ${monthOf(clicks!).key} after ${clicks} clicks → ${expired.status} ${expired.text.slice(0, 200)}`)
+    expect(bodyOf(expired).code, 'the summary of the expired month').toBe('USAGE_PERIOD_EXPIRED')
+
+    const views = [
+      { lang: 'en', locale: 'en-US', total: 'Total this month', back: 'Previous month', text: 'Detailed usage is kept for 90 days, so this month can no longer be shown.', link: 'See the invoices' },
+      { lang: 'vi', locale: 'vi-VN', total: 'Tổng tháng này', back: 'Tháng trước', text: 'Mức sử dụng chi tiết chỉ được giữ 90 ngày, nên tháng này không còn xem được.', link: 'Xem hoá đơn' },
+    ]
+    const page = await pageOf('tenant')
+    for (const view of views) {
+      const money = (amount: number) => `${Math.round(amount).toLocaleString(view.locale)} ₫`
+      await page.goto(PORTAL + '/billing', { waitUntil: 'networkidle' })
+      await page.evaluate((lang) => localStorage.setItem('ovc-lang', lang), view.lang)
+      await page.reload({ waitUntil: 'networkidle' })
+      const main = page.locator('main')
+      const back = page.getByRole('button', { name: view.back, exact: true })
+
+      await back.click()
+      const total = main.getByText(view.total, { exact: true }).locator('xpath=following-sibling::p[1]')
+      await expect(total).toHaveText(money(previous.totalCost))
+      for (const vm of previous.perVm) {
+        await expect(main.getByRole('row', { name: new RegExp(vm.vmName) })).toContainText(money(vm.totalCost))
+      }
+      await page.screenshot({ path: `${RESULTS}/UI-34-previous-${view.lang}.png` })
+
+      for (let k = 2; k <= clicks!; k++) {
+        await back.click()
+      }
+      // React Query retries a failed read before it reports the error: the sentence can take several seconds.
+      await expect(main.getByText(view.text)).toBeVisible({ timeout: 30_000 })
+      await expect(main.getByRole('link', { name: view.link, exact: true })).toHaveAttribute('href', '/billing/invoices')
+      await expect(main.getByText(view.total, { exact: true })).toHaveCount(0)
+      await expect(main.getByRole('table')).toHaveCount(0)
+      expect(await main.textContent(), 'no ₫ on the expired month').not.toContain('₫')
+      await expect(back).toBeDisabled()
+      await page.screenshot({ path: `${RESULTS}/UI-34-expired-${view.lang}.png` })
+      log(`UI-34 ${view.lang}: previous month ${money(previous.totalCost)}, month ${monthOf(clicks!).key} shows the 90-day sentence`)
+    }
+    // The cases of this group compare English formatting; leave it English for any case added after this one.
+    await page.evaluate(() => localStorage.setItem('ovc-lang', 'en'))
   })
 })

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { closeSessions, useBrowser } from './auth'
 import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, startLog } from './api'
 import { cleanUp } from './clean-up'
-import { RUN, envOf, existenceShape as ruleShape, listNetworks, networkUsable, runNetwork, waitNetwork } from './fixtures'
+import { RUN, activityIds, activitySince, envOf, existenceShape as ruleShape, listNetworks, networkUsable, runNetwork, waitNetwork } from './fixtures'
 
 // Cases FW-01..05 and FW-07..13 of plan.md: FW-07 reads the Incus host, FW-08 is NOT COVERED; rules of a
 // deleted network are NETL-02. FW-10 and FW-11 need a second network, which beta-user may not hold: they raise
@@ -36,6 +36,9 @@ test.describe.serial('firewall', () => {
   let original: { maxVms: number, maxNetworks: number, maxFirewallRulesPerNetwork: number } | null = null
   // Second networks of FW-10 and FW-11, deleted in the case's finally and again in afterAll.
   const extra: string[] = []
+  // The feed before FW-01 asked for rule 0: every run names rule 0 by the same CIDR, so ACT-02 counts only the rows that
+  // appeared since (activitySince of fixtures.ts).
+  let feedBeforeRuleZero = new Set<string>()
 
   async function quotaRow(): Promise<any> {
     const all = await get('admin', '/v1/tenants') as any[]
@@ -161,15 +164,15 @@ test.describe.serial('firewall', () => {
   // HandleAsync: SendAsync(result, 201)); the create's
   // Done carries the state of the ACL line (titan-ops features/network/design.md#firewall-rule-status)
   test('FW-01 a rule is 201 {ruleId}, then enabled', async () => {
+    feedBeforeRuleZero = await activityIds()
     const id = await createRule(0)
     const rule = await pollUntil('FW-01', () => readRule(id), (r) => r.status === 'enabled', ruleShape)
     expect(rule.status).toBe('enabled')
     // ACT-02: the activity row is named by the rule's label, which carries its CIDR
     // (OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/FirewallRule/CreateFirewallRuleCommandHandler.cs HandleAsync,
     // activity.Stage("firewall_rule.create_requested"))
-    const rows = await get('tenant', '/v1/tenant/activity?limit=50') as Array<{ action: string, resourceName: string }>
-    const actions = rows.filter((r) => r.resourceName.includes(cidrOf(0))).map((r) => r.action)
-    log(`ACT-02 rule ${cidrOf(0)}: ${actions.join(', ')}`)
+    const actions = await activitySince(feedBeforeRuleZero, cidrOf(0))
+    log(`ACT-02 rule ${cidrOf(0)}, rows since FW-01: ${actions.join(', ')}`)
     expect(actions.filter((a) => a === 'firewall_rule.create_requested').length).toBe(1)
     expect(actions.filter((a) => a === 'firewall_rule.created').length).toBe(1)
   })
@@ -209,9 +212,8 @@ test.describe.serial('firewall', () => {
     expectStatus(await call('tenant', 'DELETE', `${rulePath(networkId)}/${id}`), 204)
     await pollUntil('FW-03', () => readRule(id), (r) => r.status === 'Gone', ruleShape)
     expectStatus(await call('tenant', 'DELETE', `${rulePath(networkId)}/${id}`), 204)
-    const rows = await get('tenant', '/v1/tenant/activity?limit=50') as Array<{ action: string, resourceName: string }>
-    const actions = rows.filter((r) => r.resourceName.includes(cidrOf(0))).map((r) => r.action)
-    log(`ACT-02 rule ${cidrOf(0)} after delete: ${actions.join(', ')}`)
+    const actions = await activitySince(feedBeforeRuleZero, cidrOf(0))
+    log(`ACT-02 rule ${cidrOf(0)} after delete, rows since FW-01: ${actions.join(', ')}`)
     expect(actions.filter((a) => a === 'firewall_rule.delete_requested').length).toBe(1)
     expect(actions.filter((a) => a === 'firewall_rule.deleted').length).toBe(1)
   })

@@ -86,6 +86,12 @@ FAKE_KUBECTL = textwrap.dedent('''\
     elif args[:2] == ["get", "application"]:
         automated = {"prune": True, "selfHeal": True} if args[2].startswith("root") else {"prune": True}
         print(json.dumps({"spec": {"syncPolicy": {"automated": automated}}}))
+    elif args[:2] == ["get", "jobs"]:
+        print(json.dumps({"items": [
+            {"metadata": {"name": "control-plane-job-meter-29000001"},
+             "status": {"startTime": "2026-11-13T05:00:00Z", "completionTime": "2026-11-13T05:00:04Z",
+                        "conditions": [{"type": "Complete", "status": "True"}]}},
+            {"metadata": {"name": "control-plane-job-wallet-sweep-29000001"}, "status": {}}]}))
     elif args[:3] == ["get", "deploy", "incus-worker"]:
         print("1")
     elif args[:3] == ["get", "deploy", "incus-worker-inventory"]:
@@ -114,6 +120,7 @@ def run(phases, done_reads=0, earlier=None, **extra_env):
         env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", FAKE_STATE=str(state), FAKE_PHASES=phases,
                    FAKE_DONE_READS=str(done_reads), **extra_env)
         env.pop("REGRESSION_WORKER_APPS", None) if "REGRESSION_WORKER_APPS" not in extra_env else None
+        env.pop("REGRESSION_CP_ROLL_SECONDS", None) if "REGRESSION_CP_ROLL_SECONDS" not in extra_env else None
         result = subprocess.run(
             ["bash", str(HERE / "run-module.sh"), str(tmp / "kubeconfig"), str(src), "mod", "t1",
              str(tmp / "out"), str(tmp / "logs")],
@@ -276,6 +283,45 @@ class WorkerStopTest(unittest.TestCase):
         self.assertIn("-n regression scale deploy/incus-worker --replicas=1", steps)
         self.assertIn("worker still stopped", out)
         self.assertEqual(code, 0, out)
+
+
+ROLL = "3:CP_ROLL_WAIT roll deployment/control-plane back to back for three meter cycles"
+
+
+def roll_calls(calls):
+    """The calls that roll the control plane, read its meter Jobs or touch the BIL-25 markers, in order."""
+    return [c for c in calls.splitlines() if "bil-25" in c or "rollout" in c or "get jobs" in c]
+
+
+class ControlPlaneRollTest(unittest.TestCase):
+    def test_the_runner_rolls_the_control_plane_when_the_spec_asks_and_logs_the_meter_jobs(self):
+        code, out, calls = run("Running", done_reads=6, FAKE_LOGS=ROLL, REGRESSION_CP_ROLL_SECONDS="0")
+        self.assertEqual(roll_calls(calls), [
+            "-n regression exec regression-mod-t1-pod -- sh -c mkdir -p /work/bil-25 && touch /work/bil-25/rolling",
+            "-n regression rollout restart deployment/control-plane",
+            "-n regression rollout status deployment/control-plane --timeout=10m",
+            "-n regression get jobs -o json",
+            "-n regression exec regression-mod-t1-pod -- touch /work/bil-25/rolled",
+        ])
+        self.assertIn("1 roll(s) of deployment/control-plane; meter Jobs seen: 1", out)
+        self.assertEqual(code, 0, out)
+
+    def test_without_the_variable_the_runner_never_rolls_the_control_plane(self):
+        code, out, calls = run("Running", done_reads=6, FAKE_LOGS=ROLL)
+        self.assertEqual(roll_calls(calls), [])
+        self.assertEqual(code, 0, out)
+
+    def test_a_rollout_that_fails_is_reported_and_the_rolled_marker_is_not_written(self):
+        code, out, calls = run("Running", done_reads=6, FAKE_LOGS=ROLL, REGRESSION_CP_ROLL_SECONDS="0", FAKE_FAIL="rollout status")
+        self.assertIn("CP_ROLL_FAILED", out)
+        self.assertNotIn("touch /work/bil-25/rolled", calls)
+        self.assertEqual(code, 0, out)
+
+    def test_a_window_that_is_not_whole_seconds_is_refused_before_any_job(self):
+        code, out, calls = run("Running", REGRESSION_CP_ROLL_SECONDS="3m")
+        self.assertIn("REGRESSION_CP_ROLL_SECONDS must be whole seconds", out)
+        self.assertNotIn("create job", calls)
+        self.assertEqual(code, 2, out)
 
 
 class ResultCopyTest(unittest.TestCase):

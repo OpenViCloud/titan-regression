@@ -122,7 +122,17 @@ test.describe.serial('portal-ui pages', () => {
       await expect(page.getByText(/No data yet|Chưa có số liệu/)).toHaveCount(0)
       const card = (title: string) => page.getByRole('region', { name: title, exact: true })
       // The header value (MetricCard's first <p>), not the chart's axis ticks, which also read <n>%.
-      await expect(card(view.cpu).locator('p').first()).toHaveText(/^\d+([.,]\d)?%$/)
+      const cpu = card(view.cpu).locator('p').first()
+      await expect(cpu).toHaveText(/^\d+([.,]\d)?%$/)
+      const cpuText = (await cpu.textContent()) ?? ''
+      log(`UI-33 ${view.lang} ${view.cpu}: ${cpuText}`)
+      if (/\d[.,]\d/.test(cpuText)) {
+        expect(cpuText, `${view.lang} CPU decimal mark`).toMatch(view.lang === 'vi' ? /^\d+,\d%$/ : /^\d+\.\d%$/)
+      } else {
+        // formatPercent keeps at most one decimal (OpenViCloud/titan-cloud-console:portal/src/lib/vmMetrics.ts): a whole
+        // percent has no mark to check, and the report names the case's mark as not seen.
+        log(`UI-33 ${view.lang} CPU decimal mark not seen: ${cpuText} is a whole percent`)
+      }
       for (const title of [view.memory, view.disk]) {
         const header = card(title).locator('p').first()
         await expect(header).toContainText(view.of)
