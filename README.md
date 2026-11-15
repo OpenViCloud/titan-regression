@@ -191,7 +191,7 @@ of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud
 `cli/edge` (CLI-06..11 through the edge of the release environment, the CLI on an API token) logs `HOLD cli10 {…}` and
 waits for the agent (45 minutes at most): it copies `/work/cli-10/token` and `/work/cli-10/key` out of the pod into files only it can read,
 runs `vm ssh <vmName> -- … 'sleep 330; echo alive'` on its own machine with `OPENVICLOUD_TOKEN` read from that file
-(never on the command line), `OPENVICLOUD_API_URL` set to the environment's API and an empty `XDG_CONFIG_HOME`, deletes both files, then touches `/work/results/go-cli10` (or `skip-cli10`: N/A); the
+(never on the command line), `OPENVICLOUD_API_URL` set to the environment's API and `XDG_CONFIG_HOME` pointing at an empty directory, deletes both files, then touches `/work/results/go-cli10` (or `skip-cli10`: N/A); the
 agent's log of that command is CLI-10's verdict; `cli/edge` and `vm/ssh-sessions` (SSH-08) count beta-user's SSH
 sessions, so on the release environment they run in the sequential run, one at a time, beside no module that opens
 one; `admin/stuck-requests` (ADM-15) needs the

@@ -73,7 +73,7 @@ Hai lane (`lanes.json`) chạy cùng lúc, mỗi lane một tenant test; `admin-
 | `load-balancer` | a | nâng `maxNetworks`, LB-15 đặt `maxLoadBalancers` = 1, trả lại | lấy một /64 IPv6 từ khối của cluster |
 | `tenant` | a | TEN-02 nâng `maxVms` thêm 1 (trả lại `maxVms` và `maxNetworks`); TEN-08 cũng vậy, đọc và trả lại cả 9 cap | đọc `/v1/tenants` (mọi tenant), chọn hàng theo id |
 | `api-token` | a | không | không |
-| `cli` | a | đồng ý điều khoản (bản ghi lâu dài); job `cli/edge` (lượt prd) cũng vậy, tạo rồi xoá token API `rg-tok-edge-*` của `beta-user` | đếm phiên SSH của `beta-user` (CLI-11; job `cli/edge` và `vm/ssh-sessions` cũng đếm, SSH-08) ⇒ không chạy cạnh job nào khác mở phiên SSH của tenant đó |
+| `cli` | a | đồng ý điều khoản (bản ghi lâu dài); job `cli/edge` (lượt prd) cũng vậy, tạo rồi xoá token API `rg-tok-edge-*` của `beta-user` | đếm phiên SSH của `beta-user` (CLI-11; job `cli/edge` cũng vậy, `vm/ssh-sessions` đếm bằng SSH-08) ⇒ không chạy cạnh job nào khác mở phiên SSH của tenant đó |
 | `contract` | a | đổi tên network của lane, trả lại | không (không đụng ví) |
 | `billing` | b | đo usage trên tenant của lane | ví `admin-test` (ghi, assert đúng số); danh sách topup Pending (BIL-10 tạo một cái tạm); audit log (BIL-07 ghi một dòng); giá tier và volume offering mà nó so chi phí |
 | `concurrency` | a | nâng `maxNetworks` cho network của CC-05…CC-12, trả lại | ví `admin-test` (assert đúng số, trả hoá đơn 4444 do `seed-invoices.sql` của lane b); CC-05 lấy hai /64 IPv6 từ khối của cluster, CC-06, CC-07, CC-10, CC-11, CC-12 thêm một (network IPv6 chung của chúng) khi cluster có khối |

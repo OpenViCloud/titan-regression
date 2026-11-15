@@ -9,9 +9,9 @@ import { startLocalProxyIfNeeded } from './local-proxy'
 import { activityOf, countOf } from './fixtures'
 
 // How long a running VM's guest gets to start its agent and sshd before an SSH session can open. Measured on dev
-// (arm64, 2026-11-13): on an idle cluster a Titan-like VM had its sshd banner 261 s after start; with the keys written
-// by the boothook, key login came about 30 s after the banner (332 s, then 362 s); during a regression run the agent
-// took from 3 to more than 5 minutes. Only a red run waits it out: a
+// (arm64, 2026-11-13): on an idle cluster a Titan-like VM had its sshd banner 261 s after start with the keys written at
+// modules-final; with the keys written by the boothook, banner at 332 s and key login at 362 s, about 30 s later; during
+// a regression run the agent took from 3 to more than 5 minutes. Only a red run waits it out: a
 // wait loop fails at once on any answer other than a guest still starting (titan-ops features/vm/design.md#ssh-session).
 export const GUEST_START_WAIT_MS = 10 * 60_000
 
