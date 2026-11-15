@@ -162,13 +162,13 @@ create a network and beta-user may hold one.
 | 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-14 (host, not covered), CAT-16 (host) |
 | 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21, NET-27 (host, not covered), NET-25 (host) |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-14 (host, not covered) |
-| 5 | `vm` | VMs: create per tier (cluster named or taken from the network), stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered) |
+| 5 | `vm` | VMs: create per tier (cluster named or taken from the network), stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered); SSH-08 also a job of its own at the release environment's run, `vm/ssh-sessions` (new spec) |
 | 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-14, VMS-15, VMS-20 (host, not covered), VMS-17 (host) |
 | 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes, except VOL-18 (host, not covered), VOL-21, VOL-22 (not covered) |
 | 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: only the negative cases that need no IPv6 network) | yes | yes | yes, except LB-12 and LB-16 (host, not covered) |
 | 9 | `tenant` | tenant, quota, terms consent, approval on sign-in, the admin status route's error order | yes | yes | yes |
 | 10 | `api-token` | API tokens: create, call the API with one, duplicate name/secret, delete ⇒ `401`, unknown token | yes | yes | yes |
-| 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes |
+| 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes; CLI-06..11 also a job of its own at the release environment's run, `cli/edge` (new spec) |
 | 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | yes | yes | yes, except BIL-18 (not covered), BIL-03 (extended), BIL-13 (extended): the body `Healthy` is not checked yet, BIL-26 (plan only: an agent SQL step, like BIL-14), BIL-24 (plan only: its invoice part), BIL-25 (plan only: spec, `CP_ROLL_WAIT` in `run-module.sh`, its opt-in variable and a step of the sequential run); BIL-16's per-record part, BIL-24's and BIL-25's row counts read by the agent in SQL |
 | 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS; the metrics host behind Cloudflare Access | no: CON-09 reads the TLS certificates; dev serves plain HTTP | yes | yes, except CON-15, CON-17 (not covered), CON-16 (plan only) |
 | 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once, one tenant's two creates never run at once | yes | yes | yes, except CC-13 (plan only), CC-14 (not covered); CC-04's command count read by the agent in SQL |
@@ -189,9 +189,9 @@ modules `cli` and `terraform-provider` need the agent to copy a binary into the 
 (`cli`: the CLI built for the node's architecture; `terraform-provider`: `GOOS=linux GOARCH=<node> CGO_ENABLED=0 go test -c`
 of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud`; job `cli/edge` the same as `cli`);
 `cli/edge` (CLI-06..11 through the edge of the release environment, the CLI on an API token) logs `HOLD cli10 {…}` and
-waits for the agent: it copies `/work/cli-10/token` and `/work/cli-10/key` out of the pod into files only it can read,
+waits for the agent (45 minutes at most): it copies `/work/cli-10/token` and `/work/cli-10/key` out of the pod into files only it can read,
 runs `vm ssh <vmName> -- … 'sleep 330; echo alive'` on its own machine with `OPENVICLOUD_TOKEN` read from that file
-(never on the command line), deletes both files, then touches `/work/results/go-cli10` (or `skip-cli10`: N/A); the
+(never on the command line), `OPENVICLOUD_API_URL` set to the environment's API and an empty `XDG_CONFIG_HOME`, deletes both files, then touches `/work/results/go-cli10` (or `skip-cli10`: N/A); the
 agent's log of that command is CLI-10's verdict; `cli/edge` and `vm/ssh-sessions` (SSH-08) count beta-user's SSH
 sessions, so on the release environment they run in the sequential run, one at a time, beside no module that opens
 one; `admin/stuck-requests` (ADM-15) needs the

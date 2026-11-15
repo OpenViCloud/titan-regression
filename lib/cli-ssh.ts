@@ -12,7 +12,7 @@ import { GUEST_START_WAIT_MS } from './ssh'
 // cli/edge/cli-edge.spec.ts (prd: titan-ops architecture/testing.md#regression-dev-before-candidate). The binary is
 // not in the image: when a spec logs BINARY_WAIT the agent copies `openvicloud` built for the pod's architecture to
 // /work/bin/openvicloud, checks sha256, then touches /work/bin/openvicloud.ready
-// (titan-ops .claude/shared/regression-suite.md §Runner).
+// (OpenViCloud/titan-ops:.claude/shared/regression-suite.md §Runner).
 export const BINARY = '/work/bin/openvicloud'
 export const CLI_HOME = '/work/cli-home'
 

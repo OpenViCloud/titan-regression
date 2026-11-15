@@ -11,11 +11,11 @@ import { CLI_HOME, CliSshChain, setCliToken, waitForBinary } from './cli-ssh'
 // module runs on dev only and `vm ssh` there never crosses the edge in front of the release environment's API
 // (titan-ops architecture/testing.md#regression-dev-before-candidate). The bodies are lib/cli-ssh.ts, which
 // cli/cli.spec.ts runs on dev. The CLI signs in with an API token of beta-user (`rg-tok-edge-*`, OPENVICLOUD_TOKEN), not
-// `auth login`, so this job needs no browser login and `vm ssh` with a token is measured too. It counts beta-user's SSH
+// `auth login`, so this job needs no CLI device login and `vm ssh` with a token is measured too. It counts beta-user's SSH
 // sessions (CLI-11), so no other job that opens one (cli, vm/ssh-sessions) runs beside it.
 //
 // CLI-10 runs on the agent's machine, the customer's path through the edge, at a hold
-// (titan-ops .claude/shared/regression-suite.md §Runner): the spec writes the token and the key to /work/cli-10 (never
+// (OpenViCloud/titan-ops:.claude/shared/regression-suite.md §Runner): the spec writes the token and the key to /work/cli-10 (never
 // under RESULTS, which becomes evidence), logs `HOLD cli10 {…}` and waits for /work/results/go-cli10 (the agent ran
 // it) or /work/results/skip-cli10 (N/A). The agent's own log holds the verdict; the spec checks that the session
 // reached this VM, then deletes the token whatever happened.
@@ -120,7 +120,7 @@ test.describe.serial('cli edge', () => {
     fs.chmodSync(`${HAND_OFF}/key`, 0o600)
     const before = countOf(await activityOf(chain.vmName), 'vm.ssh_requested')
     const go = await hold('cli10', { vmName: chain.vmName, vmId: chain.vmId, token: `${HAND_OFF}/token`, key: `${HAND_OFF}/key`,
-      command: "vm ssh <vmName> -- -i <key> -o IdentitiesOnly=yes -o BatchMode=yes 'sleep 330; echo alive'" })
+      command: "vm ssh <vmName> -- -i <key> -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=<file> 'sleep 330; echo alive'" })
     fs.rmSync(HAND_OFF, { recursive: true, force: true })
     test.skip(!go, 'CLI-10: the agent answered skip-cli10')
     const after = countOf(await activityOf(chain.vmName), 'vm.ssh_requested')

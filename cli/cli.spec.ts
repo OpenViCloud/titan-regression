@@ -302,7 +302,7 @@ test.describe('cli catalog', () => {
 
 // --- CLI-12..17: ssh-key + VM lifecycle commands, on the run's network ------------------------------------------
 // A separate key pair and ssh directory from CLI-06..11's: registering the same public key twice is 409
-// SSH_KEY_EXISTS, and the chain's vmSsh()/scp() count attempts that CLI-11 already checked against the activity feed.
+// SSH_KEY_EXISTS, and the chain counts the sessions it opened, which CLI-11 already checked against the activity feed.
 test.describe.serial('cli lifecycle', () => {
   test.describe.configure({ timeout: 25 * 60_000 })
 
