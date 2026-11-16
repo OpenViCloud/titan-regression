@@ -13,7 +13,7 @@ evidence as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>`.
     python3 phase4.py host --local --log <file> [--keys <dir>] -- '<command>'      # same entry, on this machine
     python3 phase4.py bak18 --kubeconfig <kc> --job <job> --control <socket> --target <user@host> --log <file>
     python3 phase4.py sample --control <socket> --target <user@host> --project <t-…> --stop <file> --log <file> [--every 30]
-                              [--lane a|b]
+                              [--read-timeout 60] [--lane a|b, default sequential]
     python3 phase4.py disconnect --control <socket> --target <user@host>
 
 <job> is the name run-module.sh gives the job (regression-<module>-<label>). The host command runs through the
@@ -33,7 +33,8 @@ go-bak18-gone: no copy before the timeout, no `reconcile cluster done` after it,
 
 sample reads the project every <every> seconds, read-only, and logs a line per object only when its summary changed
 (`GONE <object>` when it left), then `sample objects=<n>`; a failed read (or one with no answer in --read-timeout
-seconds) and a sample that breaks are `ERROR` lines, and sampling goes on; it ends after the sample that finds <stop>.
+seconds) is an `ERROR` line, a sample that breaks is one `ERROR` line, and sampling goes on; it ends after the sample
+that finds <stop>.
 
 Exit 2: usage, the pending HOLD is not the step asked for, or no ControlMaster on the socket. wait: exit 3 = the runner finished with no HOLD pending.
 """
