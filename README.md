@@ -22,7 +22,8 @@ which signs in with the test accounts there, so no credential passes through the
 | `trim-cp-log.py` | Drops the control plane's routine info lines from a saved log |
 | `check-removed-fields.py` | Fails when a spec or a helper under `lib/` still reads a field that left the control plane's `/v1` contract and the Spec column below does not mark a case of its test; run it with the two control plane commits a contract change lies between |
 | `run-lanes.py`, `lanes.json`, `lanes-dev.json`, `lanes-dev-sequential.json` | Runs the modules as lanes, one lane per test tenant, lanes side by side (below); the two dev plans cover the Dev column |
-| `patch-job.py` | Points a job's `specs` volume at a ConfigMap of its own, so jobs started together never read each other's specs |
+| `patch-job.py` | Points a job's `specs` volume at a ConfigMap of its own, so jobs started together never read each other's specs; `--env NAME=VALUE` adds a variable to the job |
+| `phase4.py` | The agent's commands for the two Phase 4 modules (§Phase 4) |
 | `selftest/`, `test_*.py` | Tests of the helpers and scripts above |
 | [`CLAUDE.md`](CLAUDE.md) | How specs are written and the assumptions a run on the release environment makes |
 
@@ -49,7 +50,8 @@ up by hand.
    name shared by `lib/` and the module makes `create configmap` refuse: rename it, never overwrite.
 2. **Start the job** from the lane's CronJob (`titan-regression`; lane b `titan-regression-b`):
    `kubectl create job <job> --from=cronjob/<cronjob> --dry-run=client -o json | python3 patch-job.py titan-regression-specs-<job> | kubectl create -f -`
-   (`patch-job.py` points the job's `specs` volume at that ConfigMap).
+   (`patch-job.py` points the job's `specs` volume at that ConfigMap; for `phase4/` add
+   `--env "PHASE4_KEY_V=$(cat <keys dir>/v.pub)" --env "PHASE4_KEY_U=$(cat <keys dir>/u.pub)"`, which `run-module.sh` does).
 3. **Wait** for the job's own pod to be `Running` (`--field-selector=status.phase=Running`: a recreated job leaves its
    old pod behind), then poll `kubectl exec <pod> -- test -f /work/results/.done`; stop as soon as the pod is `Failed` or
    `Succeeded` (the runner exits early, for example `NO_SPECS`, without writing `.done`). A phase read that fails
@@ -136,7 +138,7 @@ both lanes before any later step, `cleanup` included.
 The `external` steps are done by the agent, who creates `<external dir>/<step>.done` when finished (`--external-dir`,
 default `<work dir>/external`; `--external-timeout-minutes`, default 90): `seed-invoices` (`billing/seed-invoices.sql`
 before `billing`), `check-wallets` (`billing/check-wallets.sql` after `concurrency`), `phase4` (the
-Incus-host observation spec of Phase 4, which the runner cannot drive: the agent runs it in lane b's tenant and does the host commands; the public site, the `worker` and `control-plane-image` reads are measured once, in the sequential run).
+Incus-host observation spec of Phase 4, `phase4/`, which the runner cannot drive: the agent runs it in lane b's tenant and does the host commands, §Phase 4; the public site, the `worker` and `control-plane-image` reads are measured once, in the sequential run).
 
 Output: `<work dir>/<lane>/<module>[-<step label>]/` holds `run.log` and the module's `runner.log` (give those to `count-cases.py`);
 `<evidence dir>/<module>/` holds the system logs and screenshots; `smoke` and `cleanup` run in every lane, so theirs are
@@ -155,6 +157,7 @@ python3 test_trim_cp_log.py
 python3 test_check_removed_fields.py
 python3 test_patch_job.py
 python3 test_run_module.py
+python3 test_phase4.py
 python3 test_run_lanes.py
 python3 run-lanes.py --check
 ```
@@ -213,7 +216,8 @@ every tenant of the cluster feels it, so on the release environment it runs only
 hand: without it the spec skips as N/A after 10 minutes), and only in the sequential run, never beside another module.
 
 Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — state changed on the Incus host outside
-OpenViCloud, needs an approved `L-x` command (OBS-13 only reads the host's trust list); `site` — the public site through Playwright MCP on the agent's machine;
+OpenViCloud, needs an approved `L-x` command (OBS-13 only reads the host's trust list), run by the agent with the
+specs of `phase4/` and `phase4-backup/` (§Phase 4); `site` — the public site through Playwright MCP on the agent's machine;
 `worker`, `control-plane-image` — read-only `gh`/`curl`/`kubectl` and `go test` of a worker clone on the agent's machine.
 
 Four things change state every tenant of the environment shares: ADM-06 (a global price), ADM-15 (the cluster's
@@ -230,6 +234,50 @@ environment (the spec calls `test.skip` with the reason, e.g. VM-12 with a singl
 in the module that owns the resource. A case with no spec yet gets one at the next release, and the cell names it as `yes, except <ID> (plan only)` until then; a case whose spec was written outside a release and has not yet run green at a release is named `<ID> (new spec)` until a release's run of its module does; a case whose row changed (more checks, or an expectation changed) in a way its spec does not check yet, or whose spec does not yet check its whole row (other than a part the agent reads in SQL, above), is named `<ID> (extended)` until the spec catches up; a case no spec can be
 written for and that Phase 4 does not measure by hand is **NOT COVERED**, with the reason in its row of `plan.md`. Specs pick the first cluster with a listed template (`lib/fixtures.ts`,
 `envOf()`); prd's cluster is `singapore01`.
+
+## Phase 4
+
+Two modules of this repository are run by the agent, not by `run-lanes.py`: `phase4/` (`phase4-host.spec.ts`, the
+`(host)` and `observation` cases of `release:regression-prd` Phase 4: the `external` step `phase4` of `lanes.json`) and
+`phase4-backup/` (BAK-18). Each spec logs `HOLD <step> <facts JSON>` (`lib/host-hold.ts`) and waits for
+`go-<step>` or `skip-<step>` in `/work/results/` of its pod; the agent does the host commands of the step in between.
+`phase4.py` is every command the agent runs for that, so nobody writes a shell loop by hand; each `host` command and
+each answer given `--log` goes to that evidence log as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>` (`bak18`
+logs its reads but not the polls that wait for the copy, only the read that ends the wait). `host` refuses (exit 2)
+when the ControlMaster is not there, rather than open a connection of its own:
+
+```bash
+python3 phase4.py keys <keys dir>          # pairs v, u, x once per release, outside the repo; private halves stay there
+REGRESSION_PHASE4_KEYS=<keys dir> bash run-module.sh <kubeconfig> <src tree> phase4 <label> <work dir> <log dir> &
+python3 phase4.py connect --control <socket> --target <user@host> --known-hosts <pinned known_hosts>
+python3 phase4.py wait --kubeconfig <kubeconfig> --job regression-phase4-<label>     # prints the pending HOLD
+python3 phase4.py host --control <socket> --target <user@host> --log <evidence log> [--keys <keys dir>] -- '<command>'
+python3 phase4.py go <step> --kubeconfig <kubeconfig> --job regression-phase4-<label> --log <evidence log>
+# … wait / host / go (or skip) for each step, until wait prints NO_HOLD
+python3 phase4.py disconnect --control <socket> --target <user@host>
+```
+
+`run-module.sh` passes `<keys dir>/v.pub` and `u.pub` to the job as `PHASE4_KEY_V` and `PHASE4_KEY_U` (one public key
+line each, or it stops before the job); `phase4/` stores V as the tenant's SSH key and puts U in a VM's cloud-init, and a
+run of it without them is red at its first step (`phase4-backup/` reads no key). In a host command `{V}`, `{U}`, `{X}` become the base64 body of that key.
+`host --local` runs a command on the agent's machine (the checks over the Internet) with the same log entry.
+
+`phase4-backup/` waits for the hourly `backup-schedule` run (minute 0 UTC): a new VM with a volume attached is backed up
+by the first run after it. Its job is its own, because the wait does not fit in the runner's 90 minutes
+(`activeDeadlineSeconds`) after the rest of Phase 4; inside those 90 it holds up to 60 minutes for the copy and 15 for
+the uploads of the VM and the volume, so start it between `:40` and `:55` (a run of the CronJob made by hand, where the release allows it, takes
+the place of `:00`). It has one VM, one volume and one network of its own, and raises the quota to fit them, given back
+after; not beside `phase4/`, whose quota raise it would undo. The backup run it waits for uploads one archive of its
+VM and one of its volume to the environment's bucket; the module deletes both resources, and the archives stay (the
+bucket keeps the 7 newest per resource, titan-ops features/backup/design.md#incus-backup). At `HOLD bak18`,
+`python3 phase4.py bak18 --kubeconfig … --job regression-phase4-backup-<label> --control … --target … --log …` reads
+the copy `bk<26>` on the host until it is there, logs its devices and the volume's `used_by`, waits for a worker
+`reconcile cluster done` after it, reads both again, and answers; at `HOLD bak18-gone` it waits for that copy and the
+volume's copy `bkv<26>`, which the same backup run makes next, to be gone (the VM's copy keeps a NIC on the spec's
+network until its upload ends, so a network delete fails before that, and a detach during the volume's copy times out)
+and answers again. Last line `BAK18_HOST=PASS`, `FAIL <what>` (both holds still answered; the spec runs its API check) or
+`NOT_COVERED <why>` (`skip-bak18`: no copy within the timeout, no `reconcile cluster done` within 6 minutes of it, or
+the copy gone before one).
 
 ## License
 

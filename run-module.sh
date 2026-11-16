@@ -30,6 +30,7 @@
 # approved L-x.
 # REGRESSION_CP_ROLL_SECONDS (BIL-25 only, set by lanes-dev-sequential.json): how long the runner rolls the control plane
 # when the spec asks (below).
+# REGRESSION_PHASE4_KEYS (phase4/ only): a directory with v.pub and u.pub, passed to the job as PHASE4_KEY_V/U (below).
 set -uo pipefail
 
 if [ "$#" -lt 6 ] || [ "$#" -gt 7 ]; then
@@ -164,6 +165,20 @@ if [ -n "$cp_roll_seconds" ] && ! [[ "$cp_roll_seconds" =~ ^[0-9]+$ && "$cp_roll
   echo "REGRESSION_CP_ROLL_SECONDS must be whole seconds, 0 to 1800: $cp_roll_seconds" >&2
   exit 2
 fi
+# Phase 4 (phase4/, phase4-backup/): REGRESSION_PHASE4_KEYS names a directory with v.pub and u.pub, the public halves of
+# the run's key pairs V and U (`python3 phase4.py keys <dir>` makes them); each goes to the job as PHASE4_KEY_V and
+# PHASE4_KEY_U. Only a one-line public key is passed: the private halves stay on the agent's machine.
+key_env=()
+if [ -n "${REGRESSION_PHASE4_KEYS:-}" ]; then
+  for key in v u; do
+    file="$REGRESSION_PHASE4_KEYS/$key.pub"
+    if [ ! -f "$file" ] || [ "$(wc -l < "$file" | tr -d ' ')" != "1" ] || ! grep -q '^ssh-[a-z0-9-]* AAAA' "$file"; then
+      echo "REGRESSION_PHASE4_KEYS: $file is not one public key line (ssh-<type> AAAA…)" >&2
+      exit 2
+    fi
+    key_env+=(--env "PHASE4_KEY_$(tr a-z A-Z <<< "$key")=$(cat "$file")")
+  done
+fi
 meter_jobs() {
   k -n "$app_ns" get jobs -o json | python3 -c '
 import json, sys
@@ -204,7 +219,7 @@ k -n "$ns" create configmap "$specs_cm" \
 since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # pipefail: a failing kubectl, patch-job.py or create all end in `exit 2`.
 k -n "$ns" create job "$job" --from="cronjob/$cronjob" --dry-run=client -o json \
-  | python3 "$runner_dir/patch-job.py" "$specs_cm" | k -n "$ns" create -f - || exit 2
+  | python3 "$runner_dir/patch-job.py" "$specs_cm" ${key_env[@]+"${key_env[@]}"} | k -n "$ns" create -f - || exit 2
 
 pod=""; phase=""
 for _ in $(seq 1 120); do

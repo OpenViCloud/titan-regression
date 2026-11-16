@@ -27,7 +27,8 @@ Repo này không có hệ thống nào để chạy: spec chạy bằng runner `
 │                   #   (--column dev --lanes lanes-dev*.json: kế hoạch cho cụm dev, đối chiếu cột Dev)
 ├── lanes.json       # module nào chạy ở lane nào, lane chờ nhau ở đâu
 ├── lanes-dev.json, lanes-dev-sequential.json  # cùng thứ cho cụm dev: hai lane / một lane, chỉ module có Dev = yes, max_pods 1
-├── patch-job.py     # trỏ volume `specs` của một job vào ConfigMap riêng của nó (run-module.sh dùng)
+├── patch-job.py     # trỏ volume `specs` của một job vào ConfigMap riêng của nó, thêm env `--env NAME=VALUE` (run-module.sh dùng)
+├── phase4.py        # phía agent của Phase 4 (phase4/, phase4-backup/): keys, connect, wait, go/skip, host, bak18, disconnect — README §Phase 4
 ├── test_*.py        # test của các script trên — python3 test_count_cases.py …
 ├── selftest/        # test của lib không cần Playwright; ngoài lib/ vì runner chép mọi file của lib/ vào e2e/ và `testMatch`
 │                   #   mặc định của Playwright chạy cả *.test.ts — node --test 'selftest/*.test.ts' (Node ≥ 22.18 tự bỏ phần
@@ -41,6 +42,8 @@ Repo này không có hệ thống nào để chạy: spec chạy bằng runner `
 │   ├── token.ts     #   newSecret(): bí mật token API ovc_…; callWithToken(): gọi API bằng token thay JWT
 │   ├── portal-config.ts  # topUpEnabledOf(PORTAL): đọc <portal>/config.json một lần; đọc không được ⇒ ném (case đỏ, không N/A)
 │   ├── meter.ts     #   meterTickMs(METER_INTERVAL_MINUTES): một tick meter của env (trống ⇒ 10 phút, mặc định của control plane); sai hình ⇒ ném
+│   ├── host-hold.ts #   hold(step, facts): log HOLD, chờ go-<step>/skip-<step> của Phase 4
+│   ├── incus-names.ts  # incusName(prefix, id), projectOf(tenantId), phase4Key('V'|'U') đọc PHASE4_KEY_* (không import: selftest chạy được)
 │   └── local-proxy.ts  # tự bật khi URL là *.localhost (cụm dev `local`: issuer Keycloak mang cổng 8080)
 └── <module>/*.spec.ts
 ```
@@ -85,6 +88,8 @@ Hai lane (`lanes.json`) chạy cùng lúc, mỗi lane một tenant test; `admin-
 | `login-page` | a | không | realm Keycloak (chỉ đọc) |
 | `cleanup` | a, b | xoá mọi `rg-*`/`tfacc-*` của tenant lane | không |
 | `terraform-provider` | a | tạo network, firewall rule, SSH key, VM, volume, LB bằng token của lane (token tạo rồi xoá) | lấy một /64 IPv6 từ khối của cluster |
+
+Ngoài bảng (bảng chỉ có module của `lanes.json`): `phase4/` và `phase4-backup/` (agent chạy, README §Phase 4) nâng quota của tenant lượt rồi trả, nên không chạy cạnh nhau; OBS-05 của `phase4/` xoá alias template của cluster (mọi tenant) tới khi sync lại.
 
 Luật rút ra, ghi ở `lanes.json`: `billing`↔`concurrency` (cùng ví `admin-test`) và `billing`↔`admin` (cùng danh sách topup Pending: topup tạm của BIL-10 làm ADM-08 gặp một hàng Pending lạ; cùng audit log và giá tier) không chồng nhau (`exclusive`); ba module lấy /64 IPv6 (`load-balancer`, `portal-ui`, `terraform-provider`) ở chung một lane (`same_lane`); `network`, `concurrency`, `admin` cũng lấy /64 và hôm nay cùng lane a, chưa có trong `same_lane`; hai create cùng lúc nay đều thành công, nên nới nhóm này chỉ cần đo lịch tách lane trước. `contract` không đụng ví nên không bị khoá. Locator tìm hàng theo tên tenant bằng khớp chuỗi con (`hasText: 'beta-user'`) khớp cả hàng `beta-user-2`: tìm theo id, hoặc khớp có chặn đuôi `-<chữ>` như `tenantRowOf()` của `admin/admin-portal.spec.ts`.
 

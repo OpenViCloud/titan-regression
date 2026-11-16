@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests of run-module.sh's wait loop against a fake kubectl and a sleep that returns at once. Run: python3 test_run_module.py"""
+import json
 import os
 import pathlib
 import subprocess
@@ -61,9 +62,12 @@ FAKE_KUBECTL = textwrap.dedent('''\
     elif args[:2] == ["create", "configmap"]:
         print("kind: ConfigMap")
     elif args[:2] == ["create", "job"]:
-        print(json.dumps({"spec": {"template": {"spec": {"volumes": [{"name": "specs", "configMap": {"name": "x"}}]}}}}))
+        print(json.dumps({"spec": {"template": {"spec": {"volumes": [{"name": "specs", "configMap": {"name": "x"}}],
+                                                         "containers": [{"name": "playwright"}]}}}}))
     elif args[:1] in (["apply"], ["create"]):
-        sys.stdin.read()
+        data = sys.stdin.read()
+        if args[:1] == ["create"] and os.environ.get("FAKE_CREATED"):
+            pathlib.Path(os.environ["FAKE_CREATED"]).write_text(data)
     elif args[:1] == ["exec"]:
         if "test" in args:
             reads = state / "phase-reads"
@@ -121,6 +125,7 @@ def run(phases, done_reads=0, earlier=None, **extra_env):
                    FAKE_DONE_READS=str(done_reads), **extra_env)
         env.pop("REGRESSION_WORKER_APPS", None) if "REGRESSION_WORKER_APPS" not in extra_env else None
         env.pop("REGRESSION_CP_ROLL_SECONDS", None) if "REGRESSION_CP_ROLL_SECONDS" not in extra_env else None
+        env.pop("REGRESSION_PHASE4_KEYS", None) if "REGRESSION_PHASE4_KEYS" not in extra_env else None
         result = subprocess.run(
             ["bash", str(HERE / "run-module.sh"), str(tmp / "kubeconfig"), str(src), "mod", "t1",
              str(tmp / "out"), str(tmp / "logs")],
@@ -351,6 +356,42 @@ class ResultCopyTest(unittest.TestCase):
         self.assertIn("SHA256_MISMATCH", out)
         self.assertNotIn("delete job", calls)
         self.assertEqual(code, 1, out)
+
+
+class Phase4KeysTest(unittest.TestCase):
+    def keys(self, tmp, v="ssh-ed25519 AAAAv rg-p4-v\n", u="ssh-ed25519 AAAAu rg-p4-u\n"):
+        d = pathlib.Path(tmp) / "keys"
+        d.mkdir()
+        if v is not None:
+            (d / "v.pub").write_text(v)
+        if u is not None:
+            (d / "u.pub").write_text(u)
+        return str(d)
+
+    def test_the_public_keys_reach_the_job_as_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            created = pathlib.Path(tmp) / "job.json"
+            code, out, _ = run("Running", done_reads=1, REGRESSION_PHASE4_KEYS=self.keys(tmp), FAKE_CREATED=str(created))
+            self.assertEqual(code, 0, out)
+            env = json.loads(created.read_text())["spec"]["template"]["spec"]["containers"][0]["env"]
+            self.assertEqual(env, [{"name": "PHASE4_KEY_V", "value": "ssh-ed25519 AAAAv rg-p4-v"},
+                                   {"name": "PHASE4_KEY_U", "value": "ssh-ed25519 AAAAu rg-p4-u"}])
+
+    def test_a_missing_or_private_key_stops_the_run_before_any_job(self):
+        for v, u in ((None, "ssh-ed25519 AAAAu u\n"), ("-----BEGIN OPENSSH PRIVATE KEY-----\n", "ssh-ed25519 AAAAu u\n"),
+                     ("ssh-ed25519 AAAAv v\nssh-ed25519 AAAAw w\n", "ssh-ed25519 AAAAu u\n")):
+            with tempfile.TemporaryDirectory() as tmp:
+                code, out, calls = run("Running", done_reads=1, REGRESSION_PHASE4_KEYS=self.keys(tmp, v, u))
+                self.assertEqual(code, 2, out)
+                self.assertIn("REGRESSION_PHASE4_KEYS", out)
+                self.assertNotIn("create job", calls)
+
+    def test_without_the_variable_the_job_has_no_key_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            created = pathlib.Path(tmp) / "job.json"
+            code, out, _ = run("Running", done_reads=1, FAKE_CREATED=str(created))
+            self.assertEqual(code, 0, out)
+            self.assertNotIn("PHASE4_KEY", created.read_text())
 
 
 if __name__ == "__main__":

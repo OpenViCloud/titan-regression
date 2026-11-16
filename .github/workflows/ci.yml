@@ -51,5 +51,8 @@ jobs:
       - name: run-module.sh
         run: python3 test_run_module.py
 
+      - name: phase4.py
+        run: python3 test_phase4.py
+
       - name: run-lanes.py
         run: python3 test_run_lanes.py && python3 run-lanes.py --check
