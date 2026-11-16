@@ -12,6 +12,7 @@ evidence as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>`.
     python3 phase4.py host --control <socket> --target <user@host> --log <file> [--keys <dir>] -- '<command>'
     python3 phase4.py host --local --log <file> [--keys <dir>] -- '<command>'      # same entry, on this machine
     python3 phase4.py bak18 --kubeconfig <kc> --job <job> --control <socket> --target <user@host> --log <file>
+    python3 phase4.py sample --control <socket> --target <user@host> --project <t-…> --stop <file> --log <file> [--every 30]
     python3 phase4.py disconnect --control <socket> --target <user@host>
 
 <job> is the name run-module.sh gives the job (regression-<module>-<label>). The host command runs through the
@@ -26,11 +27,15 @@ one) after the copy was seen, reads both again while the copy still exists, then
 it waits for that copy and the volume's copy bkv<26> to be gone (they hold the spec's network and its detach) and creates
 go-bak18-gone. Last line
 BAK18_HOST=PASS (exit 0) | FAIL <what> (exit 1, go-bak18 and go-bak18-gone still created: the spec measures the API
-side; the spec holds at bak18-gone whatever its API check says) | NOT_COVERED <why> (exit 4, skip-bak18: no copy
-before the timeout, no `reconcile cluster done` within 6 minutes of it, or the copy gone before one).
+side; the spec holds at bak18-gone whatever its API check says) | NOT_COVERED <why> (exit 4, skip-bak18, then
+go-bak18-gone: no copy before the timeout, no `reconcile cluster done` after it before the timeout, or the copy gone
+before one).
 
-Exit 2: usage, the pending HOLD is not the step asked for, or no ControlMaster on the socket (bak18 then leaves the
-spec's hold unanswered: run `connect` again and bak18 again). wait: exit 3 = the runner finished with no HOLD pending.
+sample reads the project every <every> seconds, read-only, and logs a line per object only when its summary changed
+(`GONE <object>` when it left), then `sample objects=<n>`; a failed read is an `ERROR` line and sampling goes on; it
+ends after the sample that finds <stop> there.
+
+Exit 2: usage, the pending HOLD is not the step asked for, or no ControlMaster on the socket. wait: exit 3 = the runner finished with no HOLD pending.
 """
 import argparse
 import datetime
@@ -375,6 +380,100 @@ def wait_until_gone(args, kube, log, project, pool):
     answer(kube, "bak18-gone", "go", log)
 
 
+def summaries(query, project, pool):
+    """{object: one-line summary} of the project on the host: instances, networks, network ACLs, custom volumes with
+    their snapshots, load balancers, image aliases (the objects Titan names); and the reads that failed."""
+    lines, errors = {}, []
+
+    def read(label, path):
+        found, err = query(path)
+        if err:
+            errors.append(f"{label}: {err}")
+        return found or []
+
+    for i in read("instances", f"/1.0/instances?recursion=1&project={project}"):
+        cfg, devices = i.get("config", {}), i.get("expanded_devices", {})
+        nics = {k: v.get("network") for k, v in devices.items() if v.get("type") == "nic"}
+        disks = {k: v.get("source") for k, v in devices.items() if v.get("type") == "disk" and v.get("path") != "/"}
+        # a backup copy masks the volumes of its VM as `none` (BAK-18)
+        none = sorted(k for k, v in devices.items() if v.get("type") == "none")
+        lines[f"instance {i['name']}"] = (f"status={i.get('status')} type={i.get('type')} titan-name={cfg.get('user.titan-name')} "
+                                          f"limits.cpu={cfg.get('limits.cpu')} limits.memory={cfg.get('limits.memory')} "
+                                          f"nics={nics} disks={disks} none={none}")
+    for n in read("networks", f"/1.0/networks?recursion=1&project={project}"):
+        if not n.get("managed"):
+            continue
+        cfg = n.get("config", {})
+        keep = {k: cfg.get(k) for k in ("network", "ipv4.address", "ipv4.nat", "ipv6.address", "ipv6.nat",
+                                          "security.acls", "volatile.network.ipv6.address")}
+        lines[f"network {n['name']}"] = f"type={n.get('type')} {keep} used_by={len(n.get('used_by') or [])}"
+    for a in read("acls", f"/1.0/network-acls?recursion=1&project={project}"):
+        rules = [f"{r.get('action')}:{r.get('protocol') or 'any'}:{r.get('source') or '-'}->{r.get('destination') or '-'}:"
+                 f"{r.get('destination_port') or '-'}:{r.get('state')}" for r in a.get("ingress", [])]
+        lines[f"acl {a['name']}"] = f"ingress={rules} egress_rules={len(a.get('egress', []))} used_by={len(a.get('used_by') or [])}"
+    for v in read("volumes", f"/1.0/storage-pools/{pool}/volumes/custom?recursion=1&project={project}"):
+        snaps, serr = query(f"/1.0/storage-pools/{pool}/volumes/custom/{v['name']}/snapshots?project={project}")
+        names = sorted(x.rsplit("/", 1)[-1] for x in (snaps or []))
+        lines[f"volume {v['name']}"] = (f"size={v.get('config', {}).get('size')} used_by={v.get('used_by')} "
+                                        f"snapshots={names}{' snapshot-error=' + serr if serr else ''}")
+    for net in read("network names", f"/1.0/networks?recursion=0&project={project}"):
+        name = net.rsplit("/", 1)[-1].split("?")[0]
+        if not name.startswith("net-"):
+            continue
+        for lb in read(f"load balancers of {name}", f"/1.0/networks/{name}/load-balancers?recursion=1&project={project}"):
+            ports = [f"{x.get('protocol')}:{x.get('listen_port')}->{x.get('target_backend')}" for x in lb.get("ports", [])]
+            backends = [f"{b.get('name')}={b.get('target_address')}:{b.get('target_port')}" for b in lb.get("backends", [])]
+            lines[f"load-balancer {name}/{lb.get('listen_address')}"] = f"ports={ports} backends={backends}"
+    for a in read("aliases", "/1.0/images/aliases?recursion=1"):
+        image, ierr = query(f"/1.0/images/{a.get('target')}")
+        arch = (image or {}).get("architecture")
+        lines[f"alias {a['name']}"] = f"target={a.get('target')} type={a.get('type')} architecture={arch}{' image-error=' + ierr if ierr else ''}"
+    return lines, errors
+
+
+def changes(previous, current):
+    """Lines for what differs from the previous sample: `GONE <object>`, or `<object> <summary>`."""
+    out = []
+    for key in sorted(set(previous) | set(current)):
+        if key not in current:
+            out.append(f"GONE {key}")
+        elif previous.get(key) != current[key]:
+            out.append(f"{key} {current[key]}")
+    return out
+
+
+def cmd_sample(args):
+    args.local = False
+
+    def query(path):
+        try:
+            code, output = run_command(args, f"sudo incus query '{path}'")
+        except NoMaster as error:
+            return None, str(error)
+        if code != 0:
+            return None, output.strip()
+        try:
+            return json.loads(output), None
+        except json.JSONDecodeError as error:
+            return None, f"not JSON: {error}"
+
+    log = open(args.log, "a", encoding="utf-8")
+    if log.tell() == 0:
+        log.write(f"# phase4.py sample (ssh {args.target}, ControlMaster) · project {args.project} · "
+                  f"{now().strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
+    previous = {}
+    while True:
+        stamp = now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        current, errors = summaries(query, args.project, args.pool)
+        for line in [f"ERROR {e}" for e in errors] + changes(previous, current) + [f"sample objects={len(current)}"]:
+            log.write(f"{stamp} {line}\n")
+        log.flush()
+        previous = current
+        if os.path.exists(args.stop):
+            return 0
+        time.sleep(args.every)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -415,6 +514,14 @@ def main(argv=None):
     p.add_argument("--keys")
     p.add_argument("command", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_host)
+    p = sub.add_parser("sample")
+    ssh_opts(p)
+    p.add_argument("--project", required=True)
+    p.add_argument("--every", type=float, default=30)
+    p.add_argument("--stop", required=True)
+    p.add_argument("--log", required=True)
+    p.add_argument("--pool", default="default")
+    p.set_defaults(func=cmd_sample)
     p = sub.add_parser("bak18")
     kube_args(p)
     ssh_opts(p)

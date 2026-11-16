@@ -68,7 +68,7 @@ FAKE_KUBECTL = textwrap.dedent('''\
 
 FAKE_SSH = textwrap.dedent('''\
     #!/usr/bin/env python3
-    import os, pathlib, re, sys
+    import json, os, pathlib, re, sys
     state = pathlib.Path(os.environ["FAKE_STATE"])
     with open(state / "calls", "a") as calls:
         calls.write("ssh " + " ".join(sys.argv[1:]) + "\\n")
@@ -78,6 +78,16 @@ FAKE_SSH = textwrap.dedent('''\
     if "-O" in sys.argv:
         sys.exit(1 if os.environ.get("FAKE_NO_MASTER") else 0)
     command = sys.argv[-1]
+    queries = json.loads(os.environ.get("FAKE_QUERIES", "{}"))
+    q = re.search(r"incus query '([^']+)'", command)
+    if q and q.group(1) in queries:
+        counter = state / "query-reads"
+        n = int(counter.read_text()) + 1 if counter.exists() else 1
+        counter.write_text(str(n))
+        if os.environ.get("FAKE_STOP_AFTER") and n >= int(os.environ["FAKE_STOP_AFTER"]):
+            pathlib.Path(os.environ["FAKE_STOP_FILE"]).write_text("")
+        print(json.dumps(queries[q.group(1)]))
+        sys.exit(0)
     m = re.search(r"incus query '/1.0/instances/([a-z0-9]+)", command)
     if m:
         name = m.group(1)
@@ -399,6 +409,69 @@ class ConnectTest(unittest.TestCase):
         code, out, calls, state = run("disconnect", *SSH)
         self.assertEqual(code, 0, out)
         self.assertIn(f"ssh -S {state.parent}/ctl -O exit debian@host", calls)
+
+
+P = "?project=t-1"
+SAMPLE_QUERIES = {
+    f"/1.0/instances?recursion=1&project=t-1": [
+        {"name": COPY, "status": "Stopped", "type": "virtual-machine", "config": {"user.titan-name": "rg-vm-x"},
+         "expanded_devices": {"root": {"type": "disk", "path": "/"}, "eth0": {"type": "nic", "network": "net-1"},
+                              VOL: {"type": "none"}}}],
+    "/1.0/networks?recursion=1&project=t-1": [
+        {"name": "net-1", "managed": True, "type": "ovn", "config": {"ipv4.address": "10.77.0.1/24"}, "used_by": ["a"]}],
+    "/1.0/network-acls?recursion=1&project=t-1": [],
+    "/1.0/storage-pools/default/volumes/custom?recursion=1&project=t-1": [
+        {"name": VOL, "config": {"size": "10GiB"}, "used_by": [f"/1.0/instances/{VM}{P}"]}],
+    f"/1.0/storage-pools/default/volumes/custom/{VOL}/snapshots{P}": [],
+    "/1.0/networks?recursion=0&project=t-1": ["/1.0/networks/net-1?project=t-1"],
+    "/1.0/networks/net-1/load-balancers?recursion=1&project=t-1": [],
+    "/1.0/images/aliases?recursion=1": [],
+}
+
+
+class SampleTest(unittest.TestCase):
+    def test_one_sample_prints_a_line_per_object_through_the_socket(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        (tmp / "stop").write_text("")
+        code, out, calls, state = run("sample", *SSH, "--project", "t-1", "--every", "0", "--stop", str(tmp / "stop"),
+                                      "--log", "{tmp}/sampler.log", FAKE_QUERIES=json.dumps(SAMPLE_QUERIES))
+        self.assertEqual(code, 0, out)
+        log = (state.parent / "sampler.log").read_text()
+        self.assertRegex(log, r"^# phase4.py sample \(ssh debian@host, ControlMaster\) · project t-1 · ")
+        self.assertRegex(log, rf"\dZ instance {COPY} status=Stopped type=virtual-machine titan-name=rg-vm-x .*"
+                              rf"nics=\{{'eth0': 'net-1'\}} disks=\{{\}} none=\['{VOL}'\]")
+        self.assertRegex(log, rf"\dZ volume {VOL} size=10GiB used_by=\['/1.0/instances/{VM}\?project=t-1'\] snapshots=\[\]")
+        self.assertIn("network net-1 type=ovn", log)
+        self.assertRegex(log, r"sample objects=3\n$")
+        self.assertIn("-S " + str(state.parent / "ctl"), calls)
+
+    def test_changes_only_and_gone_objects(self):
+        before = {"instance a": "x", "network n": "same", "volume v": "y"}
+        after = {"instance a": "x2", "network n": "same"}
+        self.assertEqual(phase4.changes(before, after), ["instance a x2", "GONE volume v"])
+
+    def test_it_samples_until_the_stop_file_is_there(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        # 8 reads make one sample; the stop file appears during the second
+        code, out, _, state = run("sample", *SSH, "--project", "t-1", "--every", "0", "--stop", str(tmp / "stop"),
+                                  "--log", "{tmp}/sampler.log", FAKE_QUERIES=json.dumps(SAMPLE_QUERIES),
+                                  FAKE_STOP_AFTER="9", FAKE_STOP_FILE=str(tmp / "stop"))
+        self.assertEqual(code, 0, out)
+        log = (state.parent / "sampler.log").read_text()
+        self.assertEqual(log.count("sample objects=3"), 2)
+        self.assertEqual(log.count(f"instance {COPY} "), 1)
+
+    def test_a_failed_read_is_an_error_line_and_the_sample_goes_on(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        (tmp / "stop").write_text("")
+        queries = dict(SAMPLE_QUERIES)
+        del queries["/1.0/network-acls?recursion=1&project=t-1"]
+        code, out, _, state = run("sample", *SSH, "--project", "t-1", "--every", "0", "--stop", str(tmp / "stop"),
+                                  "--log", "{tmp}/sampler.log", FAKE_QUERIES=json.dumps(queries))
+        self.assertEqual(code, 0, out)
+        log = (state.parent / "sampler.log").read_text()
+        self.assertIn("ERROR acls:", log)
+        self.assertIn(f"volume {VOL}", log)
 
 
 if __name__ == "__main__":

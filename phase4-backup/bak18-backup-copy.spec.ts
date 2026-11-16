@@ -112,9 +112,9 @@ test.describe.serial('phase4 backup copy', () => {
     await waitVolume('volume on Incus', volumeId, (v) => v.status === 'Available')
     expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${volumeId}/attach`, { vmId }), 202)
     await waitVolume('volume attached', volumeId, (v) => v.currentAttachedVmId === vmId && !VOLUME_PENDING.has(v.status))
-    const covered = await hold('bak18', { project: projectOf(tenantId), vm: incusName('vm', vmId),
-      copy: incusName('bk', vmId), volume: incusName('vol', volumeId) }, COPY_WAIT_MS)
     try {
+      const covered = await hold('bak18', { project: projectOf(tenantId), vm: incusName('vm', vmId),
+        copy: incusName('bk', vmId), volume: incusName('vol', volumeId) }, COPY_WAIT_MS)
       test.skip(!covered, 'NOT COVERED: no copy caught, or no reconcile while it existed (phase4.py bak18)')
       const after = await readVolume(volumeId)
       log(`BAK-18 ${volumeShape(after)}`)
