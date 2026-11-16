@@ -63,6 +63,27 @@ class PatchJobTest(unittest.TestCase):
         self.assertNotEqual(run.returncode, 0)
         self.assertEqual(run.stdout, "")
 
+    def test_env_is_added_to_every_container_after_what_it_had(self):
+        j = job([SPECS])
+        j["spec"]["template"]["spec"]["containers"] = [{"name": "playwright", "env": [{"name": "HOME", "value": "/work"}]}]
+        out = patch_job.patch(j, "cm", {"PHASE4_KEY_V": "ssh-ed25519 AAAA v"})
+        self.assertEqual(out["spec"]["template"]["spec"]["containers"][0]["env"],
+                         [{"name": "HOME", "value": "/work"}, {"name": "PHASE4_KEY_V", "value": "ssh-ed25519 AAAA v"}])
+
+    def test_cli_takes_env_as_name_equals_value(self):
+        run = subprocess.run([sys.executable, str(HERE / "patch-job.py"), "cm", "--env", "A=x=y", "--env", "B="],
+                             input=json.dumps(job([SPECS])), capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        env = json.loads(run.stdout)["spec"]["template"]["spec"]["containers"][0]["env"]
+        self.assertEqual(env, [{"name": "A", "value": "x=y"}, {"name": "B", "value": ""}])
+
+    def test_cli_refuses_env_without_a_name(self):
+        for bad in ("novalue", "=x", "lower-case=x"):
+            run = subprocess.run([sys.executable, str(HERE / "patch-job.py"), "cm", "--env", bad],
+                                 input=json.dumps(job([SPECS])), capture_output=True, text=True)
+            self.assertEqual(run.returncode, 2, bad)
+            self.assertEqual(run.stdout, "")
+
 
 if __name__ == "__main__":
     unittest.main()
