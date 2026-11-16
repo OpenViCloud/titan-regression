@@ -217,7 +217,7 @@ hand: without it the spec skips as N/A after 10 minutes), and only in the sequen
 
 Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — state changed on the Incus host outside
 OpenViCloud, needs an approved `L-x` command (OBS-13 only reads the host's trust list), run by the agent with the
-specs of `phase4/` and `phase4-backup/` (§Phase 4); `site` — the public site through Playwright MCP on the agent's machine;
+spec of `phase4/`; BAK-18, a `(host)` case of `backup` with a module of its own, `phase4-backup/` (§Phase 4); `site` — the public site through Playwright MCP on the agent's machine;
 `worker`, `control-plane-image` — read-only `gh`/`curl`/`kubectl` and `go test` of a worker clone on the agent's machine.
 
 Four things change state every tenant of the environment shares: ADM-06 (a global price), ADM-15 (the cluster's
@@ -243,7 +243,7 @@ Two modules of this repository are run by the agent, not by `run-lanes.py`: `pha
 `go-<step>` or `skip-<step>` in `/work/results/` of its pod; the agent does the host commands of the step in between.
 `phase4.py` is every command the agent runs for that, so nobody writes a shell loop by hand; each `host` command and
 each answer given `--log` goes to that evidence log as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>` (`bak18`
-logs its reads but not the polls that wait for the copy, only the read that ends the wait). `host` refuses (exit 2)
+logs its reads but not the polls that wait for a copy, only the read that ends each wait). `host` refuses (exit 2)
 when the ControlMaster is not there, rather than open a connection of its own:
 
 ```bash
@@ -264,19 +264,21 @@ run of it without them is red at its first step (`phase4-backup/` reads no key).
 
 `phase4-backup/` waits for the hourly `backup-schedule` run (minute 0 UTC): a new VM with a volume attached is backed up
 by the first run after it. Its job is its own, because the wait does not fit in the runner's 90 minutes
-(`activeDeadlineSeconds`) after the rest of Phase 4; inside those 90 it holds up to 60 minutes for the copy and 15 for
-the uploads of the VM and the volume, so start it between `:40` and `:55` (a run of the CronJob made by hand, where the release allows it, takes
+(`activeDeadlineSeconds`) after the rest of Phase 4; inside those 90 it holds up to 60 minutes for the copy and 12 for
+the uploads of the VM and the volume, so start it between `:40` (the wait for the copy stays under 20 minutes) and
+`:55` (its setup ends before `:00`) (a run of the CronJob made by hand, where the release allows it, takes
 the place of `:00`). It has one VM, one volume and one network of its own, and raises the quota to fit them, given back
 after; not beside `phase4/`, whose quota raise it would undo. The backup run it waits for uploads one archive of its
-VM and one of its volume to the environment's bucket; the module deletes both resources, and the archives stay (the
-bucket keeps the 7 newest per resource, titan-ops features/backup/design.md#incus-backup). At `HOLD bak18`,
+VM and one of its volume to the environment's bucket; the module deletes both resources, and the two archives stay for
+good: the bucket keeps the 7 newest per resource and removes none of a deleted resource
+(`titan-ops features/backup/design.md#incus-backup`). At `HOLD bak18`,
 `python3 phase4.py bak18 --kubeconfig … --job regression-phase4-backup-<label> --control … --target … --log …` reads
 the copy `bk<26>` on the host until it is there, logs its devices and the volume's `used_by`, waits for a worker
 `reconcile cluster done` after it, reads both again, and answers; at `HOLD bak18-gone` it waits for that copy and the
 volume's copy `bkv<26>`, which the same backup run makes next, to be gone (the VM's copy keeps a NIC on the spec's
 network until its upload ends, so a network delete fails before that, and a detach during the volume's copy times out)
-and answers again. Last line `BAK18_HOST=PASS`, `FAIL <what>` (both holds still answered; the spec runs its API check) or
-`NOT_COVERED <why>` (`skip-bak18`: no copy within the timeout, no `reconcile cluster done` within 6 minutes of it, or
+and answers again. Last line `BAK18_HOST=PASS`, `FAIL <what>` (both holds still answered; the spec runs its API check, and holds at `bak18-gone` whatever it finds) or
+`NOT_COVERED <why>` (`skip-bak18`, then `bak18-gone` answered as above: no copy within the timeout, no `reconcile cluster done` within 6 minutes of it, or
 the copy gone before one).
 
 ## License

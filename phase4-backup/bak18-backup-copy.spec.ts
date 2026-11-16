@@ -13,9 +13,9 @@ import { incusName, projectOf } from './incus-names'
 // volume is on the VM and nowhere else. One backup per VM per day: the VM is new, so the first backup-schedule run
 // after it (minute 0 UTC) backs it up. A job of its own: the wait for :00 does not fit in the runner's 90 minutes
 // (activeDeadlineSeconds) after the rest of Phase 4. Within those 90: setup (about a minute on dev), the copy (up to
-// 60), the uploads of the VM and the volume (up to 15), afterAll (up to 10).
+// 60), the uploads of the VM and the volume (up to 12), afterAll (up to 10), and the copy of the results.
 const COPY_WAIT_MS = 60 * 60_000
-const GONE_WAIT_MS = 15 * 60_000
+const GONE_WAIT_MS = 12 * 60_000
 // Statuses outside every quota (OpenViCloud/titan-cloud-console:portal/src/lib/quota.ts, the control plane's OccupiesQuota)
 const OUTSIDE = new Set(['Deleting', 'Deleted', 'NotFound', 'Failed'])
 const VOLUME_PENDING = new Set(['Creating', 'Attaching', 'Detaching', 'Deleting'])
@@ -112,17 +112,19 @@ test.describe.serial('phase4 backup copy', () => {
     await waitVolume('volume on Incus', volumeId, (v) => v.status === 'Available')
     expectStatus(await call('tenant', 'POST', `/v1/tenant/volumes/${volumeId}/attach`, { vmId }), 202)
     await waitVolume('volume attached', volumeId, (v) => v.currentAttachedVmId === vmId && !VOLUME_PENDING.has(v.status))
-    if (!await hold('bak18', { project: projectOf(tenantId), vm: incusName('vm', vmId), copy: incusName('bk', vmId),
-      volume: incusName('vol', volumeId) }, COPY_WAIT_MS)) {
-      test.skip(true, 'NOT COVERED: no copy caught, or no reconcile while it existed (phase4.py bak18)')
+    const covered = await hold('bak18', { project: projectOf(tenantId), vm: incusName('vm', vmId),
+      copy: incusName('bk', vmId), volume: incusName('vol', volumeId) }, COPY_WAIT_MS)
+    try {
+      test.skip(!covered, 'NOT COVERED: no copy caught, or no reconcile while it existed (phase4.py bak18)')
+      const after = await readVolume(volumeId)
+      log(`BAK-18 ${volumeShape(after)}`)
+      expect(after.currentAttachedVmId).toBe(vmId)
+      expect(after.currentAttachedElsewhere).toBe(false)
+    } finally {
+      // The VM's copy keeps a NIC on this network until its upload ends (a network delete fails before that), and the
+      // same run then copies the volume (a detach meanwhile times out): clean up after both copies are gone
+      await hold('bak18-gone', { project: projectOf(tenantId), copy: incusName('bk', vmId),
+        volumeCopy: incusName('bkv', volumeId) }, GONE_WAIT_MS)
     }
-    const after = await readVolume(volumeId)
-    log(`BAK-18 ${volumeShape(after)}`)
-    expect(after.currentAttachedVmId).toBe(vmId)
-    expect(after.currentAttachedElsewhere).toBe(false)
-    // The VM's copy keeps a NIC on this network until its upload ends (a network delete fails before that), and the
-    // same run then copies the volume (a detach meanwhile times out): clean up after both copies are gone
-    await hold('bak18-gone', { project: projectOf(tenantId), copy: incusName('bk', vmId),
-      volumeCopy: incusName('bkv', volumeId) }, GONE_WAIT_MS)
   })
 })

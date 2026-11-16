@@ -26,10 +26,11 @@ one) after the copy was seen, reads both again while the copy still exists, then
 it waits for that copy and the volume's copy bkv<26> to be gone (they hold the spec's network and its detach) and creates
 go-bak18-gone. Last line
 BAK18_HOST=PASS (exit 0) | FAIL <what> (exit 1, go-bak18 and go-bak18-gone still created: the spec measures the API
-side) | NOT_COVERED <why> (exit 4, skip-bak18: no copy before the timeout, no `reconcile cluster done` within 6
-minutes of it, or the copy gone before one).
+side; the spec holds at bak18-gone whatever its API check says) | NOT_COVERED <why> (exit 4, skip-bak18: no copy
+before the timeout, no `reconcile cluster done` within 6 minutes of it, or the copy gone before one).
 
-Exit 2: usage, or the pending HOLD is not the step asked for. wait: exit 3 = the runner finished with no HOLD pending.
+Exit 2: usage, the pending HOLD is not the step asked for, or no ControlMaster on the socket (bak18 then leaves the
+spec's hold unanswered: run `connect` again and bak18 again). wait: exit 3 = the runner finished with no HOLD pending.
 """
 import argparse
 import datetime
@@ -292,9 +293,13 @@ def cmd_bak18(args):
             log.entry(command, output, code)
         return json.loads(output) if code == 0 else None
 
+    pool = None
+
     def give_up(why):
-        print(f"BAK18_HOST=NOT_COVERED {why}")
+        # the spec holds at bak18-gone after a skip too: a copy seen but not measured still holds the network
         answer(kube, "bak18", "skip", log)
+        wait_until_gone(args, kube, log, project, pool)
+        print(f"BAK18_HOST=NOT_COVERED {why}")
         return 4
 
     source = query(f"/1.0/instances/{vm}")
@@ -302,7 +307,7 @@ def cmd_bak18(args):
     if pool is None:
         answer(kube, "bak18", "go", log)
         wait_until_gone(args, kube, log, project, None)
-        print(f"BAK18_HOST=FAIL {vol} is not attached to {vm}")
+        print(f"BAK18_HOST=FAIL {'cannot read ' + vm if source is None else vol + ' is not attached to ' + vm}")
         return 1
     deadline = time.monotonic() + args.timeout_minutes * 60
     reads = 0
@@ -316,7 +321,8 @@ def cmd_bak18(args):
     if first is None:
         return give_up(f"{copy} gone right after it was seen")
     used = query(f"/1.0/storage-pools/{pool}/volumes/custom/{vol}")
-    reconcile_deadline = time.monotonic() + RECONCILE_WAIT_SECONDS
+    # the same deadline as the copy's: the spec's hold started before this script, and waits no longer
+    reconcile_deadline = min(time.monotonic() + RECONCILE_WAIT_SECONDS, deadline)
     while RECONCILE_DONE not in kube.worker_logs(seen):
         if time.monotonic() >= reconcile_deadline:
             return give_up(f"no '{RECONCILE_DONE}' of the worker since {seen}")
@@ -413,9 +419,9 @@ def main(argv=None):
     kube_args(p)
     ssh_opts(p)
     p.add_argument("--log", required=True)
-    # under the spec's holds (60 and 15 minutes), so the spec hears an answer before it gives up
+    # under the spec's holds (60 and 12 minutes), when bak18 starts within a minute or two of HOLD bak18
     p.add_argument("--timeout-minutes", type=float, default=58)
-    p.add_argument("--gone-timeout-minutes", type=float, default=14)
+    p.add_argument("--gone-timeout-minutes", type=float, default=11)
     p.set_defaults(func=cmd_bak18)
 
     args = parser.parse_args(argv)

@@ -335,19 +335,23 @@ class Bak18Test(unittest.TestCase):
     def test_no_copy_before_the_timeout_skips(self):
         env = self.env()
         del env[f"FAKE_INSTANCE_{COPY}"]
-        env["FAKE_LOG_AFTER_TOUCH"] = HOLD_BAK18 + "\n2026-11-16T11:03:00.000Z SKIP bak18"
+        env["FAKE_LOG_AFTER_TOUCH"] = HOLD_BAK18 + "\n2026-11-16T11:03:00.000Z SKIP bak18\n" + HOLD_GONE
+        env["FAKE_LOG_AFTER_TOUCH_2"] = env["FAKE_LOG_AFTER_TOUCH"] + "\n2026-11-16T11:04:00.000Z GO bak18-gone"
         code, out, _, state = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", "--timeout-minutes", "0", **env)
         self.assertEqual(code, 4, out)
         self.assertIn("BAK18_HOST=NOT_COVERED", out)
         self.assertTrue((state / "pod" / "skip-bak18").exists())
+        self.assertTrue((state / "pod" / "go-bak18-gone").exists())
 
     def test_a_copy_gone_before_the_reconcile_is_not_covered(self):
+        skipped = HOLD_BAK18 + "\n2026-11-16T11:03:00.000Z SKIP bak18\n" + HOLD_GONE
         code, out, _, state = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log",
-                                  **self.env(FAKE_COPY_READS_BEFORE_GONE="2",
-                                             FAKE_LOG_AFTER_TOUCH=HOLD_BAK18 + "\n2026-11-16T11:03:00.000Z SKIP bak18"))
+                                  **self.env(FAKE_COPY_READS_BEFORE_GONE="2", FAKE_LOG_AFTER_TOUCH=skipped,
+                                             FAKE_LOG_AFTER_TOUCH_2=skipped + "\n2026-11-16T11:04:00.000Z GO bak18-gone"))
         self.assertEqual(code, 4, out)
         self.assertIn("BAK18_HOST=NOT_COVERED", out)
         self.assertTrue((state / "pod" / "skip-bak18").exists())
+        self.assertTrue((state / "pod" / "go-bak18-gone").exists())
 
     def test_a_volume_not_on_the_vm_fails_and_still_answers_both_holds(self):
         detached = {"name": VM, "expanded_devices": {"root": {"type": "disk", "path": "/", "pool": "default"}}}
@@ -357,6 +361,21 @@ class Bak18Test(unittest.TestCase):
         self.assertIn("BAK18_HOST=FAIL", out)
         self.assertTrue((state / "pod" / "go-bak18").exists())
         self.assertTrue((state / "pod" / "go-bak18-gone").exists())
+
+    def test_the_reconcile_wait_ends_with_the_copy_deadline(self):
+        skipped = HOLD_BAK18 + "\n2026-11-16T11:03:00.000Z SKIP bak18\n" + HOLD_GONE
+        code, out, _, _ = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", "--timeout-minutes", "0",
+                              **self.env(FAKE_WORKER_LOG="", FAKE_LOG_AFTER_TOUCH=skipped,
+                                         FAKE_LOG_AFTER_TOUCH_2=skipped + "\n2026-11-16T11:04:00.000Z GO bak18-gone"))
+        self.assertEqual(code, 4, out)
+        self.assertIn("no 'reconcile cluster done'", out)
+
+    def test_an_unreadable_vm_is_named_as_such(self):
+        env = self.env()
+        del env[f"FAKE_INSTANCE_{VM}"]
+        code, out, _, _ = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", **env)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"BAK18_HOST=FAIL cannot read {VM}", out)
 
     def test_bak18_refuses_when_the_pending_hold_is_another_step(self):
         code, out, _, _ = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", **self.env(FAKE_LOG_0=HOLD_VM28))
