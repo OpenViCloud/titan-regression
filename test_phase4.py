@@ -80,6 +80,9 @@ FAKE_SSH = textwrap.dedent('''\
     command = sys.argv[-1]
     queries = json.loads(os.environ.get("FAKE_QUERIES", "{}"))
     q = re.search(r"incus query '([^']+)'", command)
+    if q and os.environ.get("FAKE_HANG") and os.environ["FAKE_HANG"] in q.group(1):
+        import time
+        time.sleep(5)
     if q and q.group(1) in queries:
         counter = state / "query-reads"
         n = int(counter.read_text()) + 1 if counter.exists() else 1
@@ -437,7 +440,7 @@ class SampleTest(unittest.TestCase):
                                       "--log", "{tmp}/sampler.log", FAKE_QUERIES=json.dumps(SAMPLE_QUERIES))
         self.assertEqual(code, 0, out)
         log = (state.parent / "sampler.log").read_text()
-        self.assertRegex(log, r"^# phase4.py sample \(ssh debian@host, ControlMaster\) · project t-1 · ")
+        self.assertRegex(log, r"^# phase4.py sample \(ssh debian@host, ControlMaster, project t-1, lane sequential\) · debian@host · ")
         self.assertRegex(log, rf"\dZ instance {COPY} status=Stopped type=virtual-machine titan-name=rg-vm-x .*"
                               rf"nics=\{{'eth0': 'net-1'\}} disks=\{{\}} none=\['{VOL}'\]")
         self.assertRegex(log, rf"\dZ volume {VOL} size=10GiB used_by=\['/1.0/instances/{VM}\?project=t-1'\] snapshots=\[\]")
@@ -461,16 +464,40 @@ class SampleTest(unittest.TestCase):
         self.assertEqual(log.count("sample objects=3"), 2)
         self.assertEqual(log.count(f"instance {COPY} "), 1)
 
+    def test_a_read_that_hangs_is_an_error_line(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        (tmp / "stop").write_text("")
+        code, out, _, state = run("sample", *SSH, "--project", "t-1", "--every", "0", "--stop", str(tmp / "stop"),
+                                  "--log", "{tmp}/sampler.log", "--read-timeout", "1",
+                                  FAKE_QUERIES=json.dumps(SAMPLE_QUERIES), FAKE_HANG="network-acls")
+        self.assertEqual(code, 0, out)
+        log = (state.parent / "sampler.log").read_text()
+        self.assertIn("ERROR acls: no answer in 1", log)
+        self.assertIn(f"volume {VOL}", log)
+
+    def test_a_sample_that_breaks_is_an_error_line_and_the_last_objects_stay(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        queries = dict(SAMPLE_QUERIES)
+        queries["/1.0/network-acls?recursion=1&project=t-1"] = [{"no": "name"}]
+        code, out, _, state = run("sample", *SSH, "--project", "t-1", "--every", "0", "--stop", str(tmp / "stop"),
+                                  "--log", "{tmp}/sampler.log", FAKE_QUERIES=json.dumps(queries),
+                                  FAKE_STOP_AFTER="1", FAKE_STOP_FILE=str(tmp / "stop"))
+        self.assertEqual(code, 0, out)
+        log = (state.parent / "sampler.log").read_text()
+        self.assertIn("ERROR sample failed: KeyError", log)
+        self.assertNotIn("GONE", log)
+
     def test_a_failed_read_is_an_error_line_and_the_sample_goes_on(self):
         tmp = pathlib.Path(tempfile.mkdtemp())
         (tmp / "stop").write_text("")
         queries = dict(SAMPLE_QUERIES)
         del queries["/1.0/network-acls?recursion=1&project=t-1"]
         code, out, _, state = run("sample", *SSH, "--project", "t-1", "--every", "0", "--stop", str(tmp / "stop"),
-                                  "--log", "{tmp}/sampler.log", FAKE_QUERIES=json.dumps(queries))
+                                  "--log", "{tmp}/sampler.log", "--lane", "b", FAKE_QUERIES=json.dumps(queries))
         self.assertEqual(code, 0, out)
         log = (state.parent / "sampler.log").read_text()
         self.assertIn("ERROR acls:", log)
+        self.assertIn(", lane b) · debian@host · ", log.splitlines()[0])
         self.assertIn(f"volume {VOL}", log)
 
 

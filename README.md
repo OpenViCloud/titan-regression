@@ -250,12 +250,12 @@ when the ControlMaster is not there, rather than open a connection of its own:
 python3 phase4.py keys <keys dir>          # pairs v, u, x once per release, outside the repo; private halves stay there
 REGRESSION_PHASE4_KEYS=<keys dir> bash run-module.sh <kubeconfig> <src tree> phase4 <label> <work dir> <log dir> &
 python3 phase4.py connect --control <socket> --target <user@host> --known-hosts <pinned known_hosts>
+python3 phase4.py sample --control <socket> --target <user@host> --project <t-…> --stop <file> --log <sampler log> &
+# read-only, beside the run: a line per host object when it changes, ERROR lines, sample objects=<n>; ends after <file>
 python3 phase4.py wait --kubeconfig <kubeconfig> --job regression-phase4-<label>     # prints the pending HOLD
 python3 phase4.py host --control <socket> --target <user@host> --log <evidence log> [--keys <keys dir>] -- '<command>'
 python3 phase4.py go <step> --kubeconfig <kubeconfig> --job regression-phase4-<label> --log <evidence log>
 # … wait / host / go (or skip) for each step, until wait prints NO_HOLD
-python3 phase4.py sample --control <socket> --target <user@host> --project <t-…> --stop <file> --log <sampler log> &
-# read-only, beside the run: a line per host object when it changes; ends after <file> exists
 python3 phase4.py disconnect --control <socket> --target <user@host>
 ```
 
@@ -280,8 +280,8 @@ the copy `bk<26>` on the host until it is there, logs its devices and the volume
 volume's copy `bkv<26>`, which the same backup run makes next, to be gone (the VM's copy keeps a NIC on the spec's
 network until its upload ends, so a network delete fails before that, and a detach during the volume's copy times out)
 and answers again. Last line `BAK18_HOST=PASS`, `FAIL <what>` (both holds still answered; the spec runs its API check, and holds at `bak18-gone` whatever it finds) or
-`NOT_COVERED <why>` (`skip-bak18`, then `bak18-gone` answered as above: no copy within the timeout, no `reconcile cluster done` after it before the timeout,
-or the copy gone before one).
+`NOT_COVERED <why>` (`skip-bak18`, then `bak18-gone` answered as above: no copy within the timeout, no `reconcile cluster done` after it, or the copy gone
+before one).
 
 ## License
 

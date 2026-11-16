@@ -13,6 +13,7 @@ evidence as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>`.
     python3 phase4.py host --local --log <file> [--keys <dir>] -- '<command>'      # same entry, on this machine
     python3 phase4.py bak18 --kubeconfig <kc> --job <job> --control <socket> --target <user@host> --log <file>
     python3 phase4.py sample --control <socket> --target <user@host> --project <t-…> --stop <file> --log <file> [--every 30]
+                              [--lane a|b]
     python3 phase4.py disconnect --control <socket> --target <user@host>
 
 <job> is the name run-module.sh gives the job (regression-<module>-<label>). The host command runs through the
@@ -28,12 +29,11 @@ it waits for that copy and the volume's copy bkv<26> to be gone (they hold the s
 go-bak18-gone. Last line
 BAK18_HOST=PASS (exit 0) | FAIL <what> (exit 1, go-bak18 and go-bak18-gone still created: the spec measures the API
 side; the spec holds at bak18-gone whatever its API check says) | NOT_COVERED <why> (exit 4, skip-bak18, then
-go-bak18-gone: no copy before the timeout, no `reconcile cluster done` after it before the timeout, or the copy gone
-before one).
+go-bak18-gone: no copy before the timeout, no `reconcile cluster done` after it, or the copy gone before one).
 
 sample reads the project every <every> seconds, read-only, and logs a line per object only when its summary changed
-(`GONE <object>` when it left), then `sample objects=<n>`; a failed read is an `ERROR` line and sampling goes on; it
-ends after the sample that finds <stop> there.
+(`GONE <object>` when it left), then `sample objects=<n>`; a failed read (or one with no answer in --read-timeout
+seconds) and a sample that breaks are `ERROR` lines, and sampling goes on; it ends after the sample that finds <stop>.
 
 Exit 2: usage, the pending HOLD is not the step asked for, or no ControlMaster on the socket. wait: exit 3 = the runner finished with no HOLD pending.
 """
@@ -167,7 +167,7 @@ class NoMaster(Exception):
     pass
 
 
-def run_command(args, command):
+def run_command(args, command, timeout=None):
     """(exit code, stdout+stderr) of one command, on the host through the socket or here with --local. With no master
     on the socket ssh would open a connection of its own (default known_hosts, not the pinned one): refused."""
     if not args.local:
@@ -177,7 +177,10 @@ def run_command(args, command):
             raise NoMaster(f"no ControlMaster on {args.control} for {args.target} (phase4.py connect first): "
                            f"{check.stderr.strip()}")
     argv = ["bash", "-c", command] if args.local else ssh_args(args.control, args.target) + [command]
-    out = subprocess.run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    try:
+        out = subprocess.run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 124, f"no answer in {timeout:g} s"
     return out.returncode, out.stdout + out.stderr
 
 
@@ -447,7 +450,7 @@ def cmd_sample(args):
 
     def query(path):
         try:
-            code, output = run_command(args, f"sudo incus query '{path}'")
+            code, output = run_command(args, f"sudo incus query '{path}'", timeout=args.read_timeout)
         except NoMaster as error:
             return None, str(error)
         if code != 0:
@@ -459,12 +462,15 @@ def cmd_sample(args):
 
     log = open(args.log, "a", encoding="utf-8")
     if log.tell() == 0:
-        log.write(f"# phase4.py sample (ssh {args.target}, ControlMaster) · project {args.project} · "
-                  f"{now().strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
+        log.write(f"# phase4.py sample (ssh {args.target}, ControlMaster, project {args.project}, lane {args.lane}) · "
+                  f"{args.target} · {now().strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
     previous = {}
     while True:
         stamp = now().strftime("%Y-%m-%dT%H:%M:%SZ")
-        current, errors = summaries(query, args.project, args.pool)
+        try:
+            current, errors = summaries(query, args.project, args.pool)
+        except Exception as error:  # keep sampling; the failure is a line of the log, the last objects stand
+            current, errors = previous, [f"sample failed: {type(error).__name__}: {error}"]
         for line in [f"ERROR {e}" for e in errors] + changes(previous, current) + [f"sample objects={len(current)}"]:
             log.write(f"{stamp} {line}\n")
         log.flush()
@@ -521,6 +527,8 @@ def main(argv=None):
     p.add_argument("--stop", required=True)
     p.add_argument("--log", required=True)
     p.add_argument("--pool", default="default")
+    p.add_argument("--read-timeout", type=float, default=60)
+    p.add_argument("--lane", default="sequential", help="a or b in a run of two lanes, for the log's first line")
     p.set_defaults(func=cmd_sample)
     p = sub.add_parser("bak18")
     kube_args(p)
