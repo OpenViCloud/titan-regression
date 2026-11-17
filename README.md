@@ -175,7 +175,7 @@ create a network and beta-user may hold one.
 | 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-14 (host, not covered), CAT-16 (host) |
 | 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21, NET-27 (host, not covered), NET-25 (host) |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-14 (host, not covered) |
-| 5 | `vm` | VMs: create per tier (cluster named or taken from the network), stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered), SSH-09, VM-34, CSL-01 to CSL-06 (plan only), VM-35 (host, plan only); SSH-08 also a job of its own at the release environment's run, `vm/ssh-sessions` (new spec) |
+| 5 | `vm` | VMs: create per tier (cluster named or taken from the network), stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys and SSH sessions; console password, console tickets and console sessions | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered), SSH-09, VM-34, CSL-01 to CSL-06 (plan only), VM-35 (host, plan only); SSH-08 and CSL-06 (inside SSH-08) also a job of its own at the release environment's run, `vm/ssh-sessions` (new spec) |
 | 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-14, VMS-15, VMS-20 (host, not covered), VMS-17 (host) |
 | 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes, except VOL-18 (host, not covered), VOL-21, VOL-22 (not covered) |
 | 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: only the negative cases that need no IPv6 network) | yes | yes | yes, except LB-12 and LB-16 (host, not covered) |
@@ -205,9 +205,9 @@ of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud
 waits for the agent (45 minutes at most): it copies `/work/cli-10/token` and `/work/cli-10/key` out of the pod into files only it can read,
 runs `vm ssh <vmName> -- … 'sleep 330; echo alive'` on its own machine with `OPENVICLOUD_TOKEN` read from that file
 (never on the command line), `OPENVICLOUD_API_URL` set to the environment's API and `XDG_CONFIG_HOME` pointing at an empty directory, deletes both files, then touches `/work/results/go-cli10` (or `skip-cli10`: N/A); the
-agent's log of that command is CLI-10's verdict; `cli/edge` and `vm/ssh-sessions` (SSH-08) count beta-user's SSH
-sessions, so on the release environment they run in the sequential run, one at a time, beside no module that opens
-one; `admin/stuck-requests` (ADM-15) needs the
+agent's log of that command is CLI-10's verdict; `cli/edge` and `vm/ssh-sessions` (SSH-08, CSL-06) count beta-user's SSH
+and console sessions, so on the release environment they run in the sequential run, one at a time, beside no module that opens
+one (`vm` and `portal-ui` open console sessions too: CSL-03…CSL-05, UI-36); `admin/stuck-requests` (ADM-15) needs the
 `incus-worker` stopped and started when the spec logs `WORKER_STOP_WAIT` and `WORKER_START_WAIT` (and `incus-worker-inventory`,
 where the worker runs one, since it reports the reconciler polls): `run-module.sh` does it
 when `REGRESSION_WORKER_APPS` lists the ArgoCD Applications that would bring the worker back, root first (dev
