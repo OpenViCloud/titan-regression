@@ -897,9 +897,11 @@ test.describe.serial('vm', () => {
 
   // titan-ops features/vm/design.md#vm-console · titan-ops features/vm/design.md#console-password (the password works once
   // cloud-init's last stage ran) · OpenViCloud/titan-control-plane:Titan.Infrastructure/Sessions/ConsoleRelay.cs (WindowResizeOf:
-  // the resize text frame becomes Incus's window-resize) · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/OpenVmConsoleEndpoint.cs
+  // the resize text frame becomes Incus's window-resize) · lxc/incus@v7.0.1:cmd/incusd/instance_console.go (window-resize sets the
+  // size of Incus's own console fd with linux.SetPtySize: a VM's console is its serial port, so the guest's tty keeps its own size and
+  // `stty size` only shows that the shell answers) · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/OpenVmConsoleEndpoint.cs
   // (RunAsync: RequestVmConsoleCommand once Incus attached, one vm.console_requested per session that opens).
-  test('CSL-04 on an amd64 cluster the console shows login:, takes ubuntu and the console password, the shell sees 40 120; it opens again 5 s after a close', async () => {
+  test('CSL-04 on an amd64 cluster the console shows login:, takes ubuntu and the console password, the shell answers stty size; it opens again 5 s after a close', async () => {
     test.skip(!serialConsoleAttaches(), 'N/A: arm64 cluster, the serial console does not attach (CSL-03)')
     test.setTimeout(25 * 60_000)
     await waitVm('CSL-04 VM-34\'s VM runs', vmPw, (v) => runs(v))
@@ -929,9 +931,10 @@ test.describe.serial('vm', () => {
 
     mark = first.bytes()
     first.sendBinary('stty size\r')
-    await first.until(() => first.textSince(mark).includes('40 120'), 15_000)
+    const sizeLine = /(^|\n)\s*\d+ \d+\s*(\r|\n)/
+    await first.until(() => sizeLine.test(first.textSince(mark)), 15_000)
     log(`CSL-04 stty size → ${JSON.stringify(first.textSince(mark).slice(0, 120))}`)
-    expect(first.textSince(mark)).toContain('40 120')
+    expect(first.textSince(mark)).toMatch(sizeLine)
 
     await first.end()
     log(`CSL-04 first session ended ${first.closeCode} ${first.closeReason}`)
