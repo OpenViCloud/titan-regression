@@ -69,7 +69,7 @@ async function confirmOnTheWeb(page: Page, link: string, cliDone: () => boolean)
 const chain = new CliSshChain('/work/ssh-cli', `rg-vmcli-${RUN}`, `rg-ssh-cli-${RUN}`)
 
 // --- raw-text comparison for CLI-05: a `decimal`/json.Number field must match to every digit, which JSON.parse
-// would not preserve (it normalizes "161388.0000000000" to 161388). Both sides are read as text, never parsed.
+// would not preserve (it normalizes "1.50" to 1.5). Both sides are read as text, never parsed.
 function rawNumberField(json: string, id: string, field: string): string {
   const idIndex = json.indexOf(`"id": "${id}"`) !== -1 ? json.indexOf(`"id": "${id}"`) : json.indexOf(`"id":"${id}"`)
   expect(idIndex, `object with id ${id} in: ${json.slice(0, 200)}`).toBeGreaterThanOrEqual(0)
@@ -268,7 +268,7 @@ test.describe('cli catalog', () => {
 
     // Prices are `decimal` server-side (OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VmOffering/Contracts/VmOfferingQueryResult.cs VmOfferingQueryResult)
     // and json.Number in the CLI (OpenViCloud/titan-cli:api/client.gen.go VmOfferingQueryResult):
-    // both keep every digit on the wire. JSON.parse would renormalize "161388.0000000000" to 161388, so the
+    // both keep every digit on the wire. JSON.parse would renormalize "1.50" to 1.5, so the
     // price is compared as raw text, not parsed.
     const sizeResult = await runCli(['size', 'list', '-o', 'json'])
     expect(sizeResult.code, sizeResult.stderr).toBe(0)
