@@ -931,7 +931,7 @@ test.describe.serial('vm', () => {
 
     mark = first.bytes()
     first.sendBinary('stty size\r')
-    const sizeLine = /(^|\n)\s*\d+ \d+\s*(\r|\n)/
+    const sizeLine = /(?:^|[^0-9A-Za-z])\d+ \d+\r*\n/ // the shell may print bracketed-paste escapes before the line
     await first.until(() => sizeLine.test(first.textSince(mark)), 15_000)
     log(`CSL-04 stty size → ${JSON.stringify(first.textSince(mark).slice(0, 120))}`)
     expect(first.textSince(mark)).toMatch(sizeLine)
