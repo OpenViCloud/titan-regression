@@ -253,8 +253,8 @@ test.describe.serial('vm', () => {
     await waitVm('VM-07 stop lands', vmA, (v) => v.status === 'Stopped')
   })
 
-  // titan-ops features/vm/design.md#rename-same-name · OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/RenameVmCommandHandler.cs
-  // HandleAsync (alreadyNamedSo; ExistsByNameAsync ⇒ VM_NAME_TAKEN) · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/UpdateVmEndpoint.cs HandleAsync ·
+  // titan-ops features/vm/design.md#rename-same-name · OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/UpdateVmCommandHandler.cs
+  // HandleAsync (renames; ExistsByNameAsync ⇒ VM_NAME_TAKEN) · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/UpdateVmEndpoint.cs HandleAsync ·
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/UpdateVmValidator.cs UpdateVmValidator (Name MaximumLength(Vm.NameMaxLength), 64)
   test("VM-08 rename is 204; the same name again is a 204 no-op; another live VM's name is 409, 65 characters 400", async () => {
     const reply = await call('tenant', 'PATCH', `/v1/tenant/vms/${vmA}`, { name: renamed })
@@ -414,7 +414,7 @@ test.describe.serial('vm', () => {
     expect(countOf(actions, 'vm.deleted')).toBe(1)
 
     // A Deleted VM keeps its name: OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs Rename (IsDeleted ⇒ VM_INVALID_STATUS),
-    // reached after RenameVmCommandHandler HandleAsync finds the new name free.
+    // reached after UpdateVmCommandHandler HandleAsync finds the new name free.
     expectError(await call('tenant', 'PATCH', `/v1/tenant/vms/${vmA}`, { name: `rg-vmdel-${RUN}` }), 422, 'VM_INVALID_STATUS')
     expect((await getVm(vmA)).name).toBe(renamed)
   })
