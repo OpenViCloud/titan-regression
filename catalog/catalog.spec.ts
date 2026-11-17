@@ -24,6 +24,20 @@ function restShape(rows: any[]): string {
 function sortedOrdinal(names: string[]): string[] {
   return names.slice().sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 }
+
+// A price as the response text writes it: JSON.parse turns 170.0000000000 into 170, so only the text shows trailing zeros.
+// Shortest form = no leading zero before a whole part, and a fraction (if any) that does not end in 0 or in the mark.
+const SHORTEST_DECIMAL = /^(0|[1-9]\d*)(\.\d*[1-9])?$/
+
+function expectShortestPrices(id: string, text: string, field: string, count: number): void {
+  const written = [...text.matchAll(new RegExp(`"${field}"\\s*:\\s*([^,}\\s]+)`, 'g'))].map((m) => m[1])
+  log(`${id} ${field} as written: ${written.join(' ')}`)
+  expect(written.length, `one ${field} per offering`).toBe(count)
+  for (const price of written) {
+    expect(price, `${field} ${price} in its shortest form`).toMatch(SHORTEST_DECIMAL)
+  }
+}
+
 test.describe.serial('catalog', () => {
   test.describe.configure({ timeout: 10 * 60_000 })
 
@@ -37,9 +51,15 @@ test.describe.serial('catalog', () => {
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VmOffering/Contracts/VmOfferingQueryResult.cs (VmOfferingQueryResult:
-  // no cpu field) · titan-ops architecture/money-and-wallet.md#price-belongs-to-offering
-  test('CAT-01 vm offerings carry sizing and a price, and no cpu', async () => {
-    const offerings = await get('anonymous', '/v1/vm-offerings') as any[]
+  // no cpu field; From: PriceListNumber.WithoutTrailingZeros) · titan-ops features/catalog/design.md#vm-offering-sizing ·
+  // titan-ops features/catalog/design.md#whole-vnd-prices · titan-ops architecture/money-and-wallet.md#price-belongs-to-offering ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/PriceListNumber.cs (WithoutTrailingZeros: the decimal(18,10) column reads
+  // 170.0000000000, the list writes 170) · OpenViCloud/titan-control-plane:Titan.Tests/Services/OfferingQueryResultJsonTests.cs
+  // (AVmPrice_IsWrittenWithoutTrailingZeros)
+  test('CAT-01 vm offerings carry sizing and a price written in its shortest form, and no cpu', async () => {
+    const reply = await call('anonymous', 'GET', '/v1/vm-offerings')
+    expectStatus(reply, 200)
+    const offerings = JSON.parse(reply.text) as any[]
     log(`CAT-01 tiers ${offerings.map((o) => `${o.id}:${o.vcpu}vcpu/${o.memoryMb}MB/${o.pricePerHour}`).join(' ')}`)
     expect(offerings.map((o) => o.id).sort()).toEqual(['l', 'm', 's', 'xl'])
     for (const offering of offerings) {
@@ -48,12 +68,16 @@ test.describe.serial('catalog', () => {
       expect(offering.pricePerHour, offering.id).toBeGreaterThan(0)
       expect('cpu' in offering, `${offering.id} carries cpu`).toBe(false)
     }
+    expectShortestPrices('CAT-01', reply.text, 'pricePerHour', offerings.length)
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VolumeOffering/Contracts/VolumeOfferingQueryResult.cs
-  // (VolumeOfferingQueryResult: Id, Name, PricePerGbPerHour; the size is the volume's, sent at create) ·
-  // titan-ops features/catalog/design.md#volume-offering-catalog · titan-ops architecture/money-and-wallet.md#price-belongs-to-offering
-  test('CAT-17 volume offerings answer without a token: a standard tier, a price per GB-hour, no sizeGb or isCustomized', async () => {
+  // (VolumeOfferingQueryResult: Id, Name, PricePerGbPerHour; the size is the volume's, sent at create; From: PriceListNumber.WithoutTrailingZeros) ·
+  // titan-ops features/catalog/design.md#volume-offering-catalog · titan-ops features/catalog/design.md#whole-vnd-prices ·
+  // titan-ops architecture/money-and-wallet.md#price-belongs-to-offering ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/PriceListNumber.cs (WithoutTrailingZeros) ·
+  // OpenViCloud/titan-control-plane:Titan.Tests/Services/OfferingQueryResultJsonTests.cs (AVolumePrice_IsWrittenWithoutTrailingZeros)
+  test('CAT-17 volume offerings answer without a token: a standard tier, a price per GB-hour in its shortest form, no sizeGb or isCustomized', async () => {
     const reply = await call('anonymous', 'GET', '/v1/volume-offerings')
     expectStatus(reply, 200)
     const offerings = JSON.parse(reply.text) as any[]
@@ -66,6 +90,7 @@ test.describe.serial('catalog', () => {
       expect('sizeGb' in offering, `${offering.id} carries sizeGb`).toBe(false)
       expect('isCustomized' in offering, `${offering.id} carries isCustomized`).toBe(false)
     }
+    expectShortestPrices('CAT-17', reply.text, 'pricePerGbPerHour', offerings.length)
   })
 
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VmTemplate/Contracts/TemplateQueryResult.cs (TemplateQueryResult)
