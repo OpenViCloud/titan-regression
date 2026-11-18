@@ -284,11 +284,11 @@ good: the bucket keeps the 7 newest per resource and removes none of a deleted r
 (`titan-ops features/backup/design.md#incus-backup`). At `HOLD bak18`,
 `python3 phase4.py bak18 --kubeconfig … --job regression-phase4-backup-<label> --control … --target … --log …` reads
 the copy `bk<26>` on the host until it is there, logs its devices and the volume's `used_by`, waits for a worker
-`reconcile cluster done` after it, reads both again, and answers; at `HOLD bak18-gone` it waits for that copy and the
+`reconcile cluster done` of the reconciler (a `loop=metrics` line does not count) after it, reads both again, and answers; at `HOLD bak18-gone` it waits for that copy and the
 volume's copy `bkv<26>`, which the same backup run makes next, to be gone (the VM's copy keeps a NIC on the spec's
 network until its upload ends, so a network delete fails before that, and a detach during the volume's copy times out)
 and answers again. Last line `BAK18_HOST=PASS`, `FAIL <what>` (both holds still answered; the spec runs its API check, and holds at `bak18-gone` whatever it finds) or
-`NOT_COVERED <why>` (`skip-bak18`, then `bak18-gone` answered as above: no copy within the timeout, no `reconcile cluster done` after it, or the copy gone
+`NOT_COVERED <why>` (`skip-bak18`, then `bak18-gone` answered as above: no copy within the timeout, no reconciler's `reconcile cluster done` after it, or the copy gone
 before one).
 
 ## License
