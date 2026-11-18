@@ -288,7 +288,7 @@ the copy `bk<26>` on the host until it is there, logs its devices and the volume
 volume's copy `bkv<26>`, which the same backup run makes next, to be gone (the VM's copy keeps a NIC on the spec's
 network until its upload ends, so a network delete fails before that, and a detach during the volume's copy times out)
 and answers again. Last line `BAK18_HOST=PASS`, `FAIL <what>` (both holds still answered; the spec runs its API check, and holds at `bak18-gone` whatever it finds) or
-`NOT_COVERED <why>` (`skip-bak18`, then `bak18-gone` answered as above: no copy within the timeout, no `reconcile cluster done` after it, or the copy gone
+`NOT_COVERED <why>` (`skip-bak18`, then `bak18-gone` answered as above: no copy within the timeout, no reconciler's `reconcile cluster done` after it, or the copy gone
 before one).
 
 ## License
