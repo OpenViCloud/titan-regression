@@ -24,7 +24,7 @@ base64 body of <keys>/v.pub, u.pub, x.pub (public halves only). A host command's
 
 bak18 (BAK-18, titan-ops features/backup/design.md#incus-backup) answers HOLD bak18 of phase4-backup/: it reads the
 copy bk<26> of the held VM on the host until it is there (the hourly backup-schedule run, `:00` UTC), logs the copy's
-devices and the volume's used_by, waits for a `reconcile cluster done` of the worker (its inventory pod where there is
+devices and the volume's used_by, waits for a `reconcile cluster done` of the worker's reconciler, not of its `loop=metrics` (its inventory pod where there is
 one) after the copy was seen, reads both again while the copy still exists, then creates go-bak18; at HOLD bak18-gone
 it waits for that copy and the volume's copy bkv<26> to be gone (they hold the spec's network and its detach) and creates
 go-bak18-gone. Last line
@@ -60,7 +60,13 @@ POLL = float(os.environ.get("PHASE4_POLL_SECONDS", "10"))
 HOLD = re.compile(r"^\S+ HOLD (\S+) (\{.*\})\s*$")
 ANSWER = re.compile(r"^\S+ (GO|SKIP) (\S+)\s*$")
 RECONCILE_DONE = "reconcile cluster done"
+# the metrics runner ends its cycle with the same message, tagged with its loop; only the reconciler's line counts
+METRICS_LOOP = re.compile(r"(^|\s)loop=metrics(\s|$)")
 RECONCILE_WAIT_SECONDS = 6 * 60
+
+
+def reconciler_done(worker_log):
+    return any(RECONCILE_DONE in line and not METRICS_LOOP.search(line) for line in worker_log.splitlines())
 
 
 def now():
@@ -346,11 +352,11 @@ def cmd_bak18(args):
     used = query(f"/1.0/storage-pools/{pool}/volumes/custom/{vol}")
     # the same deadline as the copy's: the spec's hold started before this script, and waits no longer
     reconcile_deadline = min(time.monotonic() + RECONCILE_WAIT_SECONDS, deadline)
-    while RECONCILE_DONE not in kube.worker_logs(seen):
+    while not reconciler_done(kube.worker_logs(seen)):
         if time.monotonic() >= reconcile_deadline:
             return give_up(f"no '{RECONCILE_DONE}' of the worker since {seen}")
         time.sleep(POLL)
-    log.entry(f"kubectl logs -n {kube.app_ns} <worker> --since-time={seen} | grep '{RECONCILE_DONE}'", RECONCILE_DONE, 0)
+    log.entry(f"kubectl logs -n {kube.app_ns} <worker> --since-time={seen} | grep '{RECONCILE_DONE}' | grep -v loop=metrics", RECONCILE_DONE, 0)
     after = query(f"/1.0/instances/{copy}")
     if after is None:
         return give_up(f"{copy} gone before a reconcile ended")

@@ -404,6 +404,27 @@ class Bak18Test(unittest.TestCase):
         self.assertEqual(code, 4, out)
         self.assertIn("no 'reconcile cluster done'", out)
 
+    def test_a_metrics_loop_line_is_not_a_reconcile(self):
+        # the worker's text log, as on prd: the metrics runner ends its cycle with the same message
+        metrics = ('time=2026-11-16T11:01:00.000Z level=INFO msg="reconcile cluster done" worker=w loop=metrics '
+                   'clusterId=singapore01 totalMs=171 durationsMs.vm-metrics=171')
+        skipped = HOLD_BAK18 + "\n2026-11-16T11:03:00.000Z SKIP bak18\n" + HOLD_GONE
+        code, out, _, state = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", "--timeout-minutes", "0",
+                                  **self.env(FAKE_WORKER_LOG=metrics, FAKE_LOG_AFTER_TOUCH=skipped,
+                                             FAKE_LOG_AFTER_TOUCH_2=skipped + "\n2026-11-16T11:04:00.000Z GO bak18-gone"))
+        self.assertEqual(code, 4, out)
+        self.assertIn("no 'reconcile cluster done'", out)
+        self.assertTrue((state / "pod" / "skip-bak18").exists())
+
+    def test_the_reconciler_line_after_a_metrics_line_counts(self):
+        lines = ('time=2026-11-16T11:01:00.000Z level=INFO msg="reconcile cluster done" worker=w loop=metrics '
+                 'clusterId=singapore01 totalMs=171\n'
+                 'time=2026-11-16T11:01:01.000Z level=INFO msg="reconcile cluster done" worker=w '
+                 'clusterId=singapore01 totalMs=134')
+        code, out, _, _ = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", **self.env(FAKE_WORKER_LOG=lines))
+        self.assertEqual(code, 0, out)
+        self.assertIn("BAK18_HOST=PASS", out)
+
     def test_an_unreadable_vm_is_named_as_such(self):
         env = self.env()
         del env[f"FAKE_INSTANCE_{VM}"]
