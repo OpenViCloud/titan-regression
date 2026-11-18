@@ -28,7 +28,7 @@ Repo này không có hệ thống nào để chạy: spec chạy bằng runner `
 ├── lanes.json       # module nào chạy ở lane nào, lane chờ nhau ở đâu
 ├── lanes-dev.json, lanes-dev-sequential.json  # cùng thứ cho cụm dev: hai lane / một lane, chỉ module có Dev = yes, max_pods 1
 ├── patch-job.py     # trỏ volume `specs` của một job vào ConfigMap riêng của nó, thêm env `--env NAME=VALUE` (run-module.sh dùng)
-├── phase4.py        # phía agent của Phase 4 (phase4/, phase4-backup/): keys, connect, wait, go/skip, host, bak18, sample, disconnect — README §Phase 4
+├── phase4.py        # phía agent của Phase 4 (phase4/, phase4-backup/): keys, connect, wait, go/skip, host, bak18, vm35, sample, disconnect — README §Phase 4
 ├── test_*.py        # test của các script trên — python3 test_count_cases.py …
 ├── selftest/        # test của lib không cần Playwright; ngoài lib/ vì runner chép mọi file của lib/ vào e2e/ và `testMatch`
 │                   #   mặc định của Playwright chạy cả *.test.ts — node --test 'selftest/*.test.ts' (Node ≥ 22.18 tự bỏ phần

@@ -172,22 +172,22 @@ create a network and beta-user may hold one.
 | # | Module | Measures | Dev | Release | Spec |
 |---|---|---|---|---|---|
 | 1 | `smoke` | health, clusters, anonymous catalog, clean test account, no metrics on the API host | yes | yes | yes |
-| 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-14 (host, not covered), CAT-16 (host); CAT-01 (extended), CAT-17 (extended) |
+| 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-14 (host, not covered), CAT-16 (host) |
 | 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21, NET-27 (host, not covered), NET-25 (host) |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-14 (host, not covered) |
-| 5 | `vm` | VMs: create per tier (cluster named or taken from the network), stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys and SSH sessions; console password, console tickets and console sessions; stop timeout | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered), SSH-09, VM-34, VM-36, VM-37, CSL-01 to CSL-06 (plan only), VM-35 (host, plan only), VM-16 (extended); SSH-08 and CSL-06 (inside SSH-08) also a job of its own at the release environment's run, `vm/ssh-sessions` (new spec) |
+| 5 | `vm` | VMs: create per tier (cluster named or taken from the network), stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys and SSH sessions; console password, console tickets and console sessions; stop timeout | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered), VM-35 (host); SSH-08 and CSL-06 (inside SSH-08) also a job of its own at the release environment's run, `vm/ssh-sessions` (new spec) |
 | 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-14, VMS-15, VMS-20 (host, not covered), VMS-17 (host) |
 | 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes, except VOL-18 (host, not covered), VOL-21, VOL-22 (not covered) |
 | 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: only the negative cases that need no IPv6 network) | yes | yes | yes, except LB-12 and LB-16 (host, not covered) |
 | 9 | `tenant` | tenant, quota, terms consent, approval on sign-in, the admin status route's error order | yes | yes | yes |
 | 10 | `api-token` | API tokens: create, call the API with one, duplicate name/secret, delete ⇒ `401`, unknown token | yes | yes | yes |
-| 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes, except CLI-20, CLI-21 (plan only), CLI-13, CLI-14, CLI-15 (extended); CLI-21's power-off line read by the agent in the worker log; CLI-06..11 also a job of its own at the release environment's run, `cli/edge` (new spec) |
+| 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes; CLI-21's power-off line read by the agent in the worker log; CLI-06..11 also a job of its own at the release environment's run, `cli/edge` (new spec) |
 | 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | yes | yes | yes, except BIL-18 (not covered); BIL-14 and BIL-26 are agent SQL steps (`billing/check-wallets.sql`, `billing/sweep-credit.sql`); BIL-25 rolls the control plane only with `REGRESSION_CP_ROLL_SECONDS` (a step of the sequential run); BIL-24's invoice part skips where no invoice is older than 90 days; BIL-16's per-record part, BIL-24's and BIL-25's row counts read by the agent in SQL |
 | 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS; the metrics host behind Cloudflare Access | no: CON-09 reads the TLS certificates; dev serves plain HTTP | yes | yes, except CON-15, CON-17 (not covered) |
 | 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once, one tenant's two creates never run at once | yes | yes | yes, except CC-14 (not covered); CC-04's command count read by the agent in SQL, CC-13's command order by the agent in the worker log |
-| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices; the operator metrics tier (targets, alert rules, alert delivery) and the admin portal's Metrics link | yes | yes | yes (API), except ADM-15 (`L-x`, a job of its own measured at the release environment's run: `run-module.sh` on `admin/stuck-requests`, with `REGRESSION_WORKER_APPS`), ADM-19 (not covered), ADM-20 (plan only); ADM-17 reads services inside the cluster, so it runs only in the runner pod |
+| 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices; the operator metrics tier (targets, alert rules, alert delivery) and the admin portal's Metrics link | yes | yes | yes (API), except ADM-15 (`L-x`, a job of its own measured at the release environment's run: `run-module.sh` on `admin/stuck-requests`, with `REGRESSION_WORKER_APPS`), ADM-19 (not covered); ADM-17 reads services inside the cluster, so it runs only in the runner pod |
 | 16 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: the `Database` objects `keycloak` (Keycloak) and `chat` (the landing assistant), ArgoCD's health checks, schema `public` for its owner only, the name CNPG archives under and `ContinuousArchiving` (`kubectl` reads) | yes | yes | yes (API and admin portal screens); `(host)`, `L-x` and `kubectl` cases in Phase 4 of the release |
-| 17 | `portal-ui` | customer portal end to end, signed in | no: UI-28 needs a portal without `topUpEnabled`, as the release environment's; dev's sets it (UI-07 and UI-18, which need it set, are N/A at the release environment's run) | yes | yes, except UI-35, UI-36, UI-37, UI-38 (plan only) |
+| 17 | `portal-ui` | customer portal end to end, signed in | no: UI-28 needs a portal without `topUpEnabled`, as the release environment's; dev's sets it (UI-07 and UI-18, which need it set, are N/A at the release environment's run) | yes | yes |
 | 18 | `tenant-suspend` | suspended ⇒ writes refused, reads allowed; reactivated | yes | yes | yes |
 | 19 | `network-lifecycle` | deletes the run's network (with its rules), recreates the same name | yes | yes | yes |
 | 20 | `login-page` | Keycloak sign-in page: layout, colours, font, brand, sign-up form, language, redirect URIs per client (no sign-in) | yes | yes | yes |
@@ -243,7 +243,7 @@ Two modules of this repository are run by the agent, not by `run-lanes.py`: `pha
 `go-<step>` or `skip-<step>` in `/work/results/` of its pod; the agent does the host commands of the step in between.
 `phase4.py` is every command the agent runs for that, so nobody writes a shell loop by hand; each `host` command and
 each answer given `--log` goes to that evidence log as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>` (`bak18`
-logs its reads, not its polls). `host` refuses (exit 2)
+and `vm35` log their reads, not their polls). `host` refuses (exit 2)
 when the ControlMaster is not there, rather than open a connection of its own:
 
 ```bash
@@ -255,6 +255,7 @@ python3 phase4.py sample --control <socket> --target <user@host> --project <t-�
 python3 phase4.py wait --kubeconfig <kubeconfig> --job regression-phase4-<label>     # prints the pending HOLD
 python3 phase4.py host --control <socket> --target <user@host> --log <evidence log> [--keys <keys dir>] -- '<command>'
 python3 phase4.py go <step> --kubeconfig <kubeconfig> --job regression-phase4-<label> --log <evidence log>
+python3 phase4.py vm35 --kubeconfig <kubeconfig> --job regression-phase4-<label> --control <socket> --target <user@host> --log <evidence log>   # at HOLD vm35
 # … wait / host / go (or skip) for each step, until wait prints NO_HOLD
 python3 phase4.py disconnect --control <socket> --target <user@host>
 ```
@@ -263,6 +264,13 @@ python3 phase4.py disconnect --control <socket> --target <user@host>
 line each, or it stops before the job); `phase4/` stores V as the tenant's SSH key and puts U in a VM's cloud-init, and a
 run of it without them is red at its first step (`phase4-backup/` reads no key). In a host command `{V}`, `{U}`, `{X}` become the base64 body of that key.
 `host --local` runs a command on the agent's machine (the checks over the Internet) with the same log entry.
+
+At `HOLD vm35` of `phase4/`, `phase4.py vm35` waits for a `status:` line from `cloud-init status --wait` in the held VM,
+reads `getent shadow ubuntu`, `passwd -S ubuntu` and `cloud-init.vendor-data` of it and of the held VM without a console
+password, then hashes in the pod the password file the spec left there (`openssl passwd -6` with the salt read from the
+shadow) and greps the vendor-data for it, so the password is in no log. Last line `VM35_HOST=PASS` (exit 0), `FAIL <what>`
+(exit 1, `go-vm35` still created) or `NOT_COVERED <why>` (exit 4, `skip-vm35`). The VM-35 test has no check of its own
+after the hold: its ✓ in the runner log says the hold was answered, and the case's verdict is the `VM35_HOST=` line.
 
 `phase4-backup/` waits for the hourly `backup-schedule` run (minute 0 UTC): a new VM with a volume attached is backed up
 by the first run after it. Its job is its own, because the wait does not fit in the runner's 90 minutes

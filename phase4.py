@@ -12,6 +12,7 @@ evidence as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>`.
     python3 phase4.py host --control <socket> --target <user@host> --log <file> [--keys <dir>] -- '<command>'
     python3 phase4.py host --local --log <file> [--keys <dir>] -- '<command>'      # same entry, on this machine
     python3 phase4.py bak18 --kubeconfig <kc> --job <job> --control <socket> --target <user@host> --log <file>
+    python3 phase4.py vm35 --kubeconfig <kc> --job <job> --control <socket> --target <user@host> --log <file>
     python3 phase4.py sample --control <socket> --target <user@host> --project <t-…> --stop <file> --log <file> [--every 30]
                               [--read-timeout 60] [--lane a|b, default sequential]
     python3 phase4.py disconnect --control <socket> --target <user@host>
@@ -30,6 +31,14 @@ go-bak18-gone. Last line
 BAK18_HOST=PASS (exit 0) | FAIL <what> (exit 1, go-bak18 and go-bak18-gone still created: the spec measures the API
 side; the spec holds at bak18-gone whatever its API check says) | NOT_COVERED <why> (exit 4, skip-bak18, then
 go-bak18-gone: no copy before the timeout, no `reconcile cluster done` after it, or the copy gone before one).
+
+vm35 (VM-35, titan-ops features/vm/design.md#console-password) answers HOLD vm35 of phase4/: it waits on the host for
+`cloud-init status --wait` of the held VM to print a `status:` line (FAIL unless it is `done`), reads `getent shadow ubuntu`, `passwd -S ubuntu` and
+`cloud-init.vendor-data` of it and of the held VM without a console password, then, in the pod, hashes the password
+file the spec left there with `openssl passwd -6` and the salt read from the shadow and greps the vendor-data for it:
+the password never leaves the pod, so it is in no log, no argv and no file here. Last line VM35_HOST=PASS (exit 0) |
+FAIL <what> (exit 1, go-vm35) | NOT_COVERED <why> (exit 4, skip-vm35: no `status:` from cloud-init before the timeout,
+or the pod could not hash or grep).
 
 sample reads the project every <every> seconds, read-only, and logs a line per object only when its summary changed
 (`GONE <object>` when it left), then `sample objects=<n>`; a failed read (or one with no answer in --read-timeout
@@ -109,9 +118,9 @@ class Kube:
         self.app_ns = self.namespace_of("deployment", "control-plane")
         self._pod = None
 
-    def run(self, *args):
-        return subprocess.run(["kubectl", "--kubeconfig", self.kubeconfig, *args], capture_output=True, text=True,
-                              stdin=subprocess.DEVNULL)
+    def run(self, *args, input=None):
+        stdin = {"stdin": subprocess.DEVNULL} if input is None else {"input": input}
+        return subprocess.run(["kubectl", "--kubeconfig", self.kubeconfig, *args], capture_output=True, text=True, **stdin)
 
     def json(self, *args):
         out = self.run(*args, "-o", "json")
@@ -142,6 +151,11 @@ class Kube:
 
     def touch(self, name):
         return self.run("exec", "-n", self.ns, self.pod(), "--", "touch", f"/work/results/{name}")
+
+    def exec_pod(self, *command, input=None):
+        """A command in the job's pod; with input, that text is its stdin."""
+        return self.run("exec", *(["-i"] if input is not None else []), "-n", self.ns, self.pod(), "--", *command,
+                        input=input)
 
     def worker_logs(self, since):
         inventory = self.json("get", "pods", "-n", self.app_ns, "-l", "app=incus-worker-inventory")["items"]
@@ -351,6 +365,138 @@ def cmd_bak18(args):
     return 0
 
 
+CRYPT6 = re.compile(r"^\$6\$([./0-9A-Za-z]{1,16})\$[./0-9A-Za-z]{86}$")
+INCUS_NAME = re.compile(r"^[a-z0-9-]+$")
+HAND_OFF_FILE = re.compile(r"^/work/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+# Run in the pod: the password file is read there and never printed (VM-35).
+POD_HASH = 'openssl passwd -6 -salt "$1" -stdin < "$2"'
+POD_GREP = 'test -s "$1" && grep -c -F -f "$1"'
+
+
+def shadow_hash(output):
+    """The password field of the `ubuntu` line of `getent shadow ubuntu`, else None."""
+    for line in output.splitlines():
+        parts = line.split(":")
+        if len(parts) >= 2 and parts[0] == "ubuntu":
+            return parts[1]
+    return None
+
+
+def passwd_state(output):
+    """The second word of `passwd -S ubuntu` (P usable, L locked, NP none), else None."""
+    for line in output.splitlines():
+        words = line.split()
+        if len(words) >= 2 and words[0] == "ubuntu":
+            return words[1]
+    return None
+
+
+def vm35_verdict(status, hashed, state, vendor, expected, matches, locked):
+    """What is wrong (empty when nothing) with VM-35's reads: cloud-init done; the shadow field a $6$ hash equal to
+    `openssl passwd -6` of the password with its salt (expected); passwd -S P; vendor-data holding that hash and not the
+    password (matches = grep -c of the password in it); the VM without a password locked (`!`)."""
+    problems = []
+    if status != "done":
+        problems.append(f"cloud-init status {status}, not done")
+    if hashed is None or not CRYPT6.match(hashed):
+        problems.append(f"the hash field of ubuntu starts {(hashed or '')[:3]!r}, not a $6$ hash")
+    elif expected != hashed:
+        problems.append("the hash field of ubuntu is not openssl passwd -6 of the password with its salt")
+    if state != "P":
+        problems.append(f"passwd -S ubuntu is {state}, not P")
+    if hashed is not None and CRYPT6.match(hashed):
+        if hashed not in vendor:
+            problems.append("cloud-init.vendor-data does not hold the hash of /etc/shadow")
+    elif not re.search(r"\$6\$[./0-9A-Za-z]{1,16}\$[./0-9A-Za-z]{86}", vendor):
+        problems.append("cloud-init.vendor-data holds no $6$ hash")
+    if matches != "0":
+        problems.append(f"cloud-init.vendor-data holds the password ({matches} lines)")
+    if locked is None or not locked.startswith("!"):
+        problems.append(f"the hash field of ubuntu on the VM without a password starts {(locked or '')[:3]!r}, not '!'")
+    return problems
+
+
+def wait_cloud_init(args, log, project, vm, deadline):
+    """The word after `status:` once `cloud-init status --wait` in the guest prints one (the reads before the guest
+    agent runs print none and are not logged), or None at the deadline."""
+    command = f"sudo incus exec {vm} --project {project} -- cloud-init status --wait"
+    while True:
+        code, output = run_command(args, command, timeout=max(deadline - time.monotonic(), 1))
+        status = re.search(r"^status: (\S+)", output, re.M)
+        if status or time.monotonic() >= deadline:
+            log.entry(command, output, code)
+            return status.group(1) if status else None
+        time.sleep(POLL)
+
+
+def cmd_vm35(args):
+    kube = Kube(args.kubeconfig, args.job)
+    log = Log(args.log, f"phase4.py vm35 (ssh {args.target}, ControlMaster) · {args.target}")
+    held = pending_hold(kube.logs())
+    if not held or held[0] != "vm35":
+        print(f"the pending HOLD is {held[0] if held else 'none'}, not vm35")
+        return 2
+    facts = held[1]
+    project, vm, without, secret = facts["project"], facts["vm"], facts["vmWithout"], facts["passwordFile"]
+    if not all(INCUS_NAME.match(x) for x in (project, vm, without)) or not HAND_OFF_FILE.match(secret):
+        print(f"HOLD vm35 facts out of shape: {json.dumps(facts)}")
+        return 2
+    args.local = False
+
+    def not_covered(why):
+        answer(kube, "vm35", "skip", log)
+        print(f"VM35_HOST=NOT_COVERED {why}")
+        return 4
+
+    def read(name, what):
+        command = f"sudo incus exec {name} --project {project} -- {what}"
+        code, output = run_command(args, command, timeout=args.read_timeout)
+        log.entry(command, output, code)
+        return output
+
+    def vendor_data(name):
+        command = f"sudo incus config get {name} cloud-init.vendor-data --project {project}"
+        code, output = run_command(args, command, timeout=args.read_timeout)
+        log.entry(command, output, code)
+        return output if code == 0 else ""
+
+    status = wait_cloud_init(args, log, project, vm, time.monotonic() + args.timeout_minutes * 60)
+    if status is None:
+        return not_covered(f"no 'status:' from cloud-init status --wait in {vm} in {args.timeout_minutes:g} minutes")
+    hashed = shadow_hash(read(vm, "getent shadow ubuntu"))
+    state = passwd_state(read(vm, "passwd -S ubuntu"))
+    vendor = vendor_data(vm)
+    locked = shadow_hash(read(without, "getent shadow ubuntu"))
+    read(without, "passwd -S ubuntu")
+    vendor_data(without)
+
+    pod = kube.pod()
+    expected = None
+    salt = CRYPT6.match(hashed or "")
+    if salt:
+        out = kube.exec_pod("sh", "-c", POD_HASH, "sh", salt.group(1), secret)
+        log.entry(f"kubectl exec -n {kube.ns} {pod} -- sh -c '{POD_HASH}' sh {salt.group(1)} {secret}",
+                  out.stdout + out.stderr, out.returncode)
+        if out.returncode != 0:
+            return not_covered(f"openssl passwd in the pod: exit {out.returncode} {out.stderr.strip()[:200]}")
+        expected = out.stdout.strip()
+    out = kube.exec_pod("sh", "-c", POD_GREP, "sh", secret, input=vendor)
+    log.entry(f"kubectl exec -i -n {kube.ns} {pod} -- sh -c '{POD_GREP}' sh {secret} < <cloud-init.vendor-data of {vm}>",
+              out.stdout + out.stderr, out.returncode)
+    matches = out.stdout.strip()
+    if not matches.isdigit():
+        return not_covered(f"grep in the pod: exit {out.returncode} {out.stderr.strip()[:200]}")
+
+    problems = vm35_verdict(status, hashed, state, vendor, expected, matches, locked)
+    answer(kube, "vm35", "go", log)
+    if problems:
+        print("VM35_HOST=FAIL " + "; ".join(problems))
+        return 1
+    print(f"VM35_HOST=PASS {vm}: $6$ hash of the password in /etc/shadow, passwd -S P, in vendor-data without the "
+          f"password; {without}: locked")
+    return 0
+
+
 def wait_until_gone(args, kube, log, project, pool):
     """HOLD bak18-gone: the VM's copy holds a NIC on the spec's network until its upload ends (before that Incus refuses
     the network delete: "The network is currently in use"), and the same backup run copies the attached volume next
@@ -539,6 +685,14 @@ def main(argv=None):
     p.add_argument("--timeout-minutes", type=float, default=58)
     p.add_argument("--gone-timeout-minutes", type=float, default=11)
     p.set_defaults(func=cmd_bak18)
+    p = sub.add_parser("vm35")
+    kube_args(p)
+    ssh_opts(p)
+    p.add_argument("--log", required=True)
+    # under the spec's hold (45 minutes); the console password is in /etc/shadow after cloud-init's final stage
+    p.add_argument("--timeout-minutes", type=float, default=30)
+    p.add_argument("--read-timeout", type=float, default=60)
+    p.set_defaults(func=cmd_vm35)
 
     args = parser.parse_args(argv)
     if not hasattr(args, "local"):

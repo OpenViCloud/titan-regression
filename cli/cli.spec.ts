@@ -1,17 +1,19 @@
 import { test, expect, type Page } from '@playwright/test'
 import { spawn } from 'node:child_process'
+import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import { PORTAL, closeSessions, useBrowser } from './auth'
 import { startLocalProxyIfNeeded } from './local-proxy'
 import { API, RESULTS, bodyOf, call, expectStatus, get, log, newKey, sleep, startLog } from './api'
-import { RUN, createVm, deleteVmAndWait, envOf, getVm, runNetwork, runs, vmShape } from './fixtures'
+import { RUN, createVm, deleteVmAndWait, envOf, getVm, runNetwork, runs, vmShape, waitVm } from './fixtures'
 import { cleanUp } from './clean-up'
 import { newSecret } from './token'
+import { incusName } from './incus-names'
 import { BINARY, CLI_HOME, CliSshChain, type CliResult, cliAuthUrl, cliEnv, run, runCli, runWithStdin, setCliAuthUrl,
   sshOptions, untilGuestAnswers, waitForBinary } from './cli-ssh'
 
-// Cases CLI-01..18 of plan.md, in five describes that run in this order: 'cli' (CLI-01..03, CLI-06..11),
-// 'cli catalog' (CLI-05), 'cli lifecycle' (CLI-12..17), 'cli api token' (CLI-18), 'cli logout' (CLI-04). The binary is not in the image: when
+// Cases CLI-01..18, CLI-20, CLI-21 of plan.md, in five describes that run in this order: 'cli' (CLI-01..03, CLI-06..11),
+// 'cli catalog' (CLI-05), 'cli lifecycle' (CLI-12..17, CLI-20, CLI-21), 'cli api token' (CLI-18), 'cli logout' (CLI-04). The binary is not in the image: when
 // this spec logs BINARY_WAIT the agent copies `openvicloud` built for the pod's architecture from the CLI commit the
 // release measures to /work/bin/openvicloud, checks sha256, then touches /work/bin/openvicloud.ready
 // (OpenViCloud/titan-ops:.claude/shared/regression-suite.md §Runner).
@@ -300,24 +302,89 @@ test.describe('cli catalog', () => {
   })
 })
 
-// --- CLI-12..17: ssh-key + VM lifecycle commands, on the run's network ------------------------------------------
+// --- CLI-12..17, CLI-20, CLI-21: ssh-key + VM lifecycle commands, on the run's network -------------------------
 // A separate key pair and ssh directory from CLI-06..11's: registering the same public key twice is 409
 // SSH_KEY_EXISTS, and the chain counts the sessions it opened, which CLI-11 already checked against the activity feed.
+// Order: CLI-12, CLI-13, CLI-14, CLI-13's ssh, CLI-16, CLI-21, CLI-15, CLI-20, CLI-17. Dev's Incus host has 4 GiB, so
+// one VM of this describe runs at a time: CLI-06..11's VM is deleted in the 'cli' describe's afterAll, and CLI-20's
+// starts only after CLI-15 deleted CLI-13's.
+
+// `vm stop <name> --wait` with the spec's clock around it. The two marks and the instance name are what the agent reads
+// the worker log by: `kubectl logs … --since-time=<from>`, lines whose `object` is the instance
+// (OpenViCloud/titan-incus-worker:resource/vm/action.go Action.Run logs "the guest did not shut down; powering off").
+// toISOString() is RFC 3339 in UTC.
+async function timedStop(caseId: string, vmId: string, vmName: string): Promise<{ result: CliResult, ms: number }> {
+  const instance = incusName('vm', vmId)
+  const from = new Date()
+  log(`${caseId} stop from=${from.toISOString()} instance=${instance}`)
+  const result = await runCli(['vm', 'stop', vmName, '--wait'])
+  const to = new Date()
+  const ms = to.getTime() - from.getTime()
+  log(`${caseId} stop to=${to.toISOString()} instance=${instance} seconds=${(ms / 1000).toFixed(1)} exit=${result.code} ` +
+    `stdout="${result.stdout.trim()}" stderr="${result.stderr.trim()}"`)
+  return { result, ms }
+}
+
+// Like runWithStdin() of lib/cli-ssh.ts, but stdin is a file (the shell's `< <file>`), so the CLI reads it to its end.
+function runWithStdinFrom(args: string[], path: string): Promise<CliResult> {
+  const fd = fs.openSync(path, 'r')
+  return new Promise((resolve) => {
+    const child = spawn(BINARY, args, { env: cliEnv(), stdio: [fd, 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout!.on('data', (chunk) => { stdout += chunk.toString() })
+    child.stderr!.on('data', (chunk) => { stderr += chunk.toString() })
+    child.on('close', (code) => {
+      fs.closeSync(fd)
+      let exit = -1
+      if (code !== null) {
+        exit = code
+      }
+      resolve({ code: exit, stdout, stderr })
+    })
+  })
+}
+
+// A VM waiting on a create, start, stop or snapshot refuses a delete
+// (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.Deletion.cs Vm.Delete): wait until it is at rest first.
+async function deleteOnceSettled(label: string, vmId: string): Promise<void> {
+  const waiting = ['Creating', 'Starting', 'Stopping', 'Snapshotting']
+  const vm = await waitVm(`${label} settled`, vmId, (v) => !waiting.includes(v.status))
+  if (vm.status === 'Deleting') {
+    await waitVm(`${label} deleted`, vmId, (v) => v.status === 'Deleted')
+    return
+  }
+  await deleteVmAndWait(vmId)
+}
+
 test.describe.serial('cli lifecycle', () => {
   test.describe.configure({ timeout: 25 * 60_000 })
 
   const LIFECYCLE_SSH_DIR = '/work/ssh-cli-lifecycle'
+  const CONSOLE_PASSWORD_DIR = '/work/cli-console-password'
   const KEY_NAME = `rg-cli-${RUN}`
   const VM2_NAME = `rg-vmcli2-${RUN}`
   const VM3_NAME = `rg-vmcli3-${RUN}`
+  const VM4_NAME = `rg-vmcli4-${RUN}`
+  const VM5_NAME = `rg-vmcli5-${RUN}`
+  const HOST_KEYS = ['/etc/ssh/ssh_host_rsa_key', '/etc/ssh/ssh_host_ecdsa_key', '/etc/ssh/ssh_host_ed25519_key']
   let lifecycleKeyId = ''
   let lifecycleVmId = ''
   let extraVmId = ''
+  let consoleVmId = ''
+  // CLI-13's `vm ssh … id -un`: its first run is CLI-14's wait for the guest after the stop and start.
+  let cli13Ssh: CliResult | null = null
+  // CLI-21 measured a stop of 30 s or more: the 5-minute part of CLI-15's delete is measured only then.
+  let cli21Measured = false
 
   test.afterAll(async () => {
+    fs.rmSync(CONSOLE_PASSWORD_DIR, { recursive: true, force: true })
     const steps: Array<[string, () => Promise<void>]> = []
     if (extraVmId !== '') {
       steps.push([`delete VM ${extraVmId}`, () => deleteVmAndWait(extraVmId)])
+    }
+    if (consoleVmId !== '') {
+      steps.push([`delete VM ${consoleVmId}`, () => deleteOnceSettled('afterAll console VM', consoleVmId)])
     }
     if (lifecycleVmId !== '') {
       steps.push([`delete VM ${lifecycleVmId}`, () => deleteVmAndWait(lifecycleVmId)])
@@ -357,11 +424,10 @@ test.describe.serial('cli lifecycle', () => {
     expect(key!.fingerprint).toMatch(/^SHA256:/)
   })
 
-  // OpenViCloud/titan-cli:command/vm/lifecycle.go newCreate, waitFor (create --wait) ·
-  // OpenViCloud/titan-cli:command/vm/vm.go resolve (ssh by name) — create by name, size m, then log in
-  test('CLI-13 `vm create --wait` reaches Running/Ready and matches the API; `vm ssh … id -un` prints ubuntu', async () => {
-    // create --wait (up to 10 minutes) and the guest start wait (GUEST_START_WAIT_MS) in one test
-    test.setTimeout(25 * 60_000)
+  // OpenViCloud/titan-cli:command/vm/lifecycle.go newCreate, waitFor (create --wait) — create by name, size m. Its
+  // `vm ssh … id -un` runs after CLI-14, which must stop the VM before any SSH session.
+  test('CLI-13 `vm create --wait` reaches Running/Ready and matches the API', async () => {
+    test.setTimeout(15 * 60_000)
     const { clusterId, templateId } = await envOf()
     const network = await runNetwork()
     const templates = await get('tenant', `/v1/templates?clusterId=${clusterId}`) as Array<{ id: string, name: string }>
@@ -372,28 +438,27 @@ test.describe.serial('cli lifecycle', () => {
     const created = await runCli(['vm', 'create', VM2_NAME, '--cluster', clusterId, '--network', network.name,
       '--template', templateName, '--size', 'm', '--ssh-key', KEY_NAME, '--wait', '--timeout', '10m'])
     log(`CLI-13 create exit=${created.code} stdout="${created.stdout.trim()}" stderr="${created.stderr.trim()}"`)
+    const idMatch = created.stdout.match(/^ID:\s+(\S+)/m)
+    if (idMatch !== null) {
+      lifecycleVmId = idMatch[1]
+    }
     expect(created.code, created.stderr).toBe(0)
     expect(created.stdout).toMatch(/Status:\s+(Running|Ready)\s*$/m)
-
-    const idMatch = created.stdout.match(/^ID:\s+(\S+)/m)
     expect(idMatch, created.stdout).not.toBeNull()
-    lifecycleVmId = idMatch![1]
     const fromApi = await getVm(lifecycleVmId)
     log(`CLI-13 api ${vmShape(fromApi)}`)
     expect(['Running', 'Ready']).toContain(fromApi.status)
-
-    const result = await untilGuestAnswers('CLI-13 ssh', () =>
-      runCli(['vm', 'ssh', VM2_NAME, '--', ...sshOptions(LIFECYCLE_SSH_DIR, 'key', 'accept-new'), 'id', '-un']))
-    log(`CLI-13 ssh exit=${result.code} stdout="${result.stdout.trim()}"`)
-    expect(result.code, result.stderr).toBe(0)
-    expect(result.stdout.trim()).toBe('ubuntu')
   })
 
-  // OpenViCloud/titan-cli:command/vm/lifecycle.go newRequest (newStop/newStart share newRequest, both take --wait)
-  test('CLI-14 `vm stop --wait` then `vm start --wait` report Stopped, then Running/Ready', async () => {
-    test.setTimeout(10 * 60_000)
-    const stopped = await runCli(['vm', 'stop', VM2_NAME, '--wait'])
-    log(`CLI-14 stop exit=${stopped.code} stdout="${stopped.stdout.trim()}"`)
+  // OpenViCloud/titan-cli:command/vm/lifecycle.go newStop, newStart, waitFor (stop/start --wait) ·
+  // titan-ops features/vm/design.md#vm-stop-timeout · OpenViCloud/titan-incus-worker:resource/vm/action.go (Action.Run,
+  // isShutdownNotDone). A stop right after create catches the guest mid-boot, before cloud-init has its host keys on
+  // disk; whether the worker powered it off (default stop timeout 120 s) is the agent's read of the worker log between
+  // the two marks timedStop() logs. Either way the host keys must survive.
+  test('CLI-14 stop at once after create, then start: `vm ssh` gets in and the three host keys are not empty', async () => {
+    test.setTimeout(25 * 60_000)
+    expect(lifecycleVmId, 'CLI-13 made the VM').not.toBe('')
+    const { result: stopped } = await timedStop('CLI-14', lifecycleVmId, VM2_NAME)
     expect(stopped.code, stopped.stderr).toBe(0)
     expect(stopped.stdout).toMatch(/Status:\s+Stopped\s*$/m)
 
@@ -401,6 +466,33 @@ test.describe.serial('cli lifecycle', () => {
     log(`CLI-14 start exit=${started.code} stdout="${started.stdout.trim()}"`)
     expect(started.code, started.stderr).toBe(0)
     expect(started.stdout).toMatch(/Status:\s+(Running|Ready)\s*$/m)
+
+    // CLI-13's ssh, every 10 s for up to 10 minutes (GUEST_START_WAIT_MS of lib/ssh.ts)
+    const firstIn = Date.now()
+    cli13Ssh = await untilGuestAnswers('CLI-14 ssh', () =>
+      runCli(['vm', 'ssh', VM2_NAME, '--', ...sshOptions(LIFECYCLE_SSH_DIR, 'key', 'accept-new'), 'id', '-un']))
+    log(`CLI-14 ssh exit=${cli13Ssh.code} stdout="${cli13Ssh.stdout.trim()}" after ${Math.round((Date.now() - firstIn) / 1000)} s`)
+    expect(cli13Ssh.code, cli13Ssh.stderr).toBe(0)
+    expect(cli13Ssh.stdout.trim()).toBe('ubuntu')
+
+    const stat = await runCli(['vm', 'ssh', VM2_NAME, '--', ...sshOptions(LIFECYCLE_SSH_DIR, 'key', 'yes'),
+      `sudo stat -c '%s %n' ${HOST_KEYS.join(' ')}`])
+    log(`CLI-14 host keys exit=${stat.code} stdout="${stat.stdout.trim()}" stderr="${stat.stderr.trim()}"`)
+    expect(stat.code, stat.stderr).toBe(0)
+    const lines = stat.stdout.split('\n').map((line) => line.trim()).filter((line) => line !== '')
+    for (const key of HOST_KEYS) {
+      const line = lines.find((l) => l.endsWith(` ${key}`))
+      expect(line, `${key} in ${stat.stdout}`).toBeTruthy()
+      expect(Number(line!.split(' ')[0]), key).toBeGreaterThan(0)
+    }
+  })
+
+  // OpenViCloud/titan-cli:command/vm/vm.go resolve (ssh by name). The ssh itself ran once, in CLI-14: the plan has
+  // CLI-13's first `vm ssh … id -un` after the stop and start, and CLI-14's wait for the guest is that command.
+  test('CLI-13 `vm ssh … id -un`, first run after the stop and start, prints ubuntu', async () => {
+    expect(cli13Ssh, 'CLI-14 ran CLI-13\'s ssh').not.toBeNull()
+    expect(cli13Ssh!.code, cli13Ssh!.stderr).toBe(0)
+    expect(cli13Ssh!.stdout.trim()).toBe('ubuntu')
   })
 
   // OpenViCloud/titan-cli:command/vm/lifecycle.go newCreate (resolveNetwork/createVm — client-side resolution before any POST) ·
@@ -432,9 +524,60 @@ test.describe.serial('cli lifecycle', () => {
     }
   })
 
-  // OpenViCloud/titan-cli:command/vm/lifecycle.go newRename (rename), newRequest (delete's confirm prompt and --yes)
-  test('CLI-15 rename, decline delete, then `--yes --wait` deletes and the API shows status Deleted', async () => {
-    test.setTimeout(10 * 60_000)
+  // titan-ops features/vm/design.md#vm-stop-timeout · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/UpdateVmValidator.cs
+  // (UpdateVmValidator: 30..1800) · OpenViCloud/titan-incus-worker:resource/vm/action.go (Action.Run, isShutdownNotDone) ·
+  // OpenViCloud/titan-cli:command/vm/lifecycle.go (newStop, waitFor). A guest that ignores the ACPI power button makes
+  // the worker wait the VM's 30 s, then power it off. The power-off line in the worker log is the agent's read, not
+  // this spec's: the spec logs the two marks and the instance name. Not measured: whether the guest also ignores Incus's
+  // shutdown signal (QMP system_powerdown) because of that file.
+  test('CLI-21 a guest that ignores the power button: `vm stop --wait` takes the 30 s stop timeout, the drop-in survives', async () => {
+    test.setTimeout(25 * 60_000)
+    expect(lifecycleVmId, 'CLI-13 made the VM').not.toBe('')
+    expectStatus(await call('tenant', 'PATCH', `/v1/tenant/vms/${lifecycleVmId}`, { stopTimeoutSeconds: 30 }), 204)
+    expect((await getVm(lifecycleVmId)).stopTimeoutSeconds).toBe(30)
+
+    const ssh = sshOptions(LIFECYCLE_SSH_DIR, 'key', 'yes')
+    const ignore = await runCli(['vm', 'ssh', VM2_NAME, '--', ...ssh,
+      'sudo mkdir -p /etc/systemd/logind.conf.d' +
+      ' && printf \'[Login]\\nHandlePowerKey=ignore\\n\' | sudo tee /etc/systemd/logind.conf.d/rg-ignore-power.conf' +
+      ' && sudo systemctl restart systemd-logind'])
+    log(`CLI-21 drop-in exit=${ignore.code} stdout="${ignore.stdout.trim()}" stderr="${ignore.stderr.trim()}"`)
+    expect(ignore.code, ignore.stderr).toBe(0)
+    const synced = await runCli(['vm', 'ssh', VM2_NAME, '--', ...ssh, 'sync'])
+    log(`CLI-21 sync exit=${synced.code}`)
+    expect(synced.code, synced.stderr).toBe(0)
+
+    const { result: stopped, ms } = await timedStop('CLI-21', lifecycleVmId, VM2_NAME)
+    expect(stopped.code, stopped.stderr).toBe(0)
+    expect(stopped.stdout).toMatch(/Status:\s+Stopped\s*$/m)
+
+    const started = await runCli(['vm', 'start', VM2_NAME, '--wait'])
+    log(`CLI-21 start exit=${started.code} stdout="${started.stdout.trim()}"`)
+    expect(started.code, started.stderr).toBe(0)
+    expect(started.stdout).toMatch(/Status:\s+(Running|Ready)\s*$/m)
+    // Every 10 s for up to 10 minutes, as CLI-14 (GUEST_START_WAIT_MS of lib/ssh.ts)
+    const config = await untilGuestAnswers('CLI-21 cat-config', () =>
+      runCli(['vm', 'ssh', VM2_NAME, '--', ...ssh, 'systemd-analyze', 'cat-config', 'systemd/logind.conf']))
+    log(`CLI-21 cat-config exit=${config.code} HandlePowerKey lines=${JSON.stringify(config.stdout.split('\n').filter((l) => l.includes('HandlePowerKey')))}`)
+    expect(config.code, config.stderr).toBe(0)
+    expect(config.stdout).toMatch(/^HandlePowerKey=ignore\s*$/m)
+
+    // CLI-15 deletes this VM next: a delete does not read the stop timeout.
+    expectStatus(await call('tenant', 'PATCH', `/v1/tenant/vms/${lifecycleVmId}`, { stopTimeoutSeconds: 1800 }), 204)
+    expect((await getVm(lifecycleVmId)).stopTimeoutSeconds).toBe(1800)
+
+    const seconds = (ms / 1000).toFixed(1)
+    test.skip(ms < 30_000, `N/A: vm stop took ${seconds} s, under the 30 s stop timeout — the guest shut down cleanly`)
+    log(`CLI-21 stop took ${seconds} s (>= 30 s)`)
+    cli21Measured = true
+  })
+
+  // OpenViCloud/titan-cli:command/vm/lifecycle.go newRename (rename), newRequest (delete's confirm prompt and --yes) ·
+  // titan-ops architecture/http-contract.md#async-polling-contract · titan-ops features/vm/design.md#vm-stop-timeout ·
+  // OpenViCloud/titan-incus-worker:resource/vm/delete.go (removeInstance, forceStopTimeoutSeconds): a delete powers the
+  // VM off at once, so CLI-21's 1800 s and the guest that ignores the power button do not hold it up.
+  test('CLI-15 rename, decline delete, then `--yes --wait` deletes within 5 minutes and the API shows status Deleted', async () => {
+    test.setTimeout(15 * 60_000)
     const renamed = await runCli(['vm', 'rename', VM2_NAME, VM3_NAME])
     log(`CLI-15 rename exit=${renamed.code} stderr="${renamed.stderr.trim()}"`)
     expect(renamed.code, renamed.stderr).toBe(0)
@@ -451,8 +594,10 @@ test.describe.serial('cli lifecycle', () => {
     const stillThere = await getVm(lifecycleVmId)
     expect(stillThere.status).not.toBe('Deleted')
 
+    const deleteFrom = Date.now()
     const deletedResult = await runCli(['vm', 'delete', VM3_NAME, '--yes', '--wait'])
-    log(`CLI-15 delete exit=${deletedResult.code} stderr="${deletedResult.stderr.trim()}"`)
+    const deleteSeconds = Math.round((Date.now() - deleteFrom) / 1000)
+    log(`CLI-15 delete exit=${deletedResult.code} after ${deleteSeconds} s stderr="${deletedResult.stderr.trim()}"`)
     expect(deletedResult.code, deletedResult.stderr).toBe(0)
     // The delete branch of newRequest only calls deps.Printer.Message("VM %s deleted.", …), to Err.
     expect(deletedResult.stderr).toMatch(/deleted/)
@@ -460,6 +605,69 @@ test.describe.serial('cli lifecycle', () => {
     log(`CLI-15 api ${vmShape(fromApi)}`)
     expect(fromApi.status).toBe('Deleted')
     lifecycleVmId = '' // afterAll's deleteVmAndWait is a no-op on an already-Deleted VM; clearing it just skips the read.
+    if (cli21Measured) {
+      expect(deleteSeconds, 'a delete does not wait the VM\'s 1800 s stop timeout').toBeLessThanOrEqual(300)
+    } else {
+      log(`CLI-15 N/A for the 5-minute part: CLI-21 was N/A (delete took ${deleteSeconds} s)`)
+      test.info().annotations.push({ type: 'N/A', description: 'the 5-minute part of the delete: CLI-21 was N/A' })
+    }
+  })
+
+  // titan-ops features/cli/design.md#vm-lifecycle · OpenViCloud/titan-cli:command/vm/lifecycle.go (readConsolePassword:
+  // stdin less one line end, empty refused before any request; newCreate registers no flag that takes the password
+  // on the command line). Runs after CLI-15 deleted CLI-13's VM: one VM of this describe at a time.
+  test('CLI-20 `vm create --console-password-stdin` reads the password from stdin only and never prints it', async () => {
+    test.setTimeout(25 * 60_000)
+    const { clusterId, templateId } = await envOf()
+    const network = await runNetwork()
+    const password = crypto.randomBytes(12).toString('base64url')
+    expect(password.length).toBe(16)
+    const hide = (text: string): string => text.split(password).join('***').trim()
+    fs.rmSync(CONSOLE_PASSWORD_DIR, { recursive: true, force: true })
+    fs.mkdirSync(CONSOLE_PASSWORD_DIR, { recursive: true, mode: 0o700 })
+    const passwordFile = `${CONSOLE_PASSWORD_DIR}/password`
+    fs.writeFileSync(passwordFile, `${password}\n`, { mode: 0o600 })
+    const createArgs = (name: string): string[] => ['vm', 'create', name, '--cluster', clusterId, '--network', network.name,
+      '--template', templateId, '--size', 'm']
+    try {
+      const created = await runWithStdinFrom([...createArgs(VM4_NAME), '--console-password-stdin', '--wait', '--timeout', '10m'],
+        passwordFile)
+      log(`CLI-20 stdin file exit=${created.code} stdout="${hide(created.stdout)}" stderr="${hide(created.stderr)}"`)
+      const vms = await get('tenant', '/v1/tenant/vms') as Array<{ id: string, name: string }>
+      const vm = vms.find((v) => v.name === VM4_NAME)
+      if (vm !== undefined) {
+        consoleVmId = vm.id
+      }
+      expect(created.code, hide(created.stderr)).toBe(0)
+      expect(vm, `${VM4_NAME} in GET /v1/tenant/vms`).toBeTruthy()
+      expect(created.stdout.includes(password), 'stdout holds the password').toBe(false)
+      expect(created.stderr.includes(password), 'stderr holds the password').toBe(false)
+
+      const empty = await runWithStdinFrom([...createArgs(VM5_NAME), '--console-password-stdin'], '/dev/null')
+      log(`CLI-20 empty stdin exit=${empty.code} stderr="${hide(empty.stderr)}"`)
+      expect(empty.code).not.toBe(0)
+      expect(empty.stderr).toContain('no console password on stdin')
+
+      const onTheLine = await runCli([...createArgs(VM5_NAME), '--console-password', password])
+      log(`CLI-20 on the command line exit=${onTheLine.code} stderr="${hide(onTheLine.stderr).split('\n')[0]}"`)
+      expect(onTheLine.code).not.toBe(0)
+      expect(onTheLine.stderr).toContain('unknown flag: --console-password')
+
+      const after = await get('tenant', '/v1/tenant/vms') as Array<{ id: string, name: string }>
+      expect(after.filter((v) => v.name === VM5_NAME).map((v) => v.id)).toEqual([])
+    } finally {
+      fs.rmSync(CONSOLE_PASSWORD_DIR, { recursive: true, force: true })
+      if (consoleVmId !== '') {
+        // A failure here is logged, not thrown over the case's own error; afterAll tries again and fails the run.
+        try {
+          const vmId = consoleVmId
+          await cleanUp([[`delete VM ${vmId}`, () => deleteOnceSettled(`CLI-20 ${VM4_NAME}`, vmId)]])
+          consoleVmId = ''
+        } catch (error) {
+          log(`CLI-20 delete ${VM4_NAME} failed, afterAll tries again: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+    }
   })
 
   // OpenViCloud/titan-cli:command/sshkey/sshkey.go newDelete (delete --yes)
