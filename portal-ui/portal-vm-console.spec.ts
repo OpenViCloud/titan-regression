@@ -461,7 +461,7 @@ test.describe.serial('portal-ui vm: console password, stop timeout panel and Con
     } else {
       await expect(panel.getByRole('button', { name: 'Disconnect', exact: true })).toBeVisible({ timeout: 30_000 })
       const terminal = panel.locator('.xterm-rows')
-      await terminal.click()
+      await panel.locator('.xterm-screen').click() // xterm's screen layer takes the pointer above .xterm-rows
       const started = Date.now()
       const deadline = started + 10 * 60_000
       const sawLogin = await everyThirtySeconds(async () => { await page.keyboard.press('Enter') },
