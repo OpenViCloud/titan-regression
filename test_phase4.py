@@ -19,6 +19,9 @@ _spec.loader.exec_module(phase4)
 # came before, the last one repeats); `logs -l app=…` prints FAKE_WORKER_LOG; `exec … touch <file>` creates the file under
 # FAKE_STATE/pod, after which `logs <pod>` prints FAKE_LOG_AFTER_TOUCH_<files touched> or FAKE_LOG_AFTER_TOUCH when set. ssh: a command holding `incus query '/1.0/instances/<x>` prints FAKE_INSTANCE_<x> (absent ⇒ exit 1) or,
 # for `/storage-pools/`, FAKE_VOLUME; FAKE_COPY_READS_BEFORE_GONE ends the copy after that many reads of it.
+# FAKE_GUEST {substring: [[output, exit], …]}: a host command holding the substring gets its next pair (the last repeats).
+# kubectl `exec … openssl` prints FAKE_OPENSSL (unset ⇒ exit 127, no openssl); `exec -i … grep` counts the stdin lines
+# holding FAKE_POD_PASSWORD, the pod's password file, which no argument carries.
 FAKE_KUBECTL = textwrap.dedent('''\
     #!/usr/bin/env python3
     import json, os, pathlib, sys
@@ -61,6 +64,15 @@ FAKE_KUBECTL = textwrap.dedent('''\
         else:
             logs = [v for k, v in sorted(os.environ.items()) if k.startswith("FAKE_LOG_") and k[9:].isdigit()]
             print(logs[min(n, len(logs) - 1)])
+    elif args[:1] == ["exec"] and any("openssl" in a for a in args):
+        if "FAKE_OPENSSL" not in os.environ:
+            print("sh: 1: openssl: not found", file=sys.stderr)
+            sys.exit(127)
+        print(os.environ["FAKE_OPENSSL"])
+    elif args[:1] == ["exec"] and any("grep" in a for a in args):
+        count = sum(os.environ["FAKE_POD_PASSWORD"] in line for line in sys.stdin.read().splitlines())
+        print(count)
+        sys.exit(0 if count else 1)
     elif args[:1] == ["exec"] and "touch" in args:
         (state / "pod").mkdir(exist_ok=True)
         (state / "pod" / pathlib.Path(args[-1]).name).write_text("")
@@ -113,6 +125,15 @@ FAKE_SSH = textwrap.dedent('''\
         print("{}")
     elif "/storage-pools/" in command:
         print(os.environ["FAKE_VOLUME"])
+    elif any(k in command for k in json.loads(os.environ.get("FAKE_GUEST", "{}"))):
+        guest = json.loads(os.environ["FAKE_GUEST"])
+        key = next(k for k in guest if k in command)
+        counter = state / ("guest-" + str(sorted(guest).index(key)))
+        n = int(counter.read_text()) if counter.exists() else 0
+        counter.write_text(str(n + 1))
+        output, code = guest[key][min(n, len(guest[key]) - 1)]
+        print(output)
+        sys.exit(code)
     else:
         print("ran: " + command)
         sys.exit(int(os.environ.get("FAKE_EXIT", "0")))
@@ -393,6 +414,135 @@ class Bak18Test(unittest.TestCase):
     def test_bak18_refuses_when_the_pending_hold_is_another_step(self):
         code, out, _, _ = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", **self.env(FAKE_LOG_0=HOLD_VM28))
         self.assertEqual(code, 2, out)
+
+
+PW_VM = "vmpwpw"
+PASSWORD = "Probe-Pass-123"
+# OpenViCloud/titan-control-plane:Titan.Tests/Services/Sha512CryptTests.cs (AKnownPasswordAndSalt_GiveWhatOpensslGives)
+HASH = "$6$rgprobesalt$nSxi4dKg3obBTV33X0Wnws7kIi8jT50mu.DpARo.IQtM4NQ/SAJt4uuiOqBLf8QgnyKzhezr5SvghngykEqvO0"
+OTHER = "$6$rgprobesalt$V.1tXI3VaN1kXH7WHJ5/N42r4ZReZ26CKNbqXXSfPSHEEP7Qm9l5O5mxvINbD7Sn7yk9cwx8/ciOubCuxKlpm."
+HOLD_VM35 = ('2026-11-16T10:05:00.000Z HOLD vm35 '
+             + json.dumps({"project": "t-1", "vm": PW_VM, "vmWithout": VM, "passwordFile": "/work/vm-35/password"},
+                          separators=(",", ":")))
+VENDOR_PW = f"#cloud-boothook\n#!/bin/sh\necho 'ubuntu:{HASH}' | chpasswd -e\n"
+VENDOR_KEYS = "#cloud-boothook\n#!/bin/sh\ncat > /etc/ssh/openvicloud/ubuntu <<'KEYS'\nssh-ed25519 AAAAC3fake\nKEYS\n"
+
+
+class Vm35Test(unittest.TestCase):
+    def env(self, guest=None, **extra):
+        reads = {
+            f"exec {PW_VM} --project t-1 -- cloud-init": [["...\nstatus: done", 0]],
+            f"exec {PW_VM} --project t-1 -- getent": [[f"ubuntu:{HASH}:20410:0:99999:7:::", 0]],
+            f"exec {PW_VM} --project t-1 -- passwd": [["ubuntu P 2026-11-18 0 99999 7 -1", 0]],
+            f"config get {PW_VM} ": [[VENDOR_PW, 0]],
+            f"exec {VM} --project t-1 -- getent": [["ubuntu:!:20410:0:99999:7:::", 0]],
+            f"exec {VM} --project t-1 -- passwd": [["ubuntu L 2026-11-18 0 99999 7 -1", 0]],
+            f"config get {VM} ": [[VENDOR_KEYS, 0]],
+        }
+        reads.update(guest or {})
+        env = {"FAKE_LOG_0": HOLD_VM35, "FAKE_LOG_AFTER_TOUCH": HOLD_VM35 + "\n2026-11-16T10:20:00.000Z GO vm35",
+               "FAKE_GUEST": json.dumps(reads), "FAKE_OPENSSL": HASH, "FAKE_POD_PASSWORD": PASSWORD}
+        env.update(extra)
+        return env
+
+    def vm35(self, **env):
+        return run("vm35", *KUBE, *SSH, "--log", "{tmp}/vm35.log", **env)
+
+    def test_a_hash_of_the_password_in_shadow_and_vendor_data_and_a_locked_vm_pass(self):
+        code, out, calls, state = self.vm35(**self.env())
+        self.assertEqual(code, 0, out)
+        self.assertIn("VM35_HOST=PASS", out)
+        self.assertTrue((state / "pod" / "go-vm35").exists())
+        log = (state.parent / "vm35.log").read_text()
+        self.assertRegex(log, r"^# phase4\.py vm35 \(ssh debian@host, ControlMaster\) · debian@host · ")
+        for command in (f"sudo incus exec {PW_VM} --project t-1 -- cloud-init status --wait",
+                        f"sudo incus exec {PW_VM} --project t-1 -- getent shadow ubuntu",
+                        f"sudo incus exec {VM} --project t-1 -- passwd -S ubuntu",
+                        f"sudo incus config get {PW_VM} cloud-init.vendor-data --project t-1"):
+            self.assertIn("$ " + command + "\n", log)
+        self.assertIn("exec -n ns-titan-regression regression-phase4-prd-abc -- sh -c openssl passwd -6 -salt "
+                      "\"$1\" -stdin < \"$2\" sh rgprobesalt /work/vm-35/password", calls)
+        self.assertIn("exec -i -n ns-titan-regression regression-phase4-prd-abc -- sh -c", calls)
+
+    def test_the_password_is_in_no_argument_no_log_and_no_output(self):
+        code, out, calls, state = self.vm35(**self.env())
+        self.assertEqual(code, 0, out)
+        for text in (out, calls, (state.parent / "vm35.log").read_text()):
+            self.assertNotIn(PASSWORD, text)
+
+    def test_cloud_init_is_read_again_until_the_guest_agent_answers_and_logged_once(self):
+        guest = {f"exec {PW_VM} --project t-1 -- cloud-init": [
+            ["Error: VM agent isn't currently running", 1], ["Error: VM agent isn't currently running", 1],
+            ["....\nstatus: done", 0]]}
+        code, out, _, state = self.vm35(**self.env(guest))
+        self.assertEqual(code, 0, out)
+        self.assertEqual((state.parent / "vm35.log").read_text().count("cloud-init status --wait"), 1)
+
+    def test_a_hash_that_is_not_the_passwords_fails_and_still_goes(self):
+        code, out, _, state = self.vm35(**self.env(FAKE_OPENSSL=OTHER))
+        self.assertEqual(code, 1, out)
+        self.assertIn("VM35_HOST=FAIL the hash field of ubuntu is not openssl passwd -6", out)
+        self.assertTrue((state / "pod" / "go-vm35").exists())
+
+    def test_the_password_in_vendor_data_fails(self):
+        guest = {f"config get {PW_VM} ": [[VENDOR_PW + f"# {PASSWORD}\n", 0]]}
+        code, out, _, _ = self.vm35(**self.env(guest))
+        self.assertEqual(code, 1, out)
+        self.assertIn("cloud-init.vendor-data holds the password (1 lines)", out)
+        self.assertNotIn(PASSWORD, out)
+
+    def test_a_locked_or_missing_password_and_an_unlocked_vm_without_one_fail(self):
+        guest = {f"exec {PW_VM} --project t-1 -- getent": [["ubuntu:!:20410:0:99999:7:::", 0]],
+                 f"exec {PW_VM} --project t-1 -- passwd": [["ubuntu L 2026-11-18 0 99999 7 -1", 0]],
+                 f"exec {VM} --project t-1 -- getent": [[f"ubuntu:{OTHER}:20410:0:99999:7:::", 0]]}
+        code, out, calls, _ = self.vm35(**self.env(guest))
+        self.assertEqual(code, 1, out)
+        for problem in ("not a $6$ hash", "passwd -S ubuntu is L, not P",
+                        "on the VM without a password starts '$6$', not '!'"):
+            self.assertIn(problem, out)
+        self.assertNotIn("openssl", calls)
+
+    def test_vendor_data_without_the_hash_fails(self):
+        guest = {f"config get {PW_VM} ": [[VENDOR_KEYS, 0]]}
+        code, out, _, _ = self.vm35(**self.env(guest))
+        self.assertEqual(code, 1, out)
+        self.assertIn("cloud-init.vendor-data does not hold the hash of /etc/shadow", out)
+
+    def test_cloud_init_in_error_fails(self):
+        guest = {f"exec {PW_VM} --project t-1 -- cloud-init": [["status: error", 1]]}
+        code, out, _, _ = self.vm35(**self.env(guest))
+        self.assertEqual(code, 1, out)
+        self.assertIn("cloud-init status error, not done", out)
+
+    def test_no_status_before_the_timeout_skips(self):
+        guest = {f"exec {PW_VM} --project t-1 -- cloud-init": [["Error: VM agent isn't currently running", 1]]}
+        code, out, _, state = run("vm35", *KUBE, *SSH, "--log", "{tmp}/vm35.log", "--timeout-minutes", "0",
+                                  **self.env(guest, FAKE_LOG_AFTER_TOUCH=HOLD_VM35 + "\n2026-11-16T10:20:00.000Z SKIP vm35"))
+        self.assertEqual(code, 4, out)
+        self.assertIn("VM35_HOST=NOT_COVERED no 'status:'", out)
+        self.assertTrue((state / "pod" / "skip-vm35").exists())
+
+    def test_no_openssl_in_the_pod_skips(self):
+        env = self.env(FAKE_LOG_AFTER_TOUCH=HOLD_VM35 + "\n2026-11-16T10:20:00.000Z SKIP vm35")
+        del env["FAKE_OPENSSL"]
+        code, out, _, state = self.vm35(**env)
+        self.assertEqual(code, 4, out)
+        self.assertIn("VM35_HOST=NOT_COVERED openssl passwd in the pod: exit 127", out)
+        self.assertTrue((state / "pod" / "skip-vm35").exists())
+
+    def test_vm35_refuses_another_pending_step_or_facts_out_of_shape(self):
+        code, out, _, _ = self.vm35(**self.env(FAKE_LOG_0=HOLD_VM28))
+        self.assertEqual(code, 2, out)
+        outside = HOLD_VM35.replace("/work/vm-35/password", "/etc/shadow")
+        code, out, calls, _ = self.vm35(**self.env(FAKE_LOG_0=outside))
+        self.assertEqual(code, 2, out)
+        self.assertNotIn("incus exec", calls)
+
+    def test_the_shadow_field_and_the_passwd_state_are_read_from_the_ubuntu_line(self):
+        self.assertEqual(phase4.shadow_hash("root:*:1::::::\nubuntu:!:20410:0:99999:7:::\n"), "!")
+        self.assertIsNone(phase4.shadow_hash("Error: VM agent isn't currently running"))
+        self.assertEqual(phase4.passwd_state("ubuntu P 2026-11-18 0 99999 7 -1"), "P")
+        self.assertIsNone(phase4.passwd_state(""))
 
 
 class ConnectTest(unittest.TestCase):

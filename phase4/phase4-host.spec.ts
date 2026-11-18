@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test'
+import { randomBytes } from 'node:crypto'
+import * as fs from 'node:fs'
 import { closeSessions, useBrowser } from './auth'
 import { cleanUp } from './clean-up'
 import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, sleep, startLog } from './api'
 import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, existenceShape, getVm, networkUsable, readVolume,
   runs, vmShape, volumeShape, waitNetwork, waitVm, waitVolume } from './fixtures'
-import { hold } from './host-hold'
+import { HOLD_MS, hold } from './host-hold'
 import { incusName, phase4Key, projectOf } from './incus-names'
 
 // Phase 4 of the release run (`release:regression-prd`; README.md §Phase 4): resources that the
@@ -23,6 +25,20 @@ const LB_PENDING = new Set(['Creating', 'Updating', 'Deleting'])
 const RULE_PENDING = new Set(['Creating', 'Deleting'])
 const SNAP_PENDING = new Set(['Creating', 'Reverting', 'Deleting'])
 const GONE = new Set(['Gone', 'Deleted'])
+// VM-35's console password, for `python3 phase4.py vm35` to hash and grep for inside this pod (phase4.py:432 cmd_vm35):
+// outside RESULTS, which run-module.sh copies out, so it never leaves the pod; removed after the hold and in afterAll.
+const VM35_HAND_OFF = '/work/vm-35'
+
+// 12 characters, from letters that need no quoting in a shell or a cloud-init script
+function passwordOf(length: number): string {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
+  const bytes = randomBytes(length)
+  let password = ''
+  for (let i = 0; i < length; i++) {
+    password += letters[bytes[i] % letters.length]
+  }
+  return password
+}
 
 // --bind :: : the load balancer reaches its backends on their IPv6 address (dual-stack server)
 function userDataOf(label: string, marker: boolean, extraKey: string | null): string {
@@ -55,6 +71,7 @@ test.describe.serial('phase4 host', () => {
   let vmC = ''
   let vmD = ''
   let vmGu = ''
+  let vmPw = ''
   let lbId = ''
   let volumeId = ''
   let volSnapId = ''
@@ -98,6 +115,9 @@ test.describe.serial('phase4 host', () => {
   test.afterAll(async () => {
     test.setTimeout(40 * 60_000)
     const steps: Array<[string, () => Promise<void>]> = [
+      ['vm-35 hand-off', async () => {
+        fs.rmSync(VM35_HAND_OFF, { recursive: true, force: true })
+      }],
       ['load balancer', async () => {
         if (lbId === '') {
           return
@@ -131,7 +151,7 @@ test.describe.serial('phase4 host', () => {
         await pollUntil('cleanup: vm snapshot deleted', () => readVmSnap(vmSnapId), (r) => GONE.has(r.status), existenceShape)
       }],
     ]
-    for (const id of [vmA, vmB, vmC, vmD, vmGu, refusedVmId]) {
+    for (const id of [vmA, vmB, vmC, vmD, vmGu, vmPw, refusedVmId]) {
       if (id !== '') {
         steps.push([`vm ${id}`, () => deleteVmAndWait(id)])
       }
@@ -194,7 +214,7 @@ test.describe.serial('phase4 host', () => {
     const q = originalQuota!
     const raised = {
       ...q,
-      maxVms: Math.max(q.maxVms, liveVms + 6),
+      maxVms: Math.max(q.maxVms, liveVms + 7),
       maxNetworks: Math.max(q.maxNetworks, liveNets + 3),
       maxVolumes: Math.max(q.maxVolumes, liveVols + 2),
       maxPublicIpv6: Math.max(q.maxPublicIpv6, liveNets + 1),
@@ -258,6 +278,29 @@ test.describe.serial('phase4 host', () => {
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${volumeId}/snapshots/${volSnapId}`), 202)
     await pollUntil('volume snapshot deleted', () => readVolSnap(volumeId, volSnapId), (r) => GONE.has(r.status), existenceShape)
     volSnapId = ''
+  })
+
+  // plan.md VM-35 (titan-ops features/vm/design.md#console-password): the console password reaches the guest as its
+  // SHA-512 crypt hash only. OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmVendorData.cs
+  // (AppendPassword: a once-per-instance script that cloud-init's final stage runs, `chpasswd -e` with the hash) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/Sha512Crypt.cs (Hash: a random salt of 16).
+  // The agent's `python3 phase4.py vm35` waits for cloud-init in the guest, reads the shadow, `passwd -S` and the
+  // vendor-data of this VM and of vm A (keys, no password), and hashes the password with the salt it read and greps the
+  // vendor-data for it inside this pod (phase4.py:394 vm35_verdict): the host reads are its verdict. On net6 (netEmpty
+  // must stay empty for OBS-06), before VM-28 puts its limit on the project.
+  test('VM-35 a console password is a $6$ hash in /etc/shadow and in vendor-data, never the password; a VM without one is locked', async () => {
+    test.setTimeout(HOLD_MS + 20 * 60_000)
+    const { smallTier } = await envOf()
+    const password = passwordOf(12)
+    vmPw = await createVm(`rg-vmpw4-${RUN}`, smallTier, net6, { consolePassword: password })
+    await waitVm('VM-35 vm running', vmPw, runs)
+    fs.rmSync(VM35_HAND_OFF, { recursive: true, force: true })
+    fs.mkdirSync(VM35_HAND_OFF, { mode: 0o700 })
+    fs.writeFileSync(`${VM35_HAND_OFF}/password`, password, { mode: 0o600 })
+    const go = await hold('vm35', { project: projectOf(tenantId), vm: incusName('vm', vmPw), vmWithout: incusName('vm', vmA),
+      passwordFile: `${VM35_HAND_OFF}/password` })
+    fs.rmSync(VM35_HAND_OFF, { recursive: true, force: true })
+    test.skip(!go, 'host step not run')
   })
 
   // plan.md VM-28: a create Incus refuses through every lease ends Failed, and a DELETE then ends it at once
