@@ -113,7 +113,7 @@ test.describe.serial('ssh-key', () => {
   })
 
   // titan-ops features/vm/design.md#ssh-key · OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmVendorData.cs
-  // ForKeysAsync (SSH_KEY_NOT_FOUND): checked before the VM row is added, so nothing is made ·
+  // KeyLinesAsync (SSH_KEY_NOT_FOUND): checked before the VM row is added, so nothing is made ·
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/CreateVmValidator.cs CreateVmValidator (MaxSshKeysPerVm = 10 distinct ids): the
   // validator answers before the handler looks any key up
   test('SSH-04 an unknown key id is 404 SSH_KEY_NOT_FOUND; 11 unknown ids are 400 VALIDATION_ERROR; neither makes a VM', async () => {

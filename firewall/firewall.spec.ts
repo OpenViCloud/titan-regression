@@ -5,7 +5,7 @@ import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, s
 import { cleanUp } from './clean-up'
 import { RUN, activityIds, activitySince, envOf, existenceShape as ruleShape, listNetworks, networkUsable, runNetwork, waitNetwork } from './fixtures'
 
-// Cases FW-01..05 and FW-07..13 of plan.md: FW-07 reads the Incus host, FW-08 is NOT COVERED; rules of a
+// Cases FW-01..05 and FW-07..13 of plan.md: FW-07 reads the Incus host, FW-08 (host) has no spec yet; rules of a
 // deleted network are NETL-02. FW-10 and FW-11 need a second network, which beta-user may not hold: they raise
 // maxNetworks (FW-11 also sets maxFirewallRulesPerNetwork to 0), give the quota back right after the case and again
 // in afterAll, and delete the network they made.
