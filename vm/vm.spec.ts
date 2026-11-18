@@ -344,8 +344,9 @@ async function consoleRefusedAtTheLimit(vmId: string, vmName: string): Promise<v
 }
 
 // Cases VM-01..19, VM-21, VM-22, VM-26, VM-27, VM-29, VM-31..34, VM-36, VM-37, SSH-08, SSH-09 and CSL-01..06 of plan.md,
-// plus ACT-01/ACT-03/ACT-04 for VMs. VM-14 is NOT COVERED, VM-20, VM-28 and VM-35 read the Incus host. Create checks run
-// in this order (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync):
+// plus ACT-01/ACT-03/ACT-04 for VMs. VM-14 is measured over the Internet in Phase 4, VM-30 is NOT COVERED, and VM-20,
+// VM-23..25, VM-28 and VM-35 read the Incus host. Create checks run in this order
+// (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync):
 // quota (TenantQuotaGate), cluster, name, network, offering, template — so the error cases run below the quota. At most
 // two VMs of this module run at once (dev's Incus host is small): vmA and vmB until VM-17, then the VM of VM-34 alone
 // (vmA stopped) until CSL-05 deletes it, then vmA alone for SSH-08 and CSL-06.

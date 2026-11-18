@@ -243,7 +243,7 @@ Two modules of this repository are run by the agent, not by `run-lanes.py`: `pha
 `go-<step>` or `skip-<step>` in `/work/results/` of its pod; the agent does the host commands of the step in between.
 `phase4.py` is every command the agent runs for that, so nobody writes a shell loop by hand; each `host` command and
 each answer given `--log` goes to that evidence log as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>` (`bak18`
-logs its reads, not its polls). `host` refuses (exit 2)
+and `vm35` log their reads, not their polls). `host` refuses (exit 2)
 when the ControlMaster is not there, rather than open a connection of its own:
 
 ```bash
@@ -255,6 +255,7 @@ python3 phase4.py sample --control <socket> --target <user@host> --project <t-�
 python3 phase4.py wait --kubeconfig <kubeconfig> --job regression-phase4-<label>     # prints the pending HOLD
 python3 phase4.py host --control <socket> --target <user@host> --log <evidence log> [--keys <keys dir>] -- '<command>'
 python3 phase4.py go <step> --kubeconfig <kubeconfig> --job regression-phase4-<label> --log <evidence log>
+python3 phase4.py vm35 --kubeconfig <kubeconfig> --job regression-phase4-<label> --control <socket> --target <user@host> --log <evidence log>   # at HOLD vm35
 # … wait / host / go (or skip) for each step, until wait prints NO_HOLD
 python3 phase4.py disconnect --control <socket> --target <user@host>
 ```
@@ -263,6 +264,13 @@ python3 phase4.py disconnect --control <socket> --target <user@host>
 line each, or it stops before the job); `phase4/` stores V as the tenant's SSH key and puts U in a VM's cloud-init, and a
 run of it without them is red at its first step (`phase4-backup/` reads no key). In a host command `{V}`, `{U}`, `{X}` become the base64 body of that key.
 `host --local` runs a command on the agent's machine (the checks over the Internet) with the same log entry.
+
+At `HOLD vm35` of `phase4/`, `phase4.py vm35` waits for a `status:` line from `cloud-init status --wait` in the held VM,
+reads `getent shadow ubuntu`, `passwd -S ubuntu` and `cloud-init.vendor-data` of it and of the held VM without a console
+password, then hashes in the pod the password file the spec left there (`openssl passwd -6` with the salt read from the
+shadow) and greps the vendor-data for it, so the password is in no log. Last line `VM35_HOST=PASS` (exit 0), `FAIL <what>`
+(exit 1, `go-vm35` still created) or `NOT_COVERED <why>` (exit 4, `skip-vm35`). The VM-35 test has no check of its own
+after the hold: its ✓ in the runner log says the hold was answered, and the case's verdict is the `VM35_HOST=` line.
 
 `phase4-backup/` waits for the hourly `backup-schedule` run (minute 0 UTC): a new VM with a volume attached is backed up
 by the first run after it. Its job is its own, because the wait does not fit in the runner's 90 minutes

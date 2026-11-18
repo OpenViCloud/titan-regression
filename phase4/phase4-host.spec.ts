@@ -25,7 +25,7 @@ const LB_PENDING = new Set(['Creating', 'Updating', 'Deleting'])
 const RULE_PENDING = new Set(['Creating', 'Deleting'])
 const SNAP_PENDING = new Set(['Creating', 'Reverting', 'Deleting'])
 const GONE = new Set(['Gone', 'Deleted'])
-// VM-35's console password, for `python3 phase4.py vm35` to hash and grep for inside this pod (phase4.py:432 cmd_vm35):
+// VM-35's console password, for `python3 phase4.py vm35` to hash and grep for inside this pod (phase4.py cmd_vm35):
 // outside RESULTS, which run-module.sh copies out, so it never leaves the pod; removed after the hold and in afterAll.
 const VM35_HAND_OFF = '/work/vm-35'
 
@@ -286,7 +286,7 @@ test.describe.serial('phase4 host', () => {
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/Sha512Crypt.cs (Hash: a random salt of 16).
   // The agent's `python3 phase4.py vm35` waits for cloud-init in the guest, reads the shadow, `passwd -S` and the
   // vendor-data of this VM and of vm A (keys, no password), and hashes the password with the salt it read and greps the
-  // vendor-data for it inside this pod (phase4.py:394 vm35_verdict): the host reads are its verdict. On net6 (netEmpty
+  // vendor-data for it inside this pod (phase4.py vm35_verdict): the host reads are its verdict. On net6 (netEmpty
   // must stay empty for OBS-06), before VM-28 puts its limit on the project.
   test('VM-35 a console password is a $6$ hash in /etc/shadow and in vendor-data, never the password; a VM without one is locked', async () => {
     test.setTimeout(HOLD_MS + 20 * 60_000)

@@ -13,7 +13,7 @@ import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, runNetwork,
 // Cases SSH-08 and CSL-06 of plan.md on the release environment: a job of its own (run-module.sh … vm/ssh-sessions …), since the
 // vm module runs on dev only and SSH sessions there never cross the edge in front of the release environment's API.
 // The bodies are lib/ssh.ts fiveSessionsThenRefused and consoleRefusedAtTheLimit below, which vm/vm.spec.ts runs on dev.
-// They count beta-user's SSH and console sessions, so no other job that opens one (cli, cli/edge) runs beside it
+// They count beta-user's SSH and console sessions, so no other job that opens one (cli, cli/edge, portal-ui) runs beside it
 // (titan-ops architecture/testing.md#regression-dev-before-candidate).
 //
 // The helpers below are a copy of vm/vm.spec.ts's (Ws, openWs, newTicket, issueTicket, openConsole,

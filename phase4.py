@@ -33,7 +33,7 @@ side; the spec holds at bak18-gone whatever its API check says) | NOT_COVERED <w
 go-bak18-gone: no copy before the timeout, no `reconcile cluster done` after it, or the copy gone before one).
 
 vm35 (VM-35, titan-ops features/vm/design.md#console-password) answers HOLD vm35 of phase4/: it waits on the host for
-`cloud-init status --wait` of the held VM to print `status: done`, reads `getent shadow ubuntu`, `passwd -S ubuntu` and
+`cloud-init status --wait` of the held VM to print a `status:` line (FAIL unless it is `done`), reads `getent shadow ubuntu`, `passwd -S ubuntu` and
 `cloud-init.vendor-data` of it and of the held VM without a console password, then, in the pod, hashes the password
 file the spec left there with `openssl passwd -6` and the salt read from the shadow and greps the vendor-data for it:
 the password never leaves the pod, so it is in no log, no argv and no file here. Last line VM35_HOST=PASS (exit 0) |
