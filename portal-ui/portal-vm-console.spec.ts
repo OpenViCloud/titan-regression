@@ -517,7 +517,7 @@ test.describe.serial('portal-ui vm: console password, stop timeout panel and Con
       await expect(panel.getByRole('button', { name: 'Ngắt kết nối', exact: true })).toBeVisible({ timeout: 30_000 })
       // The session relays bytes before it is ended: Enter at the shell answers with a prompt.
       const mark = received.length
-      await panel.locator('.xterm-rows').click()
+      await panel.locator('.xterm-screen').click()
       await page.keyboard.press('Enter')
       expect(await until(() => received.length > mark || socketClosed, 30_000) && !socketClosed, 'the second session answers').toBe(true)
       await panel.getByRole('button', { name: 'Ngắt kết nối', exact: true }).click()
