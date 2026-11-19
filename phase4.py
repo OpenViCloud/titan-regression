@@ -15,6 +15,10 @@ evidence as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>`.
     python3 phase4.py vm35 --kubeconfig <kc> --job <job> --control <socket> --target <user@host> --log <file>
     python3 phase4.py sample --control <socket> --target <user@host> --project <t-…> --stop <file> --log <file> [--every 30]
                               [--read-timeout 60] [--lane a|b, default sequential]
+    python3 phase4.py step <step> [--kubeconfig <kc> --job <job>] --control <socket> --target <user@host> --log <file>
+                              --state <file> [--keys <dir>] [--guest-known-hosts <file>] [--api <url>]
+                              [--env release|dev] [--project <t-…>] [--no-go]
+    python3 phase4.py cli10 --kubeconfig <kc> --job <job> --cli <openvicloud> --api <url> --log <file> [--seconds 330]
     python3 phase4.py disconnect --control <socket> --target <user@host>
 
 <job> is the name run-module.sh gives the job (regression-<module>-<label>). The host command runs through the
@@ -45,6 +49,12 @@ sample reads the project every <every> seconds, read-only, and logs a line per o
 seconds) is an `ERROR` line, a sample that breaks is one `ERROR` line, and sampling goes on; it ends after the sample
 that finds <stop>.
 
+step runs the commands phase4_steps.py lists for that HOLD (README §Phase 4), each logged like host, then answers
+go-<step>; with --no-go it exits 0 and the agent answers; a host write that failed stops it with exit 1 and no answer.
+cln02 has no HOLD. cli10 answers HOLD cli10 of cli/edge: the session of CLI-10 from this machine, the token only in
+OPENVICLOUD_TOKEN; last line L_CLI10=PASS (exit 0, go) | FAIL <what> (exit 1, go) | NOT_COVERED <why> (exit 4,
+skip-cli10: the token or the key could not be copied out of the pod).
+
 Exit 2: usage, the pending HOLD is not the step asked for, or no ControlMaster on the socket. wait: exit 3 = the runner finished with no HOLD pending.
 """
 import argparse
@@ -52,9 +62,15 @@ import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
+import types
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import phase4_steps  # noqa: E402
 
 POLL = float(os.environ.get("PHASE4_POLL_SECONDS", "10"))
 HOLD = re.compile(r"^\S+ HOLD (\S+) (\{.*\})\s*$")
@@ -633,6 +649,158 @@ def cmd_sample(args):
         time.sleep(args.every)
 
 
+def wait_for(kube, step, minutes):
+    """The facts of the pending HOLD once it is step; None (printed why) when another step or nothing is pending."""
+    deadline = time.monotonic() + minutes * 60
+    kube.pod(wait_until=deadline)
+    while True:
+        held = pending_hold(kube.logs())
+        if held:
+            if held[0] != step:
+                print(f"the pending HOLD is {held[0]}, not {step}")
+                return None
+            return held[1]
+        if time.monotonic() >= deadline:
+            print(f"no HOLD {step} after {minutes:g} minutes")
+            return None
+        time.sleep(POLL)
+
+
+def run_step_command(args, cmd, values, log):
+    """One command of a step: rendered, run where it belongs, logged; (exit code, output)."""
+    text = phase4_steps.render(cmd.text, values)
+    local = args.local or (cmd.outside and args.env == "release")
+    command = substitute(text, args.keys)
+    where = types.SimpleNamespace(local=local, control=args.control, target=args.target)
+    deadline = time.monotonic() + (cmd.timeout or 0)
+    while True:
+        code, output = run_command(where, command, timeout=args.read_timeout)
+        done = cmd.until is None or cmd.until(code, output, values) or time.monotonic() >= deadline
+        if done:
+            break
+        time.sleep(POLL)
+    log.entry(("(this machine) " if local else "") + text, output, code)
+    sys.stdout.write(output)
+    return code, output
+
+
+def cmd_step(args):
+    """The host commands of one HOLD step of phase4/ (phase4_steps.py), then go-<step> unless --no-go."""
+    if args.step not in phase4_steps.STEPS:
+        print(f"no step {args.step} in phase4_steps.py")
+        return 2
+    state_path = args.state
+    state = phase4_steps.load_state(state_path)
+    kube = None
+    if args.step == "cln02":
+        facts = dict(state.get("setup", {}))
+    else:
+        if not (args.kubeconfig and args.job):
+            print(f"step {args.step} wants --kubeconfig and --job")
+            return 2
+        kube = Kube(args.kubeconfig, args.job)
+        held = wait_for(kube, args.step, args.timeout_minutes)
+        if held is None:
+            return 2
+        if args.step == "setup":
+            state["setup"], state["recorded"] = held, {}
+            phase4_steps.save_state(state_path, state)
+        facts = {**state.get("setup", {}), **held}
+    if args.project:
+        facts["project"] = args.project
+    options = {"env": args.env, "api": args.api, "keys": args.keys, "guestKnownHosts": args.guest_known_hosts}
+    where = "this machine" if args.local else args.target
+    log = Log(args.log, f"phase4.py step {args.step} ({args.env}) · {where}")
+    recorded = state.setdefault("recorded", {})
+    commands = phase4_steps.STEPS[args.step](facts, options)
+    known = {**facts, **{k: v for k, v in options.items() if v is not None}, **{k: "" for k in phase4_steps.RECORDED}}
+    for cmd in commands:
+        try:
+            phase4_steps.render(cmd.text, known)
+        except KeyError as missing:
+            print(f"step {args.step} needs {missing.args[0]} (a fact of its HOLD or setup's, or an option): nothing run")
+            return 2
+        if not args.keys and any("{" + k + "}" in cmd.text for k in phase4_steps.KEY_TOKENS):
+            print(f"step {args.step} needs --keys (its commands read the keys V, U, X): nothing run")
+            return 2
+    for cmd in commands:
+        values = {**facts, **{k: v for k, v in options.items() if v is not None}, **recorded}
+        why = cmd.when(recorded) if cmd.when else None
+        if why:
+            log.entry(cmd.text, f"skipped: {why}", 0)
+            print(f"skipped: {why}")
+            continue
+        code, output = run_step_command(args, cmd, values, log)
+        if cmd.record:
+            recorded.update(cmd.record(code, output))
+            phase4_steps.save_state(state_path, state)
+        if cmd.write and code != 0:
+            print(f"a write of step {args.step} failed (exit {code}): no answer; go, or skip when it did not happen")
+            return 1
+    if kube is None or args.no_go:
+        return 0
+    return answer(kube, args.step, "go", log)
+
+
+def cmd_cli10(args):
+    """CLI-10 at HOLD cli10 of cli/edge: a `vm ssh` session from this machine, the token never in argv or a log."""
+    kube = Kube(args.kubeconfig, args.job)
+    facts = wait_for(kube, "cli10", args.timeout_minutes)
+    if facts is None:
+        return 2
+    log = Log(args.log, f"phase4.py cli10 · job {args.job} · {args.api}")
+    work = tempfile.mkdtemp(prefix="cli10-")
+    try:
+        files = {}
+        for name in ("token", "key"):
+            files[name] = os.path.join(work, name)
+            out = kube.run("-n", kube.ns, "cp", f"{kube.pod()}:{facts[name]}", files[name])
+            size = os.path.getsize(files[name]) if os.path.exists(files[name]) else 0
+            log.entry(f"kubectl cp {kube.pod()}:{facts[name]} {files[name]}", f"{name} bytes={size}\n{out.stderr}",
+                      out.returncode)
+            if out.returncode != 0 or size == 0:
+                verdict = f"L_CLI10=NOT_COVERED could not copy {facts[name]} out of the pod"
+                answered = answer(kube, "cli10", "skip", log)
+                with open(args.log, "a", encoding="utf-8") as fh:
+                    fh.write(verdict + "\n")
+                print(verdict)
+                return answered or 4
+            os.chmod(files[name], 0o600)
+        with open(files["token"], encoding="utf-8") as fh:
+            token = fh.read().strip()
+        os.makedirs(os.path.join(work, "config"), mode=0o700)
+        env = {**os.environ, "OPENVICLOUD_TOKEN": token, "OPENVICLOUD_API_URL": args.api,
+               "XDG_CONFIG_HOME": os.path.join(work, "config")}
+        remote = f"sleep {args.seconds}; echo alive"
+        argv = [args.cli, "vm", "ssh", facts["vmName"], "--", "-i", files["key"], "-o", "IdentitiesOnly=yes", "-o",
+                "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o",
+                f"UserKnownHostsFile={os.path.join(work, 'known_hosts')}", remote]
+        started = time.monotonic()
+        try:
+            run = subprocess.run(argv, env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                 timeout=args.seconds + 90)
+            code, output = run.returncode, run.stdout + run.stderr
+        except subprocess.TimeoutExpired:
+            code, output = 124, f"no end in {args.seconds + 90} s"
+        seconds = time.monotonic() - started
+        shown = " ".join(argv[:-1]) + f" '{remote}'"
+        log.entry(f"OPENVICLOUD_TOKEN=<the token file> OPENVICLOUD_API_URL={args.api} XDG_CONFIG_HOME=<empty> {shown}",
+                  output.replace(token, "<token>") + f"seconds={seconds:.0f}", code)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    if code == 0 and "alive" in output and seconds >= args.seconds:
+        verdict = "L_CLI10=PASS"
+    else:
+        verdict = f"L_CLI10=FAIL exit={code} alive={'alive' in output} seconds={seconds:.0f}"
+    answered = answer(kube, "cli10", "go", log)
+    with open(args.log, "a", encoding="utf-8") as fh:
+        fh.write(verdict + "\n")
+    print(verdict)
+    if answered != 0:
+        return answered
+    return 0 if verdict.endswith("PASS") else 1
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -673,6 +841,31 @@ def main(argv=None):
     p.add_argument("--keys")
     p.add_argument("command", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_host)
+    p = sub.add_parser("step")
+    p.add_argument("step")
+    p.add_argument("--kubeconfig")
+    p.add_argument("--job")
+    ssh_opts(p, required=False)
+    p.add_argument("--local", action="store_true")
+    p.add_argument("--log", required=True)
+    p.add_argument("--state", required=True, help="file of setup's facts and recorded values, outside the evidence")
+    p.add_argument("--env", choices=("release", "dev"), default="release")
+    p.add_argument("--keys")
+    p.add_argument("--guest-known-hosts")
+    p.add_argument("--api", help="the environment's API, for setup's curl")
+    p.add_argument("--project", help="cln02 with no setup state, or to override setup's")
+    p.add_argument("--no-go", action="store_true", help="run the commands, leave the answer to `go`")
+    p.add_argument("--timeout-minutes", type=float, default=80)
+    p.add_argument("--read-timeout", type=float, default=300)
+    p.set_defaults(func=cmd_step)
+    p = sub.add_parser("cli10")
+    kube_args(p)
+    p.add_argument("--cli", required=True, help="the openvicloud binary the release ships, for this machine")
+    p.add_argument("--api", required=True)
+    p.add_argument("--log", required=True)
+    p.add_argument("--seconds", type=int, default=330, help="the session's silence (CLI-10: 330)")
+    p.add_argument("--timeout-minutes", type=float, default=80)
+    p.set_defaults(func=cmd_cli10)
     p = sub.add_parser("sample")
     ssh_opts(p)
     p.add_argument("--project", required=True)
@@ -703,6 +896,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not hasattr(args, "local"):
         args.local = False
+    if args.func is cmd_step and not args.local and not (args.control and args.target):
+        parser.error("step wants --control and --target (or --local)")
     if args.func is cmd_host:
         if args.command[:1] == ["--"]:
             args.command = args.command[1:]

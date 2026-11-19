@@ -24,6 +24,7 @@ which signs in with the test accounts there, so no credential passes through the
 | `run-lanes.py`, `lanes.json`, `lanes-dev.json`, `lanes-dev-sequential.json` | Runs the modules as lanes, one lane per test tenant, lanes side by side (below); the two dev plans cover the Dev column |
 | `patch-job.py` | Points a job's `specs` volume at a ConfigMap of its own, so jobs started together never read each other's specs; `--env NAME=VALUE` adds a variable to the job |
 | `phase4.py` | The agent's commands for the two Phase 4 modules (§Phase 4) |
+| `phase4_steps.py` | The host commands of each HOLD of `phase4/`, run by `phase4.py step` (§Phase 4) |
 | `selftest/`, `test_*.py` | Tests of the helpers and scripts above |
 | [`CLAUDE.md`](CLAUDE.md) | How specs are written and the assumptions a run on the release environment makes |
 
@@ -45,7 +46,7 @@ modules need around it, is the next section. The full procedure of a release (or
 up by hand.
 
 1. **Load the specs** into a ConfigMap of the job's own, `titan-regression-specs-<job>` (`<job>` is
-   `regression-<module>-<label>`): `kubectl create configmap titan-regression-specs-<job> --from-file=lib --from-file=<module> --dry-run=client -o yaml | kubectl apply -f -`
+   `regression-<module>-<label>`; a nested module gives its last folder: `cli/edge` runs as `regression-edge-<label>`): `kubectl create configmap titan-regression-specs-<job> --from-file=lib --from-file=<module> --dry-run=client -o yaml | kubectl apply -f -`
    in the source tree (a one-off spec: `--from-file=<its directory>`). The runner loads `/specs/*.ts` flat, so a file
    name shared by `lib/` and the module makes `create configmap` refuse: rename it, never overwrite.
 2. **Start the job** from the lane's CronJob (`titan-regression`; lane b `titan-regression-b`):
@@ -201,11 +202,12 @@ database; on the release environment an approved `L-x`), after `concurrency` it 
 modules `cli` and `terraform-provider` need the agent to copy a binary into the pod when the spec logs `BINARY_WAIT`
 (`cli`: the CLI built for the node's architecture; `terraform-provider`: `GOOS=linux GOARCH=<node> CGO_ENABLED=0 go test -c`
 of the provider repo — `run-module.sh` copies either to `/work/bin/openvicloud`; job `cli/edge` the same as `cli`);
-`cli/edge` (CLI-06..11 through the edge of the release environment, the CLI on an API token) logs `HOLD cli10 {…}` and
-waits for the agent (45 minutes at most): it copies `/work/cli-10/token` and `/work/cli-10/key` out of the pod into files only it can read,
-runs `vm ssh <vmName> -- … 'sleep 330; echo alive'` on its own machine with `OPENVICLOUD_TOKEN` read from that file
-(never on the command line), `OPENVICLOUD_API_URL` set to the environment's API and `XDG_CONFIG_HOME` pointing at an empty directory, deletes both files, then touches `/work/results/go-cli10` (or `skip-cli10`: N/A); the
-agent's log of that command is CLI-10's verdict; `cli/edge` and `vm/ssh-sessions` (SSH-08, CSL-06) count beta-user's SSH
+`cli/edge` (job `regression-edge-<label>`; CLI-06..11 through the edge of the release environment, the CLI on an API token) logs `HOLD cli10 {…}` and
+waits for the agent (45 minutes at most), who answers with `phase4.py cli10` (§Phase 4): it copies `/work/cli-10/token`
+and `/work/cli-10/key` out of the pod into files only it can read, runs `vm ssh <vmName> -- … 'sleep 330; echo alive'`
+on its own machine with the token in `OPENVICLOUD_TOKEN` (never on the command line), `OPENVICLOUD_API_URL` set to the
+environment's API and `XDG_CONFIG_HOME` pointing at an empty directory, deletes both files, then touches
+`/work/results/go-cli10` (or `skip-cli10`: N/A); its `L_CLI10=` line is CLI-10's verdict; `cli/edge` and `vm/ssh-sessions` (SSH-08, CSL-06) count beta-user's SSH
 and console sessions, so on the release environment they run in the sequential run, one at a time, beside no module that opens
 one (`vm` and `portal-ui` open console sessions too: CSL-03…CSL-05, UI-36); `admin/stuck-requests` (ADM-15) needs the
 `incus-worker` stopped and started when the spec logs `WORKER_STOP_WAIT` and `WORKER_START_WAIT` (and `incus-worker-inventory`,
@@ -256,7 +258,8 @@ python3 phase4.py wait --kubeconfig <kubeconfig> --job regression-phase4-<label>
 python3 phase4.py host --control <socket> --target <user@host> --log <evidence log> [--keys <keys dir>] -- '<command>'
 python3 phase4.py go <step> --kubeconfig <kubeconfig> --job regression-phase4-<label> --log <evidence log>
 python3 phase4.py vm35 --kubeconfig <kubeconfig> --job regression-phase4-<label> --control <socket> --target <user@host> --log <evidence log>   # at HOLD vm35
-# … wait / host / go (or skip) for each step, until wait prints NO_HOLD
+python3 phase4.py step <step> --kubeconfig <kubeconfig> --job regression-phase4-<label> --control <socket> --target <user@host> --log <evidence log> --state <file outside the evidence> [--keys <keys dir>] [--guest-known-hosts <file>] [--api <API>] [--env dev]
+# … step for each other HOLD (or skip), until wait prints NO_HOLD; then step cln02 (no HOLD) after the run
 python3 phase4.py disconnect --control <socket> --target <user@host>
 ```
 
@@ -264,6 +267,26 @@ python3 phase4.py disconnect --control <socket> --target <user@host>
 line each, or it stops before the job); `phase4/` stores V as the tenant's SSH key and puts U in a VM's cloud-init, and a
 run of it without them is red at its first step (`phase4-backup/` reads no key). In a host command `{V}`, `{U}`, `{X}` become the base64 body of that key.
 `host --local` runs a command on the agent's machine (the checks over the Internet) with the same log entry.
+
+`step <step>` waits for that HOLD, runs the step's commands of `phase4_steps.py` (one function per HOLD of
+`phase4/phase4-host.spec.ts` but `vm35`, and `cln02`), logs each like `host`, then answers `go-<step>` (`--no-go`: the
+agent reads the log first and answers with `go` or `skip`; a host write that fails stops the step, exit 1, no
+answer). A command marked outside runs from outside the cluster:
+this machine on the release environment, the host with `--env dev` (the spec's `FROM_OUTSIDE`). The facts of
+`HOLD setup` (the project, the names later holds lack) and the values a step records for a later one (the image
+`obs05` found behind the template alias, which `obs05-after-sync` deletes only once the alias points elsewhere) are kept
+in the `--state` file, a working file outside the evidence, one per run. Whether an output matches the plan row stays the agent's
+call; 18 steps write on the host (`WRITES` of `phase4_steps.py`), so they run only under the release's approved `L-x`.
+A step runs nothing (exit 2) when a value it needs is missing: `setup` wants `--api`, `ssh06` `--keys` and
+`--guest-known-hosts` (the known_hosts file for the guests), `vm24-restart` `--keys`. `setup` clears the values recorded
+by an earlier run, and a failed read records none.
+
+At `HOLD cli10` of `cli/edge` (job `regression-edge-<label>`), `phase4.py cli10 --kubeconfig <kubeconfig> --job
+regression-edge-<label> --cli <openvicloud for this machine> --api <API> --log <evidence log>` copies the token and the
+key out of the pod into a directory only it reads, runs `vm ssh <vmName> -- … 'sleep 330; echo alive'` with the token
+in `OPENVICLOUD_TOKEN` (never in an argument or the log) and an empty `XDG_CONFIG_HOME`, deletes the directory, answers
+`go-cli10`, and ends the log with `L_CLI10=PASS` (exit 0) or `L_CLI10=FAIL <what>` (exit 1); when the token or the
+key cannot be copied out it answers `skip-cli10` and ends with `L_CLI10=NOT_COVERED <why>` (exit 4).
 
 At `HOLD vm35` of `phase4/`, `phase4.py vm35` waits for a `status:` line from `cloud-init status --wait` in the held VM,
 reads `getent shadow ubuntu`, `passwd -S ubuntu` and `cloud-init.vendor-data` of it and of the held VM without a console
