@@ -231,6 +231,22 @@ test.describe.serial('phase4 host', () => {
     expectStatus(ne, 202)
     netEmpty = bodyOf(ne).networkId
     subnet = (await waitNetwork('ipv6 network usable', net6, networkUsable)).publicIpv6Subnet
+    // A new network drops what comes from outside it: VM-14 (ping), SSH-06 (TCP 22) and LB-08 (the target port) open
+    // their port the way a customer does (plan.md VM-14, SSH-06, LB-08)
+    const rules = [
+      { direction: 'Ingress', protocol: 'ICMP', cidr: '::/0' },
+      { direction: 'Ingress', protocol: 'TCP', startPort: 22, endPort: 22, cidr: '::/0' },
+      { direction: 'Ingress', protocol: 'TCP', startPort: 8080, endPort: 8080, cidr: '::/0' },
+    ]
+    const ruleIds: string[] = []
+    for (const rule of rules) {
+      const made = await call('tenant', 'POST', `/v1/tenant/networks/${net6}/firewall-rules`, rule, newKey())
+      expectStatus(made, 201)
+      ruleIds.push(bodyOf(made).ruleId)
+    }
+    await pollUntil('rules of the ipv6 network enabled', () => get('tenant', `/v1/tenant/networks/${net6}/firewall-rules`),
+      (rows: any[]) => ruleIds.every((id) => rows.some((r) => r.id === id && r.status === 'enabled')),
+      (rows: any[]) => JSON.stringify(rows.map((r) => r.status)))
     await waitNetwork('empty network usable', netEmpty, networkUsable)
     vmA = await createVm(`rg-vmap4-${RUN}`, smallTier, net6, { userData: userDataOf('A', true, U), sshKeyIds: [keyId] })
     vmB = await createVm(`rg-vmbp4-${RUN}`, smallTier, net6, { userData: userDataOf('B', false, null) })
@@ -261,7 +277,7 @@ test.describe.serial('phase4 host', () => {
     vmSnapId = bodyOf(vs).snapshotId
     await pollUntil('vm snapshot on Incus', () => readVmSnap(vmSnapId), (r) => r.status === 'Available', existenceShape)
     await waitVm('vm A running after its snapshot', vmA, runs)
-    // FW-07 reads the rule's line in acl-<networkId>; an allow rule under the allow default changes no traffic
+    // FW-07 reads the rule's line in acl-<networkId>; it allows a port nothing listens on, from a range no client uses
     const rule = await call('tenant', 'POST', `/v1/tenant/networks/${net6}/firewall-rules`,
       { direction: 'Ingress', protocol: 'TCP', startPort: 1007, endPort: 1007, cidr: '10.90.7.0/24' }, newKey())
     expectStatus(rule, 201)
@@ -346,11 +362,11 @@ test.describe.serial('phase4 host', () => {
     await hold('vms17-gone', { vm: incusName('vm', vmA), vmSnapshot: name })
   })
 
-  // plan.md NET-25: one Deny default ⇒ both ACL defaults drop
-  test('NET-25 a deny-by-default network: both defaults drop on the host', async () => {
+  // plan.md NET-25: each policy sets its own direction — Allow in, Deny out ⇒ ingress allow, egress drop
+  test('NET-25 a network that denies outbound: only the egress default drops on the host', async () => {
     const { clusterId } = await envOf()
     const reply = await call('tenant', 'POST', '/v1/tenant/networks',
-      { name: `rg-netdeny-${RUN}`, clusterId, cidr: '10.79.0.0/24', defaultIngressPolicy: 1, defaultEgressPolicy: 0 }, newKey())
+      { name: `rg-netdeny-${RUN}`, clusterId, cidr: '10.79.0.0/24', defaultIngressPolicy: 0, defaultEgressPolicy: 1 }, newKey())
     expectStatus(reply, 202)
     netDeny = bodyOf(reply).networkId
     await waitNetwork('NET-25 usable', netDeny, networkUsable)

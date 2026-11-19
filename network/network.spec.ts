@@ -155,9 +155,9 @@ test.describe.serial('network', () => {
 
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/CreateNetworkCommandHandler.cs HandleAsync (name, CIDR and cluster checks);
   // the create's Done carries the status Incus shows (titan-ops features/network/design.md#network-lifecycle); a body
-  // without the two policies gets Allow for both (OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/Contracts/CreateNetworkCommand.cs
-  // CreateNetworkCommand defaults; titan-ops features/network/design.md#firewall-default-policy)
-  test('NET-02 create with a key and a cidr is 202 {networkId}, then Created, both default policies Allow', async () => {
+  // without the two policies denies inbound and allows outbound (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.Creation.cs
+  // NewNetworkIngressPolicy, NewNetworkEgressPolicy; titan-ops features/network/design.md#firewall-default-policy)
+  test('NET-02 create with a key and a cidr is 202 {networkId}, then Created, inbound Deny and outbound Allow', async () => {
     const { clusterId } = await envOf()
     const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name, clusterId, cidr: RUN_CIDR }, key)
     expectStatus(reply, 202)
@@ -165,7 +165,7 @@ test.describe.serial('network', () => {
     expect(Object.keys(bodyOf(reply))).toEqual(['networkId'])
     const network = await waitNetwork('NET-02', networkId, networkUsable)
     expect(network.cidr).toBe(RUN_CIDR)
-    expect(network.defaultIngressPolicy).toBe('Allow')
+    expect(network.defaultIngressPolicy).toBe('Deny')
     expect(network.defaultEgressPolicy).toBe('Allow')
     // ACT-02: one request row, one outcome row (titan-ops features/activity/design.md#request-and-outcome-names)
     const actions = await activityOf(name)
