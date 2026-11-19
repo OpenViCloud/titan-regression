@@ -5,7 +5,8 @@ import { activityOf, countOf, envOf, nameOf, runNetwork, runs, waitVm, waitVolum
 import { topUpEnabledOf } from './portal-config'
 
 // Cases UI-01..08 and UI-34 of plan.md: dashboard gate, VM create/snapshot/volume/stop-start-delete, billing,
-// wallet, buy-credit, the static account pages and the billing page's past months. Two independent describe.serial groups so a slow VM boot
+// wallet, buy-credit, the static account pages and the billing page's past months; and UI-39's check of UI-02's create
+// body (the rest of UI-39 is in portal-vm-console.spec.ts). Two independent describe.serial groups so a slow VM boot
 // (group A) cannot erase the billing/wallet/account coverage (group B), which needs no VM. UI-07 is N/A where the
 // portal config has no topUpEnabled: true.
 
@@ -86,6 +87,9 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
 
   let vmId = ''
   let volumeId = ''
+  // UI-02's user data field as submitted and its POST /v1/tenant/vms body, read by UI-39.
+  let userDataField: string | null = null
+  let createBody: Record<string, unknown> | null = null
   const vmName = nameOf('vmflow')
   const volumeName = nameOf('volflow')
 
@@ -181,7 +185,10 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     await dialog.getByRole('combobox', { name: 'Network' }).selectOption(network.id)
     await dialog.getByRole('combobox', { name: 'Template' }).selectOption(templateId)
     await dialog.getByRole('combobox', { name: 'Size' }).selectOption(smallTier)
+    userDataField = await dialog.locator('#vm-user-data').inputValue()
+    const sent = page.waitForRequest((req) => req.method() === 'POST' && new URL(req.url()).pathname === '/v1/tenant/vms')
     await dialog.getByRole('button', { name: 'Create VM' }).click()
+    createBody = (await sent).postDataJSON()
     await expect(dialog).toHaveCount(0)
 
     // Read the id back right away, before any further UI assertion, so a later failure still leaves
@@ -206,6 +213,16 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     await expect(rowOf()).toContainText(tierName)
     await page.screenshot({ path: `${RESULTS}/UI-02-vm-running.png` })
     log(`UI-02 ${vmName} id=${vmId} tier=${tierName}`)
+  })
+
+  // Right after UI-02, so UI-04 and UI-03 still follow it. titan-ops features/vm/user-stories.md#us-vm-userdata ·
+  // OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx (handleSubmit: request.userData only when the field
+  // is not empty)
+  test('UI-39 UI-02 left the user data field empty and its POST /v1/tenant/vms body has no userData field', async () => {
+    test.skip(createBody === null, 'UI-02 sent no create')
+    expect(userDataField, 'the user data field as UI-02 submitted it').toBe('')
+    expect(Object.keys(createBody!), `UI-02 body ${JSON.stringify(createBody)}`).not.toContain('userData')
+    log(`UI-39 UI-02's create: field empty, body fields ${Object.keys(createBody!).join(',')}, no userData`)
   })
 
   // titan-ops features/volume/design.md#volume-portal · OpenViCloud/titan-cloud-console:portal/src/pages/VmDetailPage.tsx (Snapshots tab)

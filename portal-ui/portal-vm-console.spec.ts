@@ -1,18 +1,18 @@
 import { test, expect, type Page, type Route } from '@playwright/test'
-import { randomBytes } from 'node:crypto'
+import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { PORTAL, closeSessions, pageOf, useBrowser } from './auth'
-import { API, RESULTS, call, expectStatus, get, log, sleep, startLog } from './api'
+import { API, RESULTS, bodyOf, call, expectStatus, get, log, newKey, sleep, startLog } from './api'
 import { cleanUp } from './clean-up'
-import { envOf, nameOf, runNetwork, runs, waitVm } from './fixtures'
+import { RUN, envOf, nameOf, runNetwork, runs, waitVm } from './fixtures'
 
-// Cases UI-35..UI-38 of plan.md: the console password and stop timeout fields of the Create VM form, the Console tab of
-// the VM page, and its Stop timeout panel. One VM, made through the form by UI-35, is the subject of UI-36 and UI-38;
-// UI-37 sends no create. UI-36 opens console sessions of the tenant: they count toward its five SSH and console
+// Cases UI-35..UI-40 of plan.md: the console password, stop timeout and cloud-init user data fields of the Create VM form,
+// the Console tab of the VM page, its Stop timeout panel and its Add SSH key dialog. One VM, made through the form by
+// UI-35, is the subject of UI-36, UI-38, UI-39 (its user data read back) and UI-40; UI-37 sends no create. UI-36 opens console sessions of the tenant: they count toward its five SSH and console
 // sessions, so this file does not run beside a job that counts them (CLAUDE.md, shared data between lanes).
 
 // The words of the form in each language (OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts,
 // OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts: vms.create, vmCreate.title, namePlaceholder, cluster, network, template,
-// size, consolePassword, stopTimeout, submit, consolePasswordLength, stopTimeoutRange).
+// size, consolePassword, stopTimeout, userData, submit, consolePasswordLength, stopTimeoutRange, userDataTooLarge).
 type FormWords = {
   lang: 'en' | 'vi'
   open: string
@@ -24,9 +24,11 @@ type FormWords = {
   size: string
   consolePassword: string
   stopTimeout: string
+  userData: string
   submit: string
   passwordLength: string
   stopTimeoutRange: string
+  userDataTooLarge32770: string
 }
 
 const FORM: Record<'en' | 'vi', FormWords> = {
@@ -41,9 +43,11 @@ const FORM: Record<'en' | 'vi', FormWords> = {
     size: 'Size',
     consolePassword: 'Console password',
     stopTimeout: 'Stop timeout (seconds)',
+    userData: 'Cloud-init user data',
     submit: 'Create VM',
     passwordLength: 'The console password must be 12 to 72 characters.',
     stopTimeoutRange: 'The stop timeout must be a whole number of seconds from 30 to 1800.',
+    userDataTooLarge32770: 'Cloud-init user data is 32770 bytes; the limit is 32768.',
   },
   vi: {
     lang: 'vi',
@@ -56,9 +60,11 @@ const FORM: Record<'en' | 'vi', FormWords> = {
     size: 'Cấu hình',
     consolePassword: 'Mật khẩu console',
     stopTimeout: 'Thời gian dừng (giây)',
+    userData: 'Cloud-init user data',
     submit: 'Tạo VM',
     passwordLength: 'Mật khẩu console phải từ 12 đến 72 ký tự.',
     stopTimeoutRange: 'Thời gian dừng phải là số giây nguyên, từ 30 đến 1800.',
+    userDataTooLarge32770: 'Cloud-init user data dài 32770 byte, vượt giới hạn 32768.',
   },
 }
 
@@ -122,6 +128,51 @@ function passwordOf(length: number): string {
     password += letters[bytes[i] % letters.length]
   }
   return password
+}
+
+// A fresh OpenSSH ed25519 public key: POST /v1/tenant/ssh-keys parses the key, so random bytes would be refused.
+// The same construction as contract/contract-spec.spec.ts ed25519PublicKey.
+function ed25519PublicKey(comment: string): string {
+  const { publicKey } = generateKeyPairSync('ed25519')
+  const der = publicKey.export({ type: 'spki', format: 'der' }) as Buffer
+  const raw = der.subarray(der.length - 32)
+  const chunk = (buf: Buffer) => {
+    const len = Buffer.alloc(4)
+    len.writeUInt32BE(buf.length, 0)
+    return Buffer.concat([len, buf])
+  }
+  const blob = Buffer.concat([chunk(Buffer.from('ssh-ed25519')), chunk(raw)])
+  return `ssh-ed25519 ${blob.toString('base64')} ${comment}`
+}
+
+// The words of the Add SSH key dialog and of the feed rows it leads to (OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts,
+// OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts: vmKeyAddition.addKey, dialogTitle, dialogDescription, submit, adding,
+// added, restartNeeded; activityActions.vmAddKeysRequested, vmKeysAdded). The badge shows the API's status, English in both.
+const ADD_KEY = {
+  en: {
+    lang: 'en' as const,
+    addKey: 'Add SSH key',
+    title: 'Add an SSH key',
+    description: 'Pick 1 to 10 saved SSH keys to add to this running VM.',
+    submit: 'Add',
+    adding: 'Adding the key to the VM…',
+    added: 'Key added',
+    restartNeeded: 'The key takes effect once you stop the VM and start it again.',
+    feedRequested: 'Requested SSH key addition',
+    feedAdded: 'Added SSH key',
+  },
+  vi: {
+    lang: 'vi' as const,
+    addKey: 'Thêm SSH key',
+    title: 'Thêm SSH key',
+    description: 'Chọn 1 đến 10 SSH key đã lưu để thêm vào VM đang chạy này.',
+    submit: 'Thêm',
+    adding: 'Đang thêm key vào VM…',
+    added: 'Đã thêm key',
+    restartNeeded: 'Key có hiệu lực sau khi bạn Tắt VM rồi Bật lại.',
+    feedRequested: 'Yêu cầu thêm SSH key vào VM',
+    feedAdded: 'Đã thêm SSH key',
+  },
 }
 
 // A delete while the create still waits is refused (VM_INVALID_STATUS, titan-ops features/vm/design.md#requests-follow-incus),
@@ -240,8 +291,9 @@ test.describe.serial('portal-ui vm form: stop timeout', () => {
 })
 
 // ---------------------------------------------------------------------------------------------------------------
-// UI-35, UI-38, UI-36: one VM made through the form with a console password and a stop timeout of 300.
-// UI-38 before UI-36: a console that never shows a prompt must not skip the panel case.
+// UI-35, UI-39, UI-38, UI-36, UI-40: one VM made through the form with a console password, a stop timeout of 300 and
+// cloud-init user data. UI-39 and UI-38 before UI-36: a console that never shows a prompt must not skip them. UI-40
+// after UI-36: by then cloud-init has run its last stage on the VM.
 // ---------------------------------------------------------------------------------------------------------------
 
 test.describe.serial('portal-ui vm: console password, stop timeout panel and Console tab', () => {
@@ -249,7 +301,11 @@ test.describe.serial('portal-ui vm: console password, stop timeout panel and Con
 
   let vmId = ''
   let consolePassword = ''
+  // What UI-35 pasted into the user data field and what its POST body carried (undefined: no such field), read by UI-39.
+  let userDataPasted = ''
+  let userDataPosted: unknown = undefined
   const namePw = nameOf('vmuipw')
+  const nameUd = nameOf('vmuiud')
 
   test.beforeAll(async ({ browser }) => {
     startLog('portal-ui-vm-console')
@@ -264,7 +320,7 @@ test.describe.serial('portal-ui vm: console password, stop timeout panel and Con
           await deleteVmAndWait(vmId)
         }
       }],
-      ['stray vm', () => deleteStrays([namePw], vmId === '' ? [] : [vmId])],
+      ['stray vm', () => deleteStrays([namePw, nameUd], vmId === '' ? [] : [vmId])],
       // The cases switch the language; leave none picked, so the next spec starts from the default.
       ['language', async () => {
         const page = await pageOf('tenant')
@@ -305,6 +361,8 @@ test.describe.serial('portal-ui vm: console password, stop timeout panel and Con
     consolePassword = passwordOf(16)
     await dialog.locator('#console-password').fill(consolePassword)
     await dialog.getByLabel(FORM.en.stopTimeout, { exact: true }).fill('300')
+    userDataPasted = `#cloud-config\n# rg-${RUN} ✓ tiếng Việt\n`
+    await dialog.getByLabel(FORM.en.userData, { exact: true }).fill(userDataPasted)
     const isCreate = (method: string, url: string) => method === 'POST' && new URL(url).pathname === '/v1/tenant/vms'
     const sent = page.waitForResponse((res) => isCreate(res.request().method(), res.url()))
     await dialog.getByRole('button', { name: FORM.en.submit, exact: true }).click()
@@ -312,6 +370,7 @@ test.describe.serial('portal-ui vm: console password, stop timeout panel and Con
     expect(response.status(), 'POST /v1/tenant/vms').toBe(202)
     vmId = (await response.json()).vmId as string
     const body = response.request().postDataJSON()
+    userDataPosted = body.userData
     expect(body.consolePassword === consolePassword, 'the body carries the console password as typed').toBe(true)
     expect(body.stopTimeoutSeconds).toBe(300)
     expect(body.name).toBe(namePw)
@@ -339,6 +398,56 @@ test.describe.serial('portal-ui vm: console password, stop timeout panel and Con
     } finally {
       await heldVi.release()
     }
+  })
+
+  // titan-ops features/vm/user-stories.md#us-vm-userdata · titan-ops features/vm/design.md#vm-create-flow (user data: at most
+  // 32768 bytes of UTF-8) · OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx (validate: userDataByteLength over
+  // USER_DATA_MAX_BYTES ⇒ vmCreate.userDataTooLarge, after the console password and stop timeout, before the choices; handleSubmit:
+  // userData only when not empty; the textarea #vm-user-data with placeholder vmCreate.userDataPlaceholder and vmCreate.userDataHint) ·
+  // OpenViCloud/titan-cloud-console:portal/src/lib/vmUserData.ts (USER_DATA_MAX_BYTES 32768, userDataByteLength: TextEncoder bytes) ·
+  // OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts, OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts (vmCreate.userData,
+  // userDataPlaceholder, userDataHint, userDataTooLarge) · OpenViCloud/titan-control-plane:Titan.Application/Queries/Compute/Vm/Contracts/VmQueryResult.cs
+  // (VmQueryResult: UserData). UI-02's create, which leaves the field empty, is checked in portal-flows.spec.ts under this ID.
+  test('UI-39 the Cloud-init user data field hints its 32768-byte limit; 32770 bytes are refused with no create, in English then Vietnamese; UI-35 sent its user data as pasted and the VM reads it back byte for byte', async () => {
+    const choices = await choicesOf()
+    const page = await pageOf('tenant')
+    // 16 385 two-byte characters: 16 385 UTF-16 units, under the limit if the form counted characters, 32 770 bytes of UTF-8.
+    const oversize = 'á'.repeat(16_385)
+    expect(Buffer.byteLength(oversize, 'utf8')).toBe(32_770)
+
+    const held = await holdCreates(page)
+    try {
+      for (const words of [FORM.en, FORM.vi]) {
+        const dialog = await openFilledForm(page, words, nameUd, choices)
+        const field = dialog.getByLabel(words.userData, { exact: true })
+        if (words.lang === 'en') {
+          await expect(field).toHaveAttribute('placeholder', '#cloud-config')
+          await expect(dialog.getByText('Optional. Cloud-init user data, such as #cloud-config, run on first boot. Up to 32768 bytes.', { exact: true })).toBeVisible()
+          await page.screenshot({ path: `${RESULTS}/UI-39-en-field.png` })
+        }
+        await field.fill(oversize)
+        await dialog.getByRole('button', { name: words.submit, exact: true }).click()
+        await expect(dialog.getByText(words.userDataTooLarge32770, { exact: true })).toBeVisible()
+        await page.waitForTimeout(500) // a wrongly-sent request gets a moment to show before its absence is asserted
+        expect(held.posted, `${words.lang} 32770 bytes: no POST /v1/tenant/vms`).toEqual([])
+        await expect(dialog).toBeVisible()
+        await page.screenshot({ path: `${RESULTS}/UI-39-${words.lang}-too-large.png` })
+        log(`UI-39 ${words.lang} 32770 bytes: "${words.userDataTooLarge32770}", no POST`)
+        await page.keyboard.press('Escape')
+        await expect(dialog).toHaveCount(0)
+      }
+    } finally {
+      await held.release()
+    }
+
+    expect(vmId, 'UI-35 made a VM').not.toBe('')
+    expect(userDataPosted === userDataPasted, `UI-35's POST body carries userData as pasted (${JSON.stringify(userDataPosted)})`).toBe(true)
+    const vm = await get('tenant', `/v1/tenant/vms/${vmId}`)
+    expect(typeof vm.userData, 'GET /v1/tenant/vms/{vmId} returns userData').toBe('string')
+    const read = Buffer.from(vm.userData as string, 'utf8')
+    const pasted = Buffer.from(userDataPasted, 'utf8')
+    expect(read.equals(pasted), `userData read back ${read.toString('hex')} against pasted ${pasted.toString('hex')}`).toBe(true)
+    log(`UI-39 ${namePw} ${vmId}: POST userData as pasted, GET returns the same ${pasted.length} bytes`)
   })
 
   // titan-ops features/vm/design.md#vm-page (panel Stop timeout: `<n> s (<m> min)`; Save disabled while the field is unchanged;
@@ -528,5 +637,114 @@ test.describe.serial('portal-ui vm: console password, stop timeout panel and Con
     }
     // Leaving the tab unmounts the panel, which closes any session still open.
     await page.goto(PORTAL + '/', { waitUntil: 'networkidle' })
+  })
+
+  // titan-ops features/vm/user-stories.md#us-vm-add-key · titan-ops features/vm/design.md#vm-key-addition (only a Running VM; the
+  // addition is Adding, then Added or Failed; restartNeeded false for a VM made since vendor-data writes the sshd config) ·
+  // OpenViCloud/titan-cloud-console:portal/src/components/vm/AddSshKeyDialog.tsx (AddSshKeyAction: the button disabled unless
+  // canAddVmKeys; one checkbox #add-ssh-key-<id> per saved key, labelled with its name and fingerprint; Add disabled with none
+  // picked; after the POST the dialog follows the addition: a badge with its status, vmKeyAddition.adding while Adding,
+  // vmKeyAddition.added and, only when restartNeeded, vmKeyAddition.restartNeeded) · OpenViCloud/titan-cloud-console:portal/src/lib/vmState.ts
+  // (canAddVmKeys: status === 'Running') · OpenViCloud/titan-cloud-console:portal/src/hooks/useVmKeyAdditions.ts (useCreateKeyAddition:
+  // POST /v1/tenant/vms/{vmId}/key-additions {sshKeyIds}) · OpenViCloud/titan-cloud-console:portal/src/pages/VmDetailPage.tsx
+  // (AddSshKeyAction in the header) · OpenViCloud/titan-cloud-console:portal/src/pages/DashboardPage.tsx (RecentActivity) ·
+  // OpenViCloud/titan-cloud-console:portal/src/hooks/useActivity.ts (ACTION_KEYS: vm.add_keys_requested, vm.keys_added) ·
+  // OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts, OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts (vmKeyAddition,
+  // activityActions.vmAddKeysRequested, activityActions.vmKeysAdded). Vietnamese adds the same key a second time: "Key added"
+  // shows only after an addition of the open dialog, and a second addition of a key is a fair one (SSH-10).
+  test('UI-40 Add SSH key: the dialog lists the saved keys, Add sends {sshKeyIds} and follows the addition from Adding to Added, the Dashboard feed shows the request and the outcome, in English then Vietnamese; a Stopped VM disables the button', async () => {
+    test.skip(vmId === '', 'UI-35 made no VM')
+    test.setTimeout(15 * 60_000)
+    const vm = await waitVm('UI-40 vm runs', vmId, runs)
+    test.skip(vm.status === 'Ready', 'N/A: the VM is Ready, not Running, and a key addition takes only Running (canAddVmKeys)')
+
+    const keyName = nameOf('keyui')
+    const created = await call('tenant', 'POST', '/v1/tenant/ssh-keys', { name: keyName, publicKey: ed25519PublicKey(keyName) }, newKey())
+    expectStatus(created, 201)
+    const keyId = bodyOf(created).id as string
+    try {
+      const keys = await get('tenant', '/v1/tenant/ssh-keys') as Array<{ id: string, name: string, fingerprint: string }>
+      expect(keys.some((k) => k.id === keyId), `${keyName} is listed`).toBe(true)
+      log(`UI-40 key ${keyName} ${keyId}; ${keys.length} saved key(s)`)
+
+      const page = await pageOf('tenant')
+      for (const words of [ADD_KEY.en, ADD_KEY.vi]) {
+        await useLanguage(page, `/vms/${vmId}`, words.lang)
+        await expect(page.getByRole('heading', { name: namePw, exact: true })).toBeVisible()
+        const open = page.getByRole('button', { name: words.addKey, exact: true })
+        await expect(open).toBeEnabled()
+        await open.click()
+        const dialog = page.getByRole('dialog')
+        await expect(dialog.getByRole('heading', { name: words.title, exact: true })).toBeVisible()
+        await expect(dialog.getByText(words.description, { exact: true })).toBeVisible()
+        for (const key of keys) {
+          await expect(dialog.locator(`#add-ssh-key-${key.id}`)).toHaveAttribute('type', 'checkbox')
+          const label = dialog.locator(`label[for="add-ssh-key-${key.id}"]`)
+          await expect(label).toContainText(key.name)
+          await expect(label).toContainText(key.fingerprint)
+        }
+        const submit = dialog.getByRole('button', { name: words.submit, exact: true })
+        await expect(submit).toBeDisabled()
+        await page.screenshot({ path: `${RESULTS}/UI-40-${words.lang}-dialog.png` })
+
+        await dialog.locator(`#add-ssh-key-${keyId}`).check()
+        await expect(submit).toBeEnabled()
+        const sent = page.waitForResponse((res) => res.request().method() === 'POST'
+          && new URL(res.url()).pathname === `/v1/tenant/vms/${vmId}/key-additions`)
+        await submit.click()
+        const response = await sent
+        expect(response.request().postDataJSON()).toEqual({ sshKeyIds: [keyId] })
+        expect(response.status(), 'POST /v1/tenant/vms/{vmId}/key-additions').toBe(202)
+        const additionId = (await response.json()).keyAdditionId as string
+
+        // The badge holds the status alone; "Adding the key to the VM…" beside it does not match the anchored pattern.
+        const badge = dialog.getByText(/^(Adding|Added|Failed)$/)
+        await expect(badge).toBeVisible()
+        const first = await badge.textContent()
+        if (first === 'Adding') {
+          await expect(dialog.getByText(words.adding, { exact: true })).toBeVisible()
+          await page.screenshot({ path: `${RESULTS}/UI-40-${words.lang}-adding.png` })
+        } else {
+          // The worker can finish before the dialog's first read of the addition.
+          log(`UI-40 ${words.lang}: the dialog's first read was already ${first}; Adding was not on screen`)
+        }
+        await expect(badge).toHaveText(/^(Added|Failed)$/, { timeout: 5 * 60_000 })
+        if ((await badge.textContent()) !== 'Added') {
+          const addition = await get('tenant', `/v1/tenant/vms/${vmId}/key-additions/${additionId}`)
+          throw new Error(`UI-40 ${words.lang}: addition ${additionId} ended ${addition.status}: ${addition.requestFailureReason}`)
+        }
+        await expect(dialog.getByText(words.added, { exact: true })).toBeVisible()
+        await expect(dialog.getByText(words.restartNeeded, { exact: true })).toHaveCount(0)
+        await page.screenshot({ path: `${RESULTS}/UI-40-${words.lang}-added.png` })
+        log(`UI-40 ${words.lang} addition ${additionId}: POST {sshKeyIds: [${keyId}]} 202, badge ${first} then Added, "${words.added}", no restart sentence`)
+        await page.keyboard.press('Escape')
+        await expect(dialog).toHaveCount(0)
+
+        await page.goto(PORTAL + '/', { waitUntil: 'networkidle' })
+        const feed = page.locator('main').getByRole('listitem').filter({ hasText: namePw })
+        await expect(feed.filter({ has: page.getByText(words.feedRequested, { exact: true }) }).first()).toBeVisible()
+        await expect(feed.filter({ has: page.getByText(words.feedAdded, { exact: true }) }).first()).toBeVisible()
+        await page.screenshot({ path: `${RESULTS}/UI-40-${words.lang}-dashboard.png` })
+        log(`UI-40 ${words.lang} feed: "${words.feedRequested}", "${words.feedAdded}" for ${namePw}`)
+      }
+
+      const vms = await get('tenant', '/v1/tenant/vms') as Array<{ id: string, name: string, status: string }>
+      const stopped = vms.find((v) => v.name.startsWith('rg-') && v.status === 'Stopped')
+      if (stopped === undefined) {
+        log('UI-40 Stopped VM: no rg-* VM is Stopped; the disabled button of a Stopped VM is not measured')
+        test.info().annotations.push({ type: 'not measured', description: 'no rg-* VM is Stopped: the Add SSH key button of a Stopped VM' })
+      } else {
+        // pageOf() again after a wait on the API: a sign-in closes the old context (auth.ts headersOf).
+        const pageStopped = await pageOf('tenant')
+        await useLanguage(pageStopped, `/vms/${stopped.id}`, 'en')
+        await expect(pageStopped.getByRole('heading', { name: stopped.name, exact: true })).toBeVisible()
+        await expect(pageStopped.getByRole('button', { name: ADD_KEY.en.addKey, exact: true })).toBeDisabled()
+        await pageStopped.screenshot({ path: `${RESULTS}/UI-40-stopped-disabled.png` })
+        log(`UI-40 Stopped VM ${stopped.name} ${stopped.id}: Add SSH key disabled`)
+      }
+    } finally {
+      expectStatus(await call('tenant', 'DELETE', `/v1/tenant/ssh-keys/${keyId}`), 204)
+      log(`UI-40 key ${keyId} deleted`)
+    }
   })
 })

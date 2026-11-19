@@ -4,9 +4,9 @@ import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, s
 import { cleanUp } from './clean-up'
 import { RUN, RUN_CIDR, RUN_NETWORK_PREFIX, activityOf, countOf, envOf, listNetworks, networkUsable, waitNetwork } from './fixtures'
 
-// Cases NET-01..07, NET-09..13, NET-22..24 and NET-26 of plan.md (NET-08, NET-20, NET-21 and NET-25 read the Incus host;
+// Cases NET-01..07, NET-09..13, NET-22..24, NET-26 and NET-28 of plan.md (NET-08, NET-20, NET-21 and NET-25 read the Incus host;
 // NET-14..19 are measured by tests of the control plane). This module creates the run network and leaves it for the
-// modules after it; network-lifecycle deletes it. NET-11..13 and NET-24 need more networks than beta-user may hold:
+// modules after it; network-lifecycle deletes it. NET-11..13, NET-24 and NET-28 need more networks than beta-user may hold:
 // they raise maxNetworks (NET-13 also lowers maxPublicIpv6), give it back right after the case and again in afterAll,
 // and delete every network they made.
 
@@ -45,7 +45,7 @@ test.describe.serial('network', () => {
   let tenantId = ''
   // The caps this module may change, as they were before it: restored right after each case and in afterAll.
   let original: { maxVms: number, maxNetworks: number, maxPublicIpv6: number } | null = null
-  // Every extra network a case made (NET-11..13, NET-24), deleted in that case's finally and again in afterAll.
+  // Every extra network a case made (NET-11..13, NET-24, NET-28), deleted in that case's finally and again in afterAll.
   const extra: string[] = []
   // NET-11..13: the networks with public IPv6 and their /64.
   let ipv6A = ''
@@ -400,6 +400,33 @@ test.describe.serial('network', () => {
       await waitNetwork('NET-24 rg-net2 deleted', id, (n) => n.status === 'Deleted')
       expectError(await call('tenant', 'PATCH', `/v1/tenant/networks/${id}`, { name: `rg-net2r-${RUN}` }), 422, 'NETWORK_INVALID_STATE')
       expect((await get('tenant', `/v1/tenant/networks/${id}`)).name).toBe(net2)
+    } finally {
+      await cleanUp([
+        ['quota', restoreQuota],
+        ['extra networks', deleteExtraNetworks],
+      ])
+    }
+  })
+
+  // An explicit Allow (0, the type's default value) is kept, not replaced by a new network's Deny
+  // (titan-ops features/network/user-stories.md#us-f08 · titan-ops features/network/design.md#firewall-default-policy ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/Contracts/CreateNetworkCommand.cs CreateNetworkCommand:
+  // FirewallPolicy is a number on /v1, Allow = 0)
+  test('NET-28 a create that sends Allow for both policies keeps Allow inbound and outbound', async () => {
+    test.setTimeout(20 * 60_000)
+    const { clusterId } = await envOf()
+    try {
+      await setQuota({ maxVms: original!.maxVms, maxNetworks: original!.maxNetworks + 1 })
+      const reply = await call('tenant', 'POST', '/v1/tenant/networks',
+        { name: `rg-netallow-${RUN}`, clusterId, cidr: '10.78.0.0/24', defaultIngressPolicy: 0, defaultEgressPolicy: 0 }, newKey())
+      expectStatus(reply, 202)
+      const id = bodyOf(reply).networkId as string
+      extra.push(id)
+      const settled = await waitNetwork('NET-28 out of Creating', id, (n) => n.status !== 'Creating')
+      const read = await get('tenant', `/v1/tenant/networks/${id}`)
+      log(`NET-28 ${id} status=${settled.status} ingress=${read.defaultIngressPolicy} egress=${read.defaultEgressPolicy}`)
+      expect(read.defaultIngressPolicy).toBe('Allow')
+      expect(read.defaultEgressPolicy).toBe('Allow')
     } finally {
       await cleanUp([
         ['quota', restoreQuota],
