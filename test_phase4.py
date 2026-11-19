@@ -17,9 +17,9 @@ phase4 = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(phase4)
 
 # The fakes write each call to FAKE_STATE/calls. kubectl: `logs <pod>` prints FAKE_LOG_<n> (n = how many `logs` calls
-# came before, the last one repeats); `logs -l app=…` prints FAKE_WORKER_LOG; `exec … touch <file>` creates the file under
-# FAKE_STATE/pod, after which `logs <pod>` prints FAKE_LOG_AFTER_TOUCH_<files touched> or FAKE_LOG_AFTER_TOUCH when set. ssh: a command holding `incus query '/1.0/instances/<x>` prints FAKE_INSTANCE_<x> (absent ⇒ exit 1) or,
-# for `/storage-pools/`, FAKE_VOLUME; FAKE_COPY_READS_BEFORE_GONE ends the copy after that many reads of it.
+# came before, the last one repeats); `exec … touch <file>` creates the file under
+# FAKE_STATE/pod, after which `logs <pod>` prints FAKE_LOG_AFTER_TOUCH_<files touched> or FAKE_LOG_AFTER_TOUCH when set. ssh: a command holding `incus query '<path>'`
+# that is a key of FAKE_QUERIES prints its JSON value (FAKE_STOP_AFTER/FAKE_STOP_FILE touch a file after that many such reads).
 # FAKE_GUEST {substring: [[output, exit], …]}: a host command holding the substring gets its next pair (the last repeats).
 # kubectl `exec … openssl` prints FAKE_OPENSSL (unset ⇒ exit 127, no openssl); `exec -i … grep` counts the stdin lines
 # holding FAKE_POD_PASSWORD, the pod's password file, which no argument carries.
@@ -38,21 +38,11 @@ FAKE_KUBECTL = textwrap.dedent('''\
         print(json.dumps({"items": [{"metadata": {"name": n, "namespace": "ns-" + n}} for n in names]}))
     if args[:2] == ["get", "cronjob"]:
         items("titan-regression")
-    elif args[:2] == ["get", "deployment"]:
-        items("control-plane")
     elif args[:2] == ["get", "pods"]:
-        label = next(a for a in args if "=" in a)
-        if label.startswith("job-name="):
-            counter = state / "pod-reads"
-            n = int(counter.read_text()) if counter.exists() else 0
-            counter.write_text(str(n + 1))
-            items(*(["regression-phase4-prd-abc"] if n >= int(os.environ.get("FAKE_POD_AFTER", "0")) else []))
-        elif label == "app=incus-worker-inventory":
-            items(*filter(None, [os.environ.get("FAKE_INVENTORY")]))
-        else:
-            items("incus-worker-1")
-    elif args[:1] == ["logs"] and "-l" in args:
-        print(os.environ.get("FAKE_WORKER_LOG", ""))
+        counter = state / "pod-reads"
+        n = int(counter.read_text()) if counter.exists() else 0
+        counter.write_text(str(n + 1))
+        items(*(["regression-phase4-prd-abc"] if n >= int(os.environ.get("FAKE_POD_AFTER", "0")) else []))
     elif args[:1] == ["logs"]:
         counter = state / "log-reads"
         n = int(counter.read_text()) if counter.exists() else 0
@@ -106,29 +96,7 @@ FAKE_SSH = textwrap.dedent('''\
             pathlib.Path(os.environ["FAKE_STOP_FILE"]).write_text("")
         print(json.dumps(queries[q.group(1)]))
         sys.exit(0)
-    m = re.search(r"incus query '/1.0/instances/([a-z0-9]+)", command)
-    if m:
-        name = m.group(1)
-        counter = state / ("reads-" + name)
-        n = int(counter.read_text()) if counter.exists() else 0
-        counter.write_text(str(n + 1))
-        gone_after = os.environ.get("FAKE_COPY_READS_BEFORE_GONE")
-        text = os.environ.get("FAKE_INSTANCE_" + name)
-        if text is None or (name.startswith("bk") and gone_after and n >= int(gone_after)):
-            print("Error: Instance not found", file=sys.stderr)
-            sys.exit(1)
-        print(text)
-    elif "/storage-pools/" in command and "/custom/bkv" in command:
-        counter = state / "reads-bkv"
-        n = int(counter.read_text()) if counter.exists() else 0
-        counter.write_text(str(n + 1))
-        if n >= int(os.environ.get("FAKE_VOLUME_COPY_READS", "0")):
-            print("Error: Storage volume not found", file=sys.stderr)
-            sys.exit(1)
-        print("{}")
-    elif "/storage-pools/" in command:
-        print(os.environ["FAKE_VOLUME"])
-    elif any(k in command for k in json.loads(os.environ.get("FAKE_GUEST", "{}"))):
+    if any(k in command for k in json.loads(os.environ.get("FAKE_GUEST", "{}"))):
         guest = json.loads(os.environ["FAKE_GUEST"])
         key = next(k for k in guest if k in command)
         counter = state / ("guest-" + str(sorted(guest).index(key)))
@@ -158,23 +126,6 @@ HOLD_VM28 = '2026-11-16T10:01:00.000Z HOLD vm28-limit {"project":"t-1"}'
 VM = "vmaaaa"
 COPY = "bkaaaa"
 VOL = "volbbbb"
-SOURCE = {"name": VM, "expanded_devices": {
-    "root": {"type": "disk", "path": "/", "pool": "default"},
-    "eth0": {"type": "nic", "network": "net-1"},
-    VOL: {"type": "disk", "pool": "default", "source": VOL}}}
-MASKED = {"name": COPY, "expanded_devices": {
-    "root": {"type": "disk", "path": "/", "pool": "default"},
-    "eth0": {"type": "nic", "network": "net-1"},
-    VOL: {"type": "none"}}}
-# `incus query` prints the metadata of the reply, not the envelope
-UNMASKED = {"name": COPY, "expanded_devices": SOURCE["expanded_devices"]}
-USED_BY_VM = {"name": VOL, "used_by": [f"/1.0/instances/{VM}?project=t-1"]}
-USED_BY_BOTH = {"name": VOL, "used_by": [f"/1.0/instances/{VM}?project=t-1", f"/1.0/instances/{COPY}?project=t-1"]}
-VOLUME_COPY = "bkvbbbb"
-HOLD_GONE = ('2026-11-16T11:03:01.000Z HOLD bak18-gone {"project":"t-1","copy":"%s","volumeCopy":"%s"}'
-             % (COPY, VOLUME_COPY))
-HOLD_BAK18 = ('2026-11-16T10:02:00.000Z HOLD bak18 '
-              + json.dumps({"project": "t-1", "vm": VM, "copy": COPY, "volume": VOL}, separators=(",", ":")))
 
 
 def run(*args, **env_extra):
@@ -549,140 +500,6 @@ class KeysTest(unittest.TestCase):
         (state.parent / "keys" / "v.pub").write_text("ssh-ed25519 AAAAkept rg-p4-v\n")
         code, out, _, _ = run("keys", str(state.parent / "keys"))
         self.assertEqual((state.parent / "keys" / "v.pub").read_text(), "ssh-ed25519 AAAAkept rg-p4-v\n")
-
-
-class CopyVerdictTest(unittest.TestCase):
-    def test_a_masked_copy_and_a_volume_used_only_by_its_vm_pass(self):
-        self.assertEqual(phase4.copy_verdict(MASKED, USED_BY_VM, VM, COPY, VOL), [])
-
-    def test_an_unmasked_copy_fails(self):
-        self.assertTrue(any(VOL in p for p in phase4.copy_verdict(UNMASKED, USED_BY_VM, VM, COPY, VOL)))
-
-    def test_the_copy_in_used_by_fails(self):
-        self.assertTrue(any("used_by" in p for p in phase4.copy_verdict(MASKED, USED_BY_BOTH, VM, COPY, VOL)))
-
-    def test_a_copy_without_root_or_nic_fails(self):
-        bare = {"name": COPY, "expanded_devices": {VOL: {"type": "none"}}}
-        problems = phase4.copy_verdict(bare, USED_BY_VM, VM, COPY, VOL)
-        self.assertTrue(any("root" in p for p in problems) and any("nic" in p for p in problems), problems)
-
-
-class Bak18Test(unittest.TestCase):
-    def env(self, **extra):
-        go = HOLD_BAK18 + "\n2026-11-16T11:03:00.000Z GO bak18\n" + HOLD_GONE
-        env = {"FAKE_LOG_0": HOLD_BAK18, "FAKE_LOG_AFTER_TOUCH": go,
-               "FAKE_LOG_AFTER_TOUCH_2": go + "\n2026-11-16T11:10:00.000Z GO bak18-gone",
-               # poll, first read, read after the reconcile; the fourth read finds it gone
-               "FAKE_COPY_READS_BEFORE_GONE": "3",
-               f"FAKE_INSTANCE_{VM}": json.dumps(SOURCE), f"FAKE_INSTANCE_{COPY}": json.dumps(MASKED),
-               "FAKE_VOLUME": json.dumps(USED_BY_VM),
-               "FAKE_WORKER_LOG": '{"time":"2026-11-16T11:01:00Z","msg":"reconcile cluster done"}'}
-        env.update(extra)
-        return env
-
-    def test_copy_seen_then_a_reconcile_then_go(self):
-        code, out, calls, state = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", **self.env())
-        self.assertEqual(code, 0, out)
-        self.assertIn("BAK18_HOST=PASS", out)
-        self.assertTrue((state / "pod" / "go-bak18").exists())
-        self.assertTrue((state / "pod" / "go-bak18-gone").exists())
-        self.assertIn(f"{COPY} gone", out)
-        self.assertIn(f"{VOLUME_COPY} gone", out)
-
-    def test_the_volume_copy_is_waited_for_too(self):
-        code, out, calls, state = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log",
-                                      **self.env(FAKE_VOLUME_COPY_READS="3"))
-        self.assertEqual(code, 0, out)
-        self.assertEqual((state / "reads-bkv").read_text(), "4")
-        self.assertIn(f"/storage-pools/default/volumes/custom/{VOLUME_COPY}?project=t-1", calls)
-        self.assertIn("/storage-pools/default/volumes/custom/" + VOL, calls)
-        self.assertIn("logs -n ns-control-plane -l app=incus-worker --since-time=", calls)
-        log = (state.parent / "bak18.log").read_text()
-        # seen, read again after the reconcile, and the read that finds it gone
-        self.assertEqual(log.count(f"incus query '/1.0/instances/{COPY}?project=t-1'"), 3)
-
-    def test_the_inventory_pod_is_read_where_the_worker_runs_one(self):
-        code, out, calls, _ = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log",
-                                  **self.env(FAKE_INVENTORY="incus-worker-inventory-1"))
-        self.assertEqual(code, 0, out)
-        self.assertIn("-l app=incus-worker-inventory --since-time=", calls)
-
-    def test_an_unmasked_copy_is_a_fail_but_the_spec_still_goes(self):
-        code, out, _, state = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log",
-                                  **self.env(**{f"FAKE_INSTANCE_{COPY}": json.dumps(UNMASKED)}))
-        self.assertEqual(code, 1, out)
-        self.assertIn("BAK18_HOST=FAIL", out)
-        self.assertTrue((state / "pod" / "go-bak18").exists())
-
-    def test_no_copy_before_the_timeout_skips(self):
-        env = self.env()
-        del env[f"FAKE_INSTANCE_{COPY}"]
-        env["FAKE_LOG_AFTER_TOUCH"] = HOLD_BAK18 + "\n2026-11-16T11:03:00.000Z SKIP bak18\n" + HOLD_GONE
-        env["FAKE_LOG_AFTER_TOUCH_2"] = env["FAKE_LOG_AFTER_TOUCH"] + "\n2026-11-16T11:04:00.000Z GO bak18-gone"
-        code, out, _, state = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", "--timeout-minutes", "0", **env)
-        self.assertEqual(code, 4, out)
-        self.assertIn("BAK18_HOST=NOT_COVERED", out)
-        self.assertTrue((state / "pod" / "skip-bak18").exists())
-        self.assertTrue((state / "pod" / "go-bak18-gone").exists())
-
-    def test_a_copy_gone_before_the_reconcile_is_not_covered(self):
-        skipped = HOLD_BAK18 + "\n2026-11-16T11:03:00.000Z SKIP bak18\n" + HOLD_GONE
-        code, out, _, state = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log",
-                                  **self.env(FAKE_COPY_READS_BEFORE_GONE="2", FAKE_LOG_AFTER_TOUCH=skipped,
-                                             FAKE_LOG_AFTER_TOUCH_2=skipped + "\n2026-11-16T11:04:00.000Z GO bak18-gone"))
-        self.assertEqual(code, 4, out)
-        self.assertIn("BAK18_HOST=NOT_COVERED", out)
-        self.assertTrue((state / "pod" / "skip-bak18").exists())
-        self.assertTrue((state / "pod" / "go-bak18-gone").exists())
-
-    def test_a_volume_not_on_the_vm_fails_and_still_answers_both_holds(self):
-        detached = {"name": VM, "expanded_devices": {"root": {"type": "disk", "path": "/", "pool": "default"}}}
-        code, out, _, state = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log",
-                                  **self.env(**{f"FAKE_INSTANCE_{VM}": json.dumps(detached), "FAKE_COPY_READS_BEFORE_GONE": "0"}))
-        self.assertEqual(code, 1, out)
-        self.assertIn("BAK18_HOST=FAIL", out)
-        self.assertTrue((state / "pod" / "go-bak18").exists())
-        self.assertTrue((state / "pod" / "go-bak18-gone").exists())
-
-    def test_the_reconcile_wait_ends_with_the_copy_deadline(self):
-        skipped = HOLD_BAK18 + "\n2026-11-16T11:03:00.000Z SKIP bak18\n" + HOLD_GONE
-        code, out, _, _ = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", "--timeout-minutes", "0",
-                              **self.env(FAKE_WORKER_LOG="", FAKE_LOG_AFTER_TOUCH=skipped,
-                                         FAKE_LOG_AFTER_TOUCH_2=skipped + "\n2026-11-16T11:04:00.000Z GO bak18-gone"))
-        self.assertEqual(code, 4, out)
-        self.assertIn("no 'reconcile cluster done'", out)
-
-    def test_a_metrics_loop_line_is_not_a_reconcile(self):
-        # the worker's text log, as on prd: the metrics runner ends its cycle with the same message
-        metrics = ('time=2026-11-16T11:01:00.000Z level=INFO msg="reconcile cluster done" worker=w loop=metrics '
-                   'clusterId=singapore01 totalMs=171 durationsMs.vm-metrics=171')
-        skipped = HOLD_BAK18 + "\n2026-11-16T11:03:00.000Z SKIP bak18\n" + HOLD_GONE
-        code, out, _, state = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", "--timeout-minutes", "0",
-                                  **self.env(FAKE_WORKER_LOG=metrics, FAKE_LOG_AFTER_TOUCH=skipped,
-                                             FAKE_LOG_AFTER_TOUCH_2=skipped + "\n2026-11-16T11:04:00.000Z GO bak18-gone"))
-        self.assertEqual(code, 4, out)
-        self.assertIn("no 'reconcile cluster done'", out)
-        self.assertTrue((state / "pod" / "skip-bak18").exists())
-
-    def test_the_reconciler_line_after_a_metrics_line_counts(self):
-        lines = ('time=2026-11-16T11:01:00.000Z level=INFO msg="reconcile cluster done" worker=w loop=metrics '
-                 'clusterId=singapore01 totalMs=171\n'
-                 'time=2026-11-16T11:01:01.000Z level=INFO msg="reconcile cluster done" worker=w '
-                 'clusterId=singapore01 totalMs=134')
-        code, out, _, _ = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", **self.env(FAKE_WORKER_LOG=lines))
-        self.assertEqual(code, 0, out)
-        self.assertIn("BAK18_HOST=PASS", out)
-
-    def test_an_unreadable_vm_is_named_as_such(self):
-        env = self.env()
-        del env[f"FAKE_INSTANCE_{VM}"]
-        code, out, _, _ = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", **env)
-        self.assertEqual(code, 1, out)
-        self.assertIn(f"BAK18_HOST=FAIL cannot read {VM}", out)
-
-    def test_bak18_refuses_when_the_pending_hold_is_another_step(self):
-        code, out, _, _ = run("bak18", *KUBE, *SSH, "--log", "{tmp}/bak18.log", **self.env(FAKE_LOG_0=HOLD_VM28))
-        self.assertEqual(code, 2, out)
 
 
 PW_VM = "vmpwpw"

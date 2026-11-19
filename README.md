@@ -23,7 +23,7 @@ which signs in with the test accounts there, so no credential passes through the
 | `check-removed-fields.py` | Fails when a spec or a helper under `lib/` still reads a field that left the control plane's `/v1` contract and the Spec column below does not mark a case of its test; run it with the two control plane commits a contract change lies between |
 | `run-lanes.py`, `lanes.json`, `lanes-dev.json`, `lanes-dev-sequential.json` | Runs the modules as lanes, one lane per test tenant, lanes side by side (below); the two dev plans cover the Dev column |
 | `patch-job.py` | Points a job's `specs` volume at a ConfigMap of its own, so jobs started together never read each other's specs; `--env NAME=VALUE` adds a variable to the job |
-| `phase4.py` | The agent's commands for the two Phase 4 modules (§Phase 4) |
+| `phase4.py` | The agent's commands for the Phase 4 module (§Phase 4) |
 | `phase4_steps.py` | The host commands of each HOLD of `phase4/`, run by `phase4.py step` (§Phase 4) |
 | `selftest/`, `test_*.py` | Tests of the helpers and scripts above |
 | [`CLAUDE.md`](CLAUDE.md) | How specs are written and the assumptions a run on the release environment makes |
@@ -219,7 +219,7 @@ hand: without it the spec skips as N/A after 10 minutes), and only in the sequen
 
 Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — state changed on the Incus host outside
 OpenViCloud, needs an approved `L-x` command (OBS-13 only reads the host's trust list), run by the agent with the
-spec of `phase4/`; BAK-18, a `(host)` case of `backup` with a module of its own, `phase4-backup/` (§Phase 4); `site` — the public site through Playwright MCP on the agent's machine;
+spec of `phase4/`; `site` — the public site through Playwright MCP on the agent's machine;
 `worker`, `control-plane-image` — read-only `gh`/`curl`/`kubectl` and `go test` of a worker clone on the agent's machine.
 
 Four things change state every tenant of the environment shares: ADM-06 (a global price), ADM-15 (the cluster's
@@ -239,13 +239,13 @@ written for and that Phase 4 does not measure by hand is **NOT COVERED**, with t
 
 ## Phase 4
 
-Two modules of this repository are run by the agent, not by `run-lanes.py`: `phase4/` (`phase4-host.spec.ts`, the
-`(host)` and `observation` cases of `release:regression-prd` Phase 4: the `external` step `phase4` of `lanes.json`) and
-`phase4-backup/` (BAK-18). Each spec logs `HOLD <step> <facts JSON>` (`lib/host-hold.ts`) and waits for
+One module of this repository is run by the agent, not by `run-lanes.py`: `phase4/` (`phase4-host.spec.ts`, the
+`(host)` and `observation` cases of `release:regression-prd` Phase 4: the `external` step `phase4` of `lanes.json`).
+Each spec logs `HOLD <step> <facts JSON>` (`lib/host-hold.ts`) and waits for
 `go-<step>` or `skip-<step>` in `/work/results/` of its pod; the agent does the host commands of the step in between.
 `phase4.py` is every command the agent runs for that, so nobody writes a shell loop by hand; each `host` command and
-each answer given `--log` goes to that evidence log as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>` (`bak18`
-and `vm35` log their reads, not their polls). `host` refuses (exit 2)
+each answer given `--log` goes to that evidence log as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>` (`vm35`
+logs its reads, not its polls). `host` refuses (exit 2)
 when the ControlMaster is not there, rather than open a connection of its own:
 
 ```bash
@@ -265,7 +265,7 @@ python3 phase4.py disconnect --control <socket> --target <user@host>
 
 `run-module.sh` passes `<keys dir>/v.pub` and `u.pub` to the job as `PHASE4_KEY_V` and `PHASE4_KEY_U` (one public key
 line each, or it stops before the job); `phase4/` stores V as the tenant's SSH key and puts U in a VM's cloud-init, and a
-run of it without them is red at its first step (`phase4-backup/` reads no key). In a host command `{V}`, `{U}`, `{X}` become the base64 body of that key.
+run of it without them is red at its first step. In a host command `{V}`, `{U}`, `{X}` become the base64 body of that key.
 `host --local` runs a command on the agent's machine (the checks over the Internet) with the same log entry.
 
 `step <step>` waits for that HOLD, runs the step's commands of `phase4_steps.py` (one function per HOLD of
@@ -294,25 +294,6 @@ password, then hashes in the pod the password file the spec left there (`openssl
 shadow) and greps the vendor-data for it, so the password is in no log. Last line `VM35_HOST=PASS` (exit 0), `FAIL <what>`
 (exit 1, `go-vm35` still created) or `NOT_COVERED <why>` (exit 4, `skip-vm35`). The VM-35 test has no check of its own
 after the hold: its ✓ in the runner log says the hold was answered, and the case's verdict is the `VM35_HOST=` line.
-
-`phase4-backup/` waits for the hourly `backup-schedule` run (minute 0 UTC): a new VM with a volume attached is backed up
-by the first run after it. Its job is its own, because the wait does not fit in the runner's 90 minutes
-(`activeDeadlineSeconds`) after the rest of Phase 4; inside those 90 it holds up to 60 minutes for the copy and 12 for
-the uploads of the VM and the volume, so start it between `:40` (the wait for the copy stays under 20 minutes) and
-`:55` (its setup ends before `:00`) (a run of the CronJob made by hand, where the release allows it, takes
-the place of `:00`). It has one VM, one volume and one network of its own, and raises the quota to fit them, given back
-after; not beside `phase4/`, whose quota raise it would undo. The backup run it waits for uploads one archive of its
-VM and one of its volume to the environment's bucket; the module deletes both resources, and the two archives stay for
-good: the bucket keeps the 7 newest per resource and removes none of a deleted resource
-(`titan-ops features/backup/design.md#incus-backup`). At `HOLD bak18`,
-`python3 phase4.py bak18 --kubeconfig … --job regression-phase4-backup-<label> --control … --target … --log …` reads
-the copy `bk<26>` on the host until it is there, logs its devices and the volume's `used_by`, waits for a worker
-`reconcile cluster done` of the reconciler (a `loop=metrics` line does not count) after it, reads both again, and answers; at `HOLD bak18-gone` it waits for that copy and the
-volume's copy `bkv<26>`, which the same backup run makes next, to be gone (the VM's copy keeps a NIC on the spec's
-network until its upload ends, so a network delete fails before that, and a detach during the volume's copy times out)
-and answers again. Last line `BAK18_HOST=PASS`, `FAIL <what>` (both holds still answered; the spec runs its API check, and holds at `bak18-gone` whatever it finds) or
-`NOT_COVERED <why>` (`skip-bak18`, then `bak18-gone` answered as above: no copy within the timeout, no reconciler's `reconcile cluster done` after it, or the copy gone
-before one).
 
 ## License
 

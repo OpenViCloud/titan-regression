@@ -28,7 +28,7 @@ Repo này không có hệ thống nào để chạy: spec chạy bằng runner `
 ├── lanes.json       # module nào chạy ở lane nào, lane chờ nhau ở đâu
 ├── lanes-dev.json, lanes-dev-sequential.json  # cùng thứ cho cụm dev: hai lane / một lane, chỉ module có Dev = yes, max_pods 1
 ├── patch-job.py     # trỏ volume `specs` của một job vào ConfigMap riêng của nó, thêm env `--env NAME=VALUE` (run-module.sh dùng)
-├── phase4.py        # phía agent của Phase 4 (phase4/, phase4-backup/): keys, connect, wait, go/skip, host, step, cli10, bak18, vm35, sample, disconnect — README §Phase 4
+├── phase4.py        # phía agent của Phase 4 (phase4/): keys, connect, wait, go/skip, host, step, cli10, vm35, sample, disconnect — README §Phase 4
 ├── phase4_steps.py  # lệnh host của từng HOLD của phase4/ cho `phase4.py step` (bước nào ghi host: WRITES)
 ├── test_*.py        # test của các script trên — python3 test_count_cases.py …
 ├── selftest/        # test của lib không cần Playwright; ngoài lib/ vì runner chép mọi file của lib/ vào e2e/ và `testMatch`
@@ -90,7 +90,7 @@ Hai lane (`lanes.json`) chạy cùng lúc, mỗi lane một tenant test; `admin-
 | `cleanup` | a, b | xoá mọi `rg-*`/`tfacc-*` của tenant lane | không |
 | `terraform-provider` | a | tạo network, firewall rule, SSH key, VM, volume, LB bằng token của lane (token tạo rồi xoá) | lấy một /64 IPv6 từ khối của cluster |
 
-Ngoài bảng (bảng chỉ có module của `lanes.json`): `phase4/` và `phase4-backup/` (agent chạy, README §Phase 4) nâng quota của tenant lượt rồi trả, nên không chạy cạnh nhau; OBS-05 của `phase4/` xoá alias template của cluster (mọi tenant) tới khi sync lại.
+Ngoài bảng (bảng chỉ có module của `lanes.json`): `phase4/` (agent chạy, README §Phase 4) nâng quota của tenant lượt rồi trả; OBS-05 của `phase4/` xoá alias template của cluster (mọi tenant) tới khi sync lại.
 
 Luật rút ra, ghi ở `lanes.json`: `billing`↔`concurrency` (cùng ví `admin-test`) và `billing`↔`admin` (cùng danh sách topup Pending: topup tạm của BIL-10 làm ADM-08 gặp một hàng Pending lạ; cùng audit log và giá tier) không chồng nhau (`exclusive`); ba module lấy /64 IPv6 (`load-balancer`, `portal-ui`, `terraform-provider`) ở chung một lane (`same_lane`); `network`, `concurrency`, `admin` cũng lấy /64 và hôm nay cùng lane a, chưa có trong `same_lane`; hai create cùng lúc nay đều thành công, nên nới nhóm này chỉ cần đo lịch tách lane trước. `contract` không đụng ví nên không bị khoá. Locator tìm hàng theo tên tenant bằng khớp chuỗi con (`hasText: 'beta-user'`) khớp cả hàng `beta-user-2`: tìm theo id, hoặc khớp có chặn đuôi `-<chữ>` như `tenantRowOf()` của `admin/admin-portal.spec.ts`.
 
