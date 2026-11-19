@@ -409,7 +409,7 @@ test.describe.serial('network', () => {
   })
 
   // An explicit Allow (0, the type's default value) is kept, not replaced by a new network's Deny
-  // (titan-ops features/network/user-stories.md#us-f08 AC-1 · titan-ops features/network/design.md#firewall-default-policy ·
+  // (titan-ops features/network/user-stories.md#us-f08 · titan-ops features/network/design.md#firewall-default-policy ·
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/Contracts/CreateNetworkCommand.cs CreateNetworkCommand:
   // FirewallPolicy is a number on /v1, Allow = 0)
   test('NET-28 a create that sends Allow for both policies keeps Allow inbound and outbound', async () => {

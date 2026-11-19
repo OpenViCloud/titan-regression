@@ -748,7 +748,7 @@ test.describe.serial('vm', () => {
     expect(vm.vmOfferingId).toBe(otherTier)
   })
 
-  // titan-ops features/vm/user-stories.md#us-vm-add-key AC-4 · titan-ops features/vm/design.md#vm-key-addition ·
+  // titan-ops features/vm/user-stories.md#us-vm-add-key · titan-ops features/vm/design.md#vm-key-addition ·
   // OpenViCloud/titan-incus-worker:resource/vmkeyaddition/report.go (reasonAgentNotRunning, reasonCreateFailed) ·
   // titan-ops architecture/provider-commands.md#retry-on-workflow. Right after VM-02, before any SSH session to vmB, so
   // its guest agent may not be up yet; an addition that came through (the agent was up in time) is recorded, not red.
@@ -809,7 +809,7 @@ test.describe.serial('vm', () => {
   })
 
   // titan-ops features/vm/user-stories.md#us-vm-add-key · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.KeyAdditions.cs
-  // (EnsureCanAddKeys: only Running; GetKeyAddition: one of another VM answers like a missing one) ·
+  // (EnsureCanAddKeys: only Running) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Compute/VmKeyAddition/GetVmKeyAdditionQueryHandler.cs (HandleAsync).
   // Parts (c) and (e): vmA is Stopped since VM-03, vmB is the run's other VM.
   test('SSH-11 (c) a Stopped VM is 422 VM_INVALID_STATUS; (e) an unknown addition, or one of another VM, is 404 VM_KEY_ADDITION_NOT_FOUND', async () => {
@@ -1319,7 +1319,7 @@ test.describe.serial('vm', () => {
     vmAgain = again
   })
 
-  // titan-ops features/vm/user-stories.md#us-vm-add-key AC-6 · titan-ops features/vm/design.md#vm-key-addition ·
+  // titan-ops features/vm/user-stories.md#us-vm-add-key · titan-ops features/vm/design.md#vm-key-addition ·
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmKeyAddition.cs (EndWithItsVm: VM_DELETED) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/ComputeOwnership.cs (RequireVmAsync: a Deleted VM
   // still reads). The name is the one VM-16's Deleted VM had, so the feed is compared before and after.

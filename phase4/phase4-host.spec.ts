@@ -734,7 +734,7 @@ test.describe.serial('phase4 host', () => {
     expect(countOf(actions, 'load_balancer.deleted')).toBe(1)
   })
 
-  // plan.md FW-08 (titan-ops features/network/design.md#firewall-default-policy, #ipv6-public;
+  // plan.md FW-08 (titan-ops features/network/design.md#firewall-default-policy · titan-ops features/network/design.md#ipv6-public;
   // OpenViCloud/titan-incus-worker:resource/network/create.go DefaultAction, defaultActionsOf): a network made without
   // policies drops what comes from outside it and lets its VMs out, and VMs of one network still reach each other; a
   // network sent Allow/Allow lets both through. The spec checks the policies the API reads back; the measured parts

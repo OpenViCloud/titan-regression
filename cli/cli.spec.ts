@@ -501,9 +501,9 @@ test.describe.serial('cli lifecycle', () => {
     expect(cli13Ssh!.stdout.trim()).toBe('ubuntu')
   })
 
-  // titan-ops features/vm/user-stories.md#us-vm-add-key AC-1, AC-3, AC-8 · titan-ops features/vm/design.md#vm-key-addition ·
-  // OpenViCloud/titan-cli:command/vm/addsshkey.go (newAddSshKey: the waiting line and the missing --ssh-key error before any
-  // request, by Printer.Message to stderr; printKeyAddition: the fields to stdout, the restart line only when restartNeeded) ·
+  // titan-ops features/vm/user-stories.md#us-vm-add-key · titan-ops features/vm/design.md#vm-key-addition ·
+  // OpenViCloud/titan-cli:command/vm/addsshkey.go (newAddSshKey: the waiting line by Printer.Message to stderr; the missing --ssh-key
+  // error returned by RunE before any request; printKeyAddition: the fields to stdout, the restart line only when restartNeeded) ·
   // OpenViCloud/titan-incus-worker:resource/vmkeyaddition/create.go (appends only a line the file lacks). After CLI-14, so
   // VM2_NAME runs and `vm ssh` with the run's key gets in; before CLI-21 stops it again.
   test('CLI-22 `vm add-ssh-key` adds a second key that logs in at once; the same key again adds no line; no --ssh-key is refused', async () => {
@@ -748,7 +748,7 @@ test.describe.serial('cli lifecycle', () => {
     }
   })
 
-  // titan-ops features/vm/user-stories.md#us-vm-userdata AC-4 · titan-ops features/vm/design.md#vm-create-flow ·
+  // titan-ops features/vm/user-stories.md#us-vm-userdata · titan-ops features/vm/design.md#vm-create-flow ·
   // OpenViCloud/titan-cli:command/vm/lifecycle.go (readUserData: the file's exact bytes, refused before any request when
   // unreadable, past maxUserDataBytes or not UTF-8). The accepted file rode CLI-20's first create.
   test('CLI-23 `vm create --user-data` sends the file byte for byte; a missing, too large or non-UTF-8 file is refused with no VM', async () => {
