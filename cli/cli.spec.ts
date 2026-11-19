@@ -5,7 +5,7 @@ import * as fs from 'node:fs'
 import { PORTAL, closeSessions, useBrowser } from './auth'
 import { startLocalProxyIfNeeded } from './local-proxy'
 import { API, RESULTS, bodyOf, call, expectStatus, get, log, newKey, sleep, startLog } from './api'
-import { RUN, createVm, deleteVmAndWait, envOf, getVm, runNetwork, runs, vmShape, waitVm } from './fixtures'
+import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, getVm, runNetwork, runs, vmShape, waitVm } from './fixtures'
 import { cleanUp } from './clean-up'
 import { newSecret } from './token'
 import { incusName } from './incus-names'
@@ -376,9 +376,15 @@ test.describe.serial('cli lifecycle', () => {
   let cli13Ssh: CliResult | null = null
   // CLI-21 measured a stop of 30 s or more: the 5-minute part of CLI-15's delete is measured only then.
   let cli21Measured = false
+  // CLI-23: the user data file of CLI-20's first create, and what the API read back for that VM.
+  const USER_DATA_DIR = '/work/cli-user-data'
+  const VM6_NAME = `rg-vmcli6-${RUN}`
+  const CLI23_USER_DATA = `#cloud-config\n# rg-${RUN} ✓ tiếng Việt\n`
+  let cli23UserData: string | null = null
 
   test.afterAll(async () => {
     fs.rmSync(CONSOLE_PASSWORD_DIR, { recursive: true, force: true })
+    fs.rmSync(USER_DATA_DIR, { recursive: true, force: true })
     const steps: Array<[string, () => Promise<void>]> = []
     if (extraVmId !== '') {
       steps.push([`delete VM ${extraVmId}`, () => deleteVmAndWait(extraVmId)])
@@ -493,6 +499,73 @@ test.describe.serial('cli lifecycle', () => {
     expect(cli13Ssh, 'CLI-14 ran CLI-13\'s ssh').not.toBeNull()
     expect(cli13Ssh!.code, cli13Ssh!.stderr).toBe(0)
     expect(cli13Ssh!.stdout.trim()).toBe('ubuntu')
+  })
+
+  // titan-ops features/vm/user-stories.md#us-vm-add-key AC-1, AC-3, AC-8 · titan-ops features/vm/design.md#vm-key-addition ·
+  // OpenViCloud/titan-cli:command/vm/addsshkey.go (newAddSshKey: the waiting line and the missing --ssh-key error before any
+  // request, by Printer.Message to stderr; printKeyAddition: the fields to stdout, the restart line only when restartNeeded) ·
+  // OpenViCloud/titan-incus-worker:resource/vmkeyaddition/create.go (appends only a line the file lacks). After CLI-14, so
+  // VM2_NAME runs and `vm ssh` with the run's key gets in; before CLI-21 stops it again.
+  test('CLI-22 `vm add-ssh-key` adds a second key that logs in at once; the same key again adds no line; no --ssh-key is refused', async () => {
+    test.setTimeout(15 * 60_000)
+    expect(lifecycleVmId, 'CLI-13 made the VM').not.toBe('')
+    const key2Name = `rg-cli2-${RUN}`
+    const additions = async (): Promise<number> => (await get('tenant', `/v1/tenant/vms/${lifecycleVmId}/key-additions`) as any[]).length
+    const lines = async (): Promise<CliResult> =>
+      runCli(['vm', 'ssh', VM2_NAME, '--', ...sshOptions(LIFECYCLE_SSH_DIR, 'key', 'yes'), 'sudo', 'wc', '-l', '/etc/ssh/openvicloud/ubuntu'])
+    const countOfLines = (result: CliResult): number => Number(result.stdout.trim().split(/\s+/)[0])
+    try {
+      fs.rmSync(`${LIFECYCLE_SSH_DIR}/key2`, { force: true })
+      fs.rmSync(`${LIFECYCLE_SSH_DIR}/key2.pub`, { force: true })
+      const made = await run('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', key2Name, '-f', `${LIFECYCLE_SSH_DIR}/key2`])
+      expect(made.code, made.stderr).toBe(0)
+      const saved = await runCli(['ssh-key', 'add', key2Name, '--public-key-file', `${LIFECYCLE_SSH_DIR}/key2.pub`])
+      log(`CLI-22 ssh-key add exit=${saved.code} ${saved.stdout.trim()}`)
+      expect(saved.code, saved.stderr).toBe(0)
+
+      const added = await runCli(['vm', 'add-ssh-key', VM2_NAME, '--ssh-key', key2Name])
+      log(`CLI-22 add exit=${added.code} stdout="${added.stdout.trim()}" stderr="${added.stderr.trim()}"`)
+      expect(added.code, added.stderr).toBe(0)
+      expect(added.stderr).toContain(`Adding 1 SSH key(s) to VM ${VM2_NAME}, waiting until it is Added or Failed...`)
+      expect(added.stdout).toMatch(/^Status:\s+Added\s*$/m)
+      expect(added.stdout).toMatch(/^Restart needed:\s+false\s*$/m)
+      expect(added.stderr).not.toMatch(/Stop VM .* and start it again/)
+
+      const withKey2 = await runCli(['vm', 'ssh', VM2_NAME, '--', ...sshOptions(LIFECYCLE_SSH_DIR, 'key2', 'yes'), 'id', '-un'])
+      log(`CLI-22 ssh with the added key exit=${withKey2.code} stdout="${withKey2.stdout.trim()}" stderr="${withKey2.stderr.trim()}"`)
+      expect(withKey2.code, withKey2.stderr).toBe(0)
+      expect(withKey2.stdout.trim()).toBe('ubuntu')
+      const withRunKey = await runCli(['vm', 'ssh', VM2_NAME, '--', ...sshOptions(LIFECYCLE_SSH_DIR, 'key', 'yes'), 'id', '-un'])
+      log(`CLI-22 ssh with the run's key exit=${withRunKey.code} stdout="${withRunKey.stdout.trim()}"`)
+      expect(withRunKey.code, withRunKey.stderr).toBe(0)
+      expect(withRunKey.stdout.trim()).toBe('ubuntu')
+
+      const before = await lines()
+      log(`CLI-22 key file before the repeat exit=${before.code} "${before.stdout.trim()}"`)
+      expect(before.code, before.stderr).toBe(0)
+      expect(countOfLines(before)).toBe(2)
+      const again = await runCli(['vm', 'add-ssh-key', VM2_NAME, '--ssh-key', key2Name])
+      log(`CLI-22 repeat exit=${again.code} stdout="${again.stdout.trim()}"`)
+      expect(again.code, again.stderr).toBe(0)
+      expect(again.stdout).toMatch(/^Status:\s+Added\s*$/m)
+      const after = await lines()
+      log(`CLI-22 key file after the repeat exit=${after.code} "${after.stdout.trim()}"`)
+      expect(after.code, after.stderr).toBe(0)
+      expect(countOfLines(after)).toBe(2)
+
+      const rows = await additions()
+      const none = await runCli(['vm', 'add-ssh-key', VM2_NAME])
+      log(`CLI-22 no --ssh-key exit=${none.code} stderr="${none.stderr.trim()}"`)
+      expect(none.code).not.toBe(0)
+      expect(none.stderr).toContain('at least one --ssh-key is required')
+      expect(await additions(), 'no addition from the refused call').toBe(rows)
+    } finally {
+      await cleanUp([[`delete SSH key ${key2Name}`, async () => {
+        for (const key of (await get('tenant', '/v1/tenant/ssh-keys') as any[]).filter((k) => k.name === key2Name)) {
+          expectStatus(await call('tenant', 'DELETE', `/v1/tenant/ssh-keys/${key.id}`), 204)
+        }
+      }]])
+    }
   })
 
   // OpenViCloud/titan-cli:command/vm/lifecycle.go newCreate (resolveNetwork/createVm — client-side resolution before any POST) ·
@@ -630,13 +703,18 @@ test.describe.serial('cli lifecycle', () => {
     const createArgs = (name: string): string[] => ['vm', 'create', name, '--cluster', clusterId, '--network', network.name,
       '--template', templateId, '--size', 'm']
     try {
-      const created = await runWithStdinFrom([...createArgs(VM4_NAME), '--console-password-stdin', '--wait', '--timeout', '10m'],
-        passwordFile)
+      // CLI-23's first part rides this create: its user data file, read back from the API before the delete below.
+      fs.rmSync(USER_DATA_DIR, { recursive: true, force: true })
+      fs.mkdirSync(USER_DATA_DIR, { recursive: true })
+      fs.writeFileSync(`${USER_DATA_DIR}/user-data`, CLI23_USER_DATA)
+      const created = await runWithStdinFrom([...createArgs(VM4_NAME), '--console-password-stdin', '--user-data', `${USER_DATA_DIR}/user-data`,
+        '--wait', '--timeout', '10m'], passwordFile)
       log(`CLI-20 stdin file exit=${created.code} stdout="${hide(created.stdout)}" stderr="${hide(created.stderr)}"`)
       const vms = await get('tenant', '/v1/tenant/vms') as Array<{ id: string, name: string }>
       const vm = vms.find((v) => v.name === VM4_NAME)
       if (vm !== undefined) {
         consoleVmId = vm.id
+        cli23UserData = (await getVm(vm.id)).userData ?? null
       }
       expect(created.code, hide(created.stderr)).toBe(0)
       expect(vm, `${VM4_NAME} in GET /v1/tenant/vms`).toBeTruthy()
@@ -667,6 +745,39 @@ test.describe.serial('cli lifecycle', () => {
           log(`CLI-20 delete ${VM4_NAME} failed, afterAll tries again: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
+    }
+  })
+
+  // titan-ops features/vm/user-stories.md#us-vm-userdata AC-4 · titan-ops features/vm/design.md#vm-create-flow ·
+  // OpenViCloud/titan-cli:command/vm/lifecycle.go (readUserData: the file's exact bytes, refused before any request when
+  // unreadable, past maxUserDataBytes or not UTF-8). The accepted file rode CLI-20's first create.
+  test('CLI-23 `vm create --user-data` sends the file byte for byte; a missing, too large or non-UTF-8 file is refused with no VM', async () => {
+    try {
+      expect(cli23UserData, 'CLI-20 made its VM and read it back').not.toBeNull()
+      log(`CLI-23 userData of ${VM4_NAME}: ${JSON.stringify(cli23UserData)}`)
+      expect(Buffer.from(cli23UserData!, 'utf8').equals(Buffer.from(CLI23_USER_DATA, 'utf8'))).toBe(true)
+
+      const { clusterId, templateId } = await envOf()
+      const network = await runNetwork()
+      fs.writeFileSync(`${USER_DATA_DIR}/too-large`, 'a'.repeat(32_769))
+      fs.writeFileSync(`${USER_DATA_DIR}/not-utf8`, Buffer.from([0x23, 0x20, 0xff, 0x0a]))
+      const refusals: Array<[string, string]> = [
+        [`${USER_DATA_DIR}/missing`, 'cannot read the user data file'],
+        [`${USER_DATA_DIR}/too-large`, 'is 32769 bytes, more than the 32768 byte limit'],
+        [`${USER_DATA_DIR}/not-utf8`, 'is not valid UTF-8'],
+      ]
+      for (const [file, message] of refusals) {
+        const result = await runCli(['vm', 'create', VM6_NAME, '--cluster', clusterId, '--network', network.name,
+          '--template', templateId, '--size', 'm', '--user-data', file])
+        log(`CLI-23 ${file} exit=${result.code} stderr="${result.stderr.trim()}"`)
+        expect(result.code).not.toBe(0)
+        expect(result.stderr).toContain(message)
+      }
+      const vms = await get('tenant', '/v1/tenant/vms') as Array<{ id: string, name: string }>
+      expect(vms.filter((v) => v.name === VM6_NAME).map((v) => v.id)).toEqual([])
+      expect(countOf(await activityOf(VM6_NAME), 'vm.create_requested')).toBe(0)
+    } finally {
+      fs.rmSync(USER_DATA_DIR, { recursive: true, force: true })
     }
   })
 

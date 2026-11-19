@@ -68,7 +68,7 @@ Hai lane (`lanes.json`) chạy cùng lúc, mỗi lane một tenant test; `admin-
 |---|---|---|---|
 | `smoke` | a, b | không | không |
 | `catalog` | a | không | `POST /v1/admin/templates/sync` đổi alias template của cluster (chấp nhận: lane kia tạo VM từ template cùng lúc, rủi ro thấp) |
-| `network` | a | tạo network của lane (một slot); NET-11, NET-24 nâng `maxNetworks`, NET-13 đặt `maxPublicIpv6` = số network IPv6 đang có, trả lại | NET-11, NET-12 lấy /64 IPv6 từ khối của cluster |
+| `network` | a | tạo network của lane (một slot); NET-11, NET-24, NET-28 nâng `maxNetworks`, NET-13 đặt `maxPublicIpv6` = số network IPv6 đang có, trả lại | NET-11, NET-12 lấy /64 IPv6 từ khối của cluster |
 | `firewall` | a | FW-10, FW-11 nâng `maxNetworks` cho network thứ hai, FW-11 đặt `maxFirewallRulesPerNetwork` = 0, trả lại | không (cap 20 rule mặc định) |
 | `vm` | a | VM-15 đặt `maxVms` = số VM đang đếm + 1, VM-26 đặt `maxVms` = 0, SSH-07 đặt `maxSshKeys` = số khoá đã lưu, trả lại | không |
 | `vm-snapshot` | a | VMS-12 đặt `maxVmSnapshotsPerVm` = 0, trả lại | không (cap 3 mặc định) |
@@ -99,7 +99,7 @@ Luật rút ra, ghi ở `lanes.json`: `billing`↔`concurrency` (cùng ví `admi
 - Realm prd có `admin-test` và `beta-user`, chưa có `beta-user-2` ⇒ trên prd chạy một lane (`run-module.sh` từng module theo thứ tự README); máy hai lane (`lanes.json`, `run-lanes.py`) giữ nguyên.
 - `config.json` của portal prd không có `topUpEnabled` (prd không nhận thanh toán) ⇒ UI-07, UI-18 gọi `test.skip` kèm lý do `topUpEnabled` (report ghi N/A); UI-06 đo không có mục Receipts. `POST /v1/tenant/topups` không đọc `topUpEnabled` ⇒ ADM-08 vẫn tạo topup của nó qua API.
 - Cap per-resource đọc từ hằng mặc định của `TenantQuota` (20 rule/network, 3 snapshot/VM, 3 snapshot/volume) vì không API nào đọc được. Cap volume (10) nay `GET /v1/tenant` trả ở `maxVolumes`, nhưng spec VOL-05 vẫn dùng hằng. Tenant test có cap khác ⇒ FW-04, VMS-03, VOL-05, VOL-10 đỏ có chủ ý — đọc cap bằng SQL (`L-x` của release) trước khi chạy.
-- Mọi case có ghi quota trong bảng ở mục trên (NET-11, NET-13, NET-24, FW-10, FW-11, VM-15, VM-26, SSH-07, VMS-12, VOL-15, VOL-16, TEN-02, TEN-08, LB-15, CC-05…CC-12, ADM-13, `load-balancer`, `portal-ui`) đổi quota của tenant lane rồi trả lại ngay và trong `afterAll`, trừ: NET-11 để `maxNetworks` đã nâng qua NET-12, trả ở `finally` của NET-13 và trong `afterAll`; ADM-13, `load-balancer` và `portal-ui` chỉ trong `afterAll`. Pod bị giết giữa chừng ⇒ quota lệch: SMOKE-04 log quota đầu mỗi lượt để so.
+- Mọi case có ghi quota trong bảng ở mục trên (NET-11, NET-13, NET-24, NET-28, FW-10, FW-11, VM-15, VM-26, SSH-07, VMS-12, VOL-15, VOL-16, TEN-02, TEN-08, LB-15, CC-05…CC-12, ADM-13, `load-balancer`, `portal-ui`) đổi quota của tenant lane rồi trả lại ngay và trong `afterAll`, trừ: NET-11 để `maxNetworks` đã nâng qua NET-12, trả ở `finally` của NET-13 và trong `afterAll`; ADM-13, `load-balancer` và `portal-ui` chỉ trong `afterAll`. Pod bị giết giữa chừng ⇒ quota lệch: SMOKE-04 log quota đầu mỗi lượt để so.
 - FW-02, VMS-04, VMS-05 đọc trạng thái ngay sau request: cửa sổ là tới khi worker lease lệnh (poll 2 s) cộng thời gian provider làm — đỏ ở đây phải đối chiếu log trước khi ghi FINDING.
 - CAT-05 đọc `/v1/os-images` trước khi CAT-06 sync, nên cần image đã có sẵn trên cluster.
 - `billing/seed-invoices.sql` mỗi lượt để lại trên `admin-test` một hoá đơn `New` 900.000.000 ₫ (BIL-06) — quá hạn sau 6 ngày, cộng dồn vào công nợ của `admin-test` trong receivables. Trên prd nó là một `L-x`, chỉ tới khách thật đầu tiên.

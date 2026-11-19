@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { randomBytes, randomUUID } from 'node:crypto'
+import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
 import * as http from 'node:http'
 import * as https from 'node:https'
 import type { Socket } from 'node:net'
@@ -277,6 +277,36 @@ async function everyThirtySeconds(ws: Ws, send: () => Promise<void>, seen: () =>
   return seen()
 }
 
+// A fresh ed25519 public key in OpenSSH form (RFC 8709: string "ssh-ed25519", string the 32-byte key), its private half
+// discarded: the key additions below need a key of the tenant, never a login with it (CLI-22 logs in with an added key).
+function newEd25519PublicKey(comment: string): string {
+  const raw = generateKeyPairSync('ed25519').publicKey.export({ format: 'der', type: 'spki' }).subarray(-32)
+  const field = (bytes: Buffer): Buffer => {
+    const length = Buffer.alloc(4)
+    length.writeUInt32BE(bytes.length)
+    return Buffer.concat([length, bytes])
+  }
+  return `ssh-ed25519 ${Buffer.concat([field(Buffer.from('ssh-ed25519')), field(raw)]).toString('base64')} ${comment}`
+}
+
+function keyAdditionShape(a: any): string {
+  return `status=${a.status} restartNeeded=${a.restartNeeded} reason=${a.requestFailureReason}`
+}
+
+async function getKeyAddition(vmId: string, id: string): Promise<any> {
+  return get('tenant', `/v1/tenant/vms/${vmId}/key-additions/${id}`)
+}
+
+// Until the addition leaves Adding: the worker gives up after five leases with backoff, about 1.5 minutes
+// (titan-ops architecture/provider-commands.md#retry-on-workflow).
+async function waitKeyAddition(label: string, vmId: string, id: string): Promise<any> {
+  return pollUntil(label, () => getKeyAddition(vmId, id), (a) => a.status !== 'Adding', keyAdditionShape)
+}
+
+async function listKeyAdditions(vmId: string): Promise<any[]> {
+  return await get('tenant', `/v1/tenant/vms/${vmId}/key-additions`) as any[]
+}
+
 function passwordOf(length: number): string {
   const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
   const bytes = randomBytes(length)
@@ -343,7 +373,7 @@ async function consoleRefusedAtTheLimit(vmId: string, vmName: string): Promise<v
   expect(countOf(await activityOf(vmName), 'vm.console_requested')).toBe(before)
 }
 
-// Cases VM-01..13, VM-15..19, VM-21, VM-22, VM-26, VM-27, VM-29, VM-31..34, VM-36, VM-37, SSH-08, SSH-09 and CSL-01..06 of plan.md,
+// Cases VM-01..13, VM-15..19, VM-21, VM-22, VM-26, VM-27, VM-29, VM-31..34, VM-36, VM-37, SSH-08..13 and CSL-01..06 of plan.md,
 // plus ACT-01/ACT-03/ACT-04 for VMs. VM-14 is measured over the Internet in Phase 4, VM-30 is NOT COVERED, and VM-20,
 // VM-23..25, VM-28 and VM-35 read the Incus host. Create checks run in this order
 // (OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync):
@@ -369,6 +399,22 @@ test.describe.serial('vm', () => {
   // CSL-04's session, still open for CSL-05.
   let consoleSession: Ws | null = null
   const opened: Ws[] = []
+  // SSH-10..13: the key every addition adds, saved for this module and removed in afterAll; SSH-10's first addition.
+  const keyName = `rg-keyadd-${RUN}`
+  let keyK = ''
+  let additionA = ''
+  // VM-18's VM, deleted by SSH-13 while an addition waits.
+  let vmAgain = ''
+
+  async function postAddition(vmId: string, sshKeyIds: string[], as: 'tenant' | 'admin' = 'tenant') {
+    return call(as, 'POST', `/v1/tenant/vms/${vmId}/key-additions`, { sshKeyIds }, newKey())
+  }
+
+  async function addKeyK(): Promise<string> {
+    const reply = await call('tenant', 'POST', '/v1/tenant/ssh-keys', { name: keyName, publicKey: newEd25519PublicKey(keyName) }, newKey())
+    expectStatus(reply, 201)
+    return bodyOf(reply).id as string
+  }
 
   test.beforeAll(async ({ browser }) => {
     test.setTimeout(10 * 60_000)
@@ -398,6 +444,11 @@ test.describe.serial('vm', () => {
     for (const id of made) {
       steps.push([`vm ${id}`, () => deleteVmAndWait(id)])
     }
+    steps.push(['ssh key of SSH-10..13', async () => {
+      for (const key of (await get('tenant', '/v1/tenant/ssh-keys') as any[]).filter((k) => k.name === keyName)) {
+        expectStatus(await call('tenant', 'DELETE', `/v1/tenant/ssh-keys/${key.id}`), 204)
+      }
+    }])
     steps.push(['sessions', closeSessions])
     await cleanUp(steps)
   })
@@ -564,6 +615,89 @@ test.describe.serial('vm', () => {
     expect(countOf(await activityOf(nameA), 'vm.ssh_requested') - before, 'one vm.ssh_requested per 101, none per refusal').toBe(1)
   })
 
+  // titan-ops features/vm/user-stories.md#us-vm-add-key · titan-ops features/vm/design.md#vm-key-addition ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.KeyAdditions.cs (AddKeys: only Running, the VM's status
+  // untouched; KeyAdditionSucceeded) · OpenViCloud/titan-incus-worker:resource/vmkeyaddition/create.go ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Compute/VmKeyAddition/Contracts/VmKeyAdditionQueryResult.cs ·
+  // ACT-01: one vm.add_keys_requested and one vm.keys_added per addition (titan-ops features/activity/design.md#request-and-outcome-names).
+  // After SSH-09's first 101, so vmA's guest agent is up. restartNeeded true (a VM made before vendor-data always wrote
+  // the sshd config) is NOT COVERED: every VM made today has the file.
+  test('SSH-10 adding a saved key to a running VM is 202 {keyAdditionId}, then Added without a restart; again with the same key, Added again', async () => {
+    test.setTimeout(10 * 60_000)
+    keyK = await addKeyK()
+    const vm = await getVm(vmA)
+    log(`SSH-10 vmA status=${vm.status}`)
+    test.skip(vm.status !== 'Running', `vmA is ${vm.status}: the route takes only Running`)
+    for (const round of [1, 2]) {
+      const before = await activityOf(nameA)
+      const startedAt = Date.now()
+      const reply = await postAddition(vmA, [keyK])
+      expectStatus(reply, 202)
+      expect(Object.keys(bodyOf(reply))).toEqual(['keyAdditionId'])
+      const id = bodyOf(reply).keyAdditionId as string
+      if (round === 1) {
+        additionA = id
+      }
+      const done = await waitKeyAddition(`SSH-10 round ${round}`, vmA, id)
+      log(`SSH-10 round ${round} ${id} ${keyAdditionShape(done)} after ${Math.round((Date.now() - startedAt) / 1000)} s`)
+      expect(done.status).toBe('Added')
+      expect(done.sshKeyIds).toEqual([keyK])
+      expect(done.restartNeeded).toBe(false)
+      expect(Date.parse(done.createdAt)).not.toBeNaN()
+      expect(done.requestFailureReason).toBeNull()
+      const list = await listKeyAdditions(vmA)
+      expect(list[0]?.id, 'the list is newest first').toBe(id)
+      const after = await activityOf(nameA)
+      log(`ACT-01 key addition ${round} on ${nameA}: ${after.join(', ')}`)
+      expect(countOf(after, 'vm.add_keys_requested') - countOf(before, 'vm.add_keys_requested')).toBe(1)
+      expect(countOf(after, 'vm.keys_added') - countOf(before, 'vm.keys_added')).toBe(1)
+      expect((await getVm(vmA)).status, "the VM's status does not move for a key addition").toBe('Running')
+    }
+  })
+
+  // titan-ops features/vm/user-stories.md#us-vm-add-key · titan-ops features/vm/design.md#vm-key-addition ·
+  // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/VmKeyAdditions/CreateKeyAdditionValidator.cs (1 to
+  // MaxSshKeysPerKeyAddition distinct ids) · OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/VmKeyAddition/CreateVmKeyAdditionCommandHandler.cs
+  // (HandleAsync: the caller's VM, then the caller's keys, then AddKeys) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.KeyAdditions.cs
+  // (EnsureNoKeyAdditionWaiting). Parts (a), (b), (d) on vmA while it runs; (c) and (e) need a Stopped VM and a second
+  // VM: the SSH-11 case after VM-04.
+  test('SSH-11 (a) no key, 11 or an unknown key are 400, 400, 404; (b) another tenant 404 VM_NOT_FOUND; (d) a second addition while one is Adding is 422 VM_INVALID_STATUS', async () => {
+    test.setTimeout(10 * 60_000)
+    test.skip(keyK === '' || (await getVm(vmA)).status !== 'Running', 'vmA is not Running or SSH-10 saved no key')
+    const refused = async (label: string, send: () => ReturnType<typeof call>, status: number, code: string) => {
+      const rows = (await listKeyAdditions(vmA)).length
+      const requested = countOf(await activityOf(nameA), 'vm.add_keys_requested')
+      const reply = await send()
+      log(`SSH-11 ${label} → ${reply.status} ${reply.text.slice(0, 160)}`)
+      expectError(reply, status, code)
+      expect((await listKeyAdditions(vmA)).length, `${label}: no addition row`).toBe(rows)
+      expect(countOf(await activityOf(nameA), 'vm.add_keys_requested'), `${label}: no vm.add_keys_requested`).toBe(requested)
+    }
+    await refused('(a) []', () => postAddition(vmA, []), 400, 'VALIDATION_ERROR')
+    await refused('(a) 11 unknown ids', () => postAddition(vmA, Array.from({ length: 11 }, () => randomUUID())), 400, 'VALIDATION_ERROR')
+    await refused('(a) one unknown id', () => postAddition(vmA, [randomUUID()]), 404, 'SSH_KEY_NOT_FOUND')
+    await refused('(b) admin-test', () => postAddition(vmA, [keyK], 'admin'), 404, 'VM_NOT_FOUND')
+
+    const rows = (await listKeyAdditions(vmA)).length
+    const requested = countOf(await activityOf(nameA), 'vm.add_keys_requested')
+    const first = await postAddition(vmA, [keyK])
+    const second = await postAddition(vmA, [keyK])
+    log(`SSH-11 (d) first → ${first.status}, second → ${second.status} ${second.text.slice(0, 160)}`)
+    expectStatus(first, 202)
+    const firstId = bodyOf(first).keyAdditionId as string
+    if (second.status === 202) {
+      // The first had already left Adding: the second is a fair addition of its own.
+      log('SSH-11 (d) the first addition ended before the second POST: recorded, not red')
+      test.info().annotations.push({ type: 'note', description: '(d) the first addition ended before the second POST' })
+      await waitKeyAddition('SSH-11 (d) second', vmA, bodyOf(second).keyAdditionId)
+    } else {
+      expectError(second, 422, 'VM_INVALID_STATUS')
+      expect((await listKeyAdditions(vmA)).length, '(d) the refused second adds no row').toBe(rows + 1)
+      expect(countOf(await activityOf(nameA), 'vm.add_keys_requested') - requested, '(d) one vm.add_keys_requested, for the first').toBe(1)
+    }
+    expect((await waitKeyAddition('SSH-11 (d) first', vmA, firstId)).status).toBe('Added')
+  })
+
   // OpenViCloud/titan-control-plane:Titan.Application/Commands/Compute/Vm/CreateVmCommandHandler.cs HandleAsync (ExistsByNameAsync ⇒ VM_NAME_TAKEN)
   test('VM-10 a second VM with a live name is 409 VM_NAME_TAKEN', async () => {
     const { smallTier, clusterId, templateId } = await envOf()
@@ -614,6 +748,39 @@ test.describe.serial('vm', () => {
     expect(vm.vmOfferingId).toBe(otherTier)
   })
 
+  // titan-ops features/vm/user-stories.md#us-vm-add-key AC-4 · titan-ops features/vm/design.md#vm-key-addition ·
+  // OpenViCloud/titan-incus-worker:resource/vmkeyaddition/report.go (reasonAgentNotRunning, reasonCreateFailed) ·
+  // titan-ops architecture/provider-commands.md#retry-on-workflow. Right after VM-02, before any SSH session to vmB, so
+  // its guest agent may not be up yet; an addition that came through (the agent was up in time) is recorded, not red.
+  test('SSH-12 a key addition to a VM whose guest agent is not up yet ends Failed with the still-starting reason', async () => {
+    test.setTimeout(10 * 60_000)
+    const nameNow = (await getVm(vmB)).name as string
+    const vm = await getVm(vmB)
+    log(`SSH-12 vmB first read status=${vm.status}`)
+    test.skip(keyK === '', 'SSH-10 saved no key')
+    test.skip(vm.status !== 'Running', `vmB is ${vm.status}: the route takes only Running`)
+    const before = await activityOf(nameNow)
+    const reply = await postAddition(vmB, [keyK])
+    expectStatus(reply, 202)
+    const id = bodyOf(reply).keyAdditionId as string
+    const done = await waitKeyAddition('SSH-12', vmB, id)
+    const after = await activityOf(nameNow)
+    log(`SSH-12 ${id} ${keyAdditionShape(done)} requestFailedAt=${done.requestFailedAt}; ACT-01 on ${nameNow}: ${after.join(', ')}`)
+    expect(runs(await getVm(vmB)), 'vmB stays Running or Ready').toBe(true)
+    expect(countOf(after, 'vm.add_keys_requested') - countOf(before, 'vm.add_keys_requested')).toBe(1)
+    if (done.status === 'Added') {
+      log('SSH-12 the guest agent was up in time: Added, recorded, not red')
+      test.info().annotations.push({ type: 'note', description: 'the guest agent was up in time: the addition was Added' })
+      expect(countOf(after, 'vm.keys_added') - countOf(before, 'vm.keys_added')).toBe(1)
+      return
+    }
+    expect(done.status).toBe('Failed')
+    expect(done.requestFailureReason).toBe('The VM is still starting, so the key could not be added yet. Try again in a few minutes.')
+    expect(done.requestFailureReason).not.toBe('Adding the key failed due to a system error. Please try again or contact support.')
+    expect(Date.parse(done.requestFailedAt)).not.toBeNaN()
+    expect(countOf(after, 'vm.add_keys_failed') - countOf(before, 'vm.add_keys_failed')).toBe(1)
+  })
+
   // Public IPv6 is the network's (titan-ops features/network/design.md#ipv6-public): the VM has no switch, and on the run
   // network (no public IPv6) the reconciler reports no global IPv6 — OpenViCloud/titan-incus-worker:resource/vm/reconcile.go
   test('VM-13 a VM on a network without public IPv6 has no IPv6 switch and no public IPv6 address', async () => {
@@ -639,6 +806,29 @@ test.describe.serial('vm', () => {
     const vm = await getVm(vmA)
     expect(vm.status).toBe('Stopped')
     expect(countOf(await activityOf(nameA), 'vm.stop_requested')).toBe(1)
+  })
+
+  // titan-ops features/vm/user-stories.md#us-vm-add-key · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.KeyAdditions.cs
+  // (EnsureCanAddKeys: only Running; GetKeyAddition: one of another VM answers like a missing one) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Compute/VmKeyAddition/GetVmKeyAdditionQueryHandler.cs (HandleAsync).
+  // Parts (c) and (e): vmA is Stopped since VM-03, vmB is the run's other VM.
+  test('SSH-11 (c) a Stopped VM is 422 VM_INVALID_STATUS; (e) an unknown addition, or one of another VM, is 404 VM_KEY_ADDITION_NOT_FOUND', async () => {
+    test.skip(keyK === '', 'SSH-10 saved no key')
+    expect((await getVm(vmA)).status).toBe('Stopped')
+    const rows = (await listKeyAdditions(vmA)).length
+    const requested = countOf(await activityOf(nameA), 'vm.add_keys_requested')
+    const stopped = await postAddition(vmA, [keyK])
+    log(`SSH-11 (c) Stopped vmA → ${stopped.status} ${stopped.text.slice(0, 160)}`)
+    expectError(stopped, 422, 'VM_INVALID_STATUS')
+    expect((await listKeyAdditions(vmA)).length, '(c) no addition row').toBe(rows)
+    expect(countOf(await activityOf(nameA), 'vm.add_keys_requested'), '(c) no vm.add_keys_requested').toBe(requested)
+
+    expectError(await call('tenant', 'GET', `/v1/tenant/vms/${vmA}/key-additions/${randomUUID()}`), 404, 'VM_KEY_ADDITION_NOT_FOUND')
+    if (additionA === '') {
+      log('SSH-11 (e) SSH-10 made no addition: the other-VM read is not measured')
+    } else {
+      expectError(await call('tenant', 'GET', `/v1/tenant/vms/${vmB}/key-additions/${additionA}`), 404, 'VM_KEY_ADDITION_NOT_FOUND')
+    }
   })
 
   // titan-ops features/vm/design.md#vm-console · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Vm/CreateVmConsoleTicketEndpoint.cs
@@ -1126,6 +1316,39 @@ test.describe.serial('vm', () => {
     await waitVm('VM-18 has an instance', again, (v) => ['Running', 'Ready', 'Stopped', 'Frozen', 'Error'].includes(v.status))
     const reply = await call('tenant', 'GET', `/v1/tenant/vms/${again}`)
     expect(bodyOf(reply).name).toBe(renamed)
+    vmAgain = again
+  })
+
+  // titan-ops features/vm/user-stories.md#us-vm-add-key AC-6 · titan-ops features/vm/design.md#vm-key-addition ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Entities/VmKeyAddition.cs (EndWithItsVm: VM_DELETED) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/ComputeOwnership.cs (RequireVmAsync: a Deleted VM
+  // still reads). The name is the one VM-16's Deleted VM had, so the feed is compared before and after.
+  test('SSH-13 deleting a VM while a key addition is Adding ends it Failed VM_DELETED, without vm.add_keys_failed', async () => {
+    test.setTimeout(15 * 60_000)
+    test.skip(keyK === '' || vmAgain === '', 'SSH-10 saved no key or VM-18 made no VM')
+    const vm = await getVm(vmAgain)
+    log(`SSH-13 VM-18's VM first read status=${vm.status}`)
+    test.skip(vm.status !== 'Running', `the VM is ${vm.status}: the route takes only Running`)
+    const before = await activityOf(renamed)
+    const reply = await postAddition(vmAgain, [keyK])
+    expectStatus(reply, 202)
+    const id = bodyOf(reply).keyAdditionId as string
+    const waiting = await getKeyAddition(vmAgain, id)
+    log(`SSH-13 ${id} before the delete: ${keyAdditionShape(waiting)}`)
+    if (waiting.status !== 'Adding') {
+      log('SSH-13 the addition ended before the DELETE: recorded, not red')
+      test.info().annotations.push({ type: 'note', description: `the addition was ${waiting.status} before the DELETE` })
+      await deleteVmAndWait(vmAgain)
+      return
+    }
+    expectStatus(await call('tenant', 'DELETE', `/v1/tenant/vms/${vmAgain}`), 202)
+    await waitVm('SSH-13 deleted', vmAgain, (v) => v.status === 'Deleted')
+    const ended = await getKeyAddition(vmAgain, id)
+    const after = await activityOf(renamed)
+    log(`SSH-13 after the delete: ${keyAdditionShape(ended)}; feed on ${renamed}: ${after.join(', ')}`)
+    expect(ended.status).toBe('Failed')
+    expect(ended.requestFailureReason).toBe('VM_DELETED')
+    expect(countOf(after, 'vm.add_keys_failed') - countOf(before, 'vm.add_keys_failed'), 'no vm.add_keys_failed: the delete ended it').toBe(0)
   })
 
   // titan-ops features/activity/design.md#activity-data-and-route · OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/ActivityEvent/ListActivityEventsQueryHandler.cs

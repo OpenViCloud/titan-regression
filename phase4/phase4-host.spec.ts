@@ -54,6 +54,55 @@ function userDataOf(label: string, marker: boolean, extraKey: string | null): st
   return lines.join('\n') + '\n'
 }
 
+// A loop that appends one line every 15 s to log: `<UTC time> <check>=ok|fail … <nc's own words>`, so that a tail of it
+// on the host says whether the VM's packets went out and their answers came back. Only the checks change per VM.
+function loopUserData(log: string, checks: string[]): string {
+  const script = [
+    '#!/bin/sh',
+    'set -f',
+    'while true; do',
+    ...checks.map((c) => `  ${c}`),
+    '  sleep 15',
+    'done',
+  ]
+  return ['#cloud-config', 'write_files:', '  - path: /usr/local/bin/rg-loop', "    permissions: '0755'", '    content: |',
+    ...script.map((l) => `      ${l}`),
+    'runcmd:', `  - [sh, -c, "nohup /usr/local/bin/rg-loop >>${log} 2>&1 &"]`].join('\n') + '\n'
+}
+
+// FW-08's vm A and vm B: ping and TCP 22 to the host on the uplink (nc -z sends no data)
+function outboundUserData(host: string): string {
+  return loopUserData('/var/log/rg-out.log', [
+    `if ping -6 -c1 -W3 ${host} >/dev/null 2>&1; then p=ok; else p=fail; fi`,
+    `n=$(nc -6 -zv -w5 ${host} 22 2>&1); if [ $? = 0 ]; then t=ok; else t=fail; fi`,
+    `printf '%s ping6=%s tcp22=%s %s\\n' "$(date -u +%FT%TZ)" "$p" "$t" "$(echo $n)"`,
+  ])
+}
+
+// FW-08's vm B2: ping to vm B's IPv4 on their network
+function eastUserData(ipv4: string): string {
+  return loopUserData('/var/log/rg-east.log', [
+    `if ping -c1 -W3 ${ipv4} >/dev/null 2>&1; then p=ok; else p=fail; fi`,
+    `printf '%s ping4=%s\\n' "$(date -u +%FT%TZ)" "$p"`,
+  ])
+}
+
+// The uplink's gateway, ::1 of the first /64 of the cluster's /56 (written as its first address): OVH's router on
+// singapore01 (titan-ops infra/incus/design.md#ipv6-address-plan), the titan-incus host on dev
+// (OpenViCloud/titan-local-cluster:docs/network.md, `ovnup`)
+function gatewayOf(block: string): string {
+  const address = block.split('/')[0]
+  const [head, tail] = address.includes('::') ? address.split('::') : [address, '']
+  const left = head === '' ? [] : head.split(':')
+  const right = tail === '' ? [] : tail.split(':')
+  const groups = [...left, ...Array(8 - left.length - right.length).fill('0'), ...right].map((g) => parseInt(g, 16))
+  groups[7] += 1
+  return groups.map((g) => g.toString(16)).join(':')
+}
+
+// Where the checks "from outside the network" run (plan.md FW-08, LB-18): the runner's pod has no IPv6 route out
+const FROM_OUTSIDE = 'dev: python3 phase4.py host (on titan-incus); release env: python3 phase4.py host --local (over the Internet; this machine without IPv6 => N/A)'
+
 test.describe.serial('phase4 host', () => {
   test.describe.configure({ timeout: 60 * 60_000 })
 
@@ -80,6 +129,11 @@ test.describe.serial('phase4 host', () => {
   let refusedVmId = ''
   let vol2Id = ''
   let vol2SnapId = ''
+  // What FW-08 and LB-18 made and have not yet seen deleted: their finally deletes it, afterAll whatever that left
+  const extraRules: Array<{ network: string, rule: string }> = []
+  const extraLbs: string[] = []
+  const extraVms: string[] = []
+  const extraNets: string[] = []
 
   const readLb = () => get('tenant', `/v1/tenant/load-balancers/${lbId}`)
   const rulesOf = () => get('tenant', `/v1/tenant/networks/${net6}/firewall-rules`) as Promise<any[]>
@@ -93,6 +147,108 @@ test.describe.serial('phase4 host', () => {
     return (bodyOf(reply) as any[]).find((r) => r.id === id) ?? { status: 'Gone' }
   }
   const adminRow = async () => (await get('admin', '/v1/tenants') as any[]).find((t) => t.id === tenantId)
+  const liveOf = async (path: string) => (await get('tenant', path) as any[]).filter((r) => !OUTSIDE.has(r.status))
+  const clusterOf = async () => {
+    const { clusterId } = await envOf()
+    const settings = (await get('admin', '/v1/admin/clusters') as any[]).find((c) => c.clusterId === clusterId)?.providerSettings
+    return { block: (settings?.ipv6Block ?? null) as string | null, uplink: (settings?.ovnUplinkNetwork ?? null) as string | null }
+  }
+
+  // A rule of its own, 201 {ruleId}, then enabled (plan.md FW-01)
+  async function addRule(network: string, rule: Record<string, unknown>): Promise<string> {
+    const made = await call('tenant', 'POST', `/v1/tenant/networks/${network}/firewall-rules`, rule, newKey())
+    expectStatus(made, 201)
+    const id = bodyOf(made).ruleId as string
+    extraRules.push({ network, rule: id })
+    const read = async () => ((await get('tenant', `/v1/tenant/networks/${network}/firewall-rules`)) as any[]).find((r) => r.id === id) ?? { status: 'Gone' }
+    await pollUntil(`rule ${id} enabled`, read, (r) => r.status === 'enabled', existenceShape)
+    return id
+  }
+
+  // An IPv6 network of its own, Created; policies only when given
+  async function addNetwork(name: string, cidr: string, policies: Record<string, number> = {}): Promise<any> {
+    const { clusterId } = await envOf()
+    const reply = await call('tenant', 'POST', '/v1/tenant/networks', { name, clusterId, cidr, enablePublicIpv6: true, ...policies }, newKey())
+    expectStatus(reply, 202)
+    const id = bodyOf(reply).networkId as string
+    extraNets.push(id)
+    return waitNetwork(`network ${name} usable`, id, networkUsable)
+  }
+
+  // Raises the caps FW-08 or LB-18 needs above what the tenant holds now; returns the quota to give back
+  async function raiseFor(more: { vms: number, networks: number, lbs: number }): Promise<Record<string, number>> {
+    const row = await adminRow()
+    const before = { maxVms: row.maxVms, maxNetworks: row.maxNetworks, maxPublicIpv6: row.maxPublicIpv6, maxLoadBalancers: row.maxLoadBalancers }
+    const nets = await liveOf('/v1/tenant/networks')
+    const vms = (await liveOf('/v1/tenant/vms')).length
+    const lbs = (await liveOf('/v1/tenant/load-balancers')).length
+    const v6 = nets.filter((n) => n.publicIpv6Subnet !== null).length
+    const raised = {
+      maxVms: Math.max(before.maxVms, vms + more.vms),
+      maxNetworks: Math.max(before.maxNetworks, nets.length) + more.networks,
+      maxPublicIpv6: Math.max(before.maxPublicIpv6, v6 + more.networks),
+      maxLoadBalancers: Math.max(before.maxLoadBalancers, lbs + more.lbs),
+    }
+    log(`live vms=${vms} networks=${nets.length} ipv6=${v6} lbs=${lbs}; quota ← ${JSON.stringify(raised)}`)
+    expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/quota`, raised), 204)
+    return before
+  }
+
+  // Rules, then load balancers (a backend VM and its network refuse a delete while one asks for them), VMs, networks;
+  // every one gets its turn, and leaves its list only once deleted
+  async function dropExtras(quota: Record<string, number> | null): Promise<void> {
+    const forget = <T>(list: T[], item: T) => {
+      list.splice(list.indexOf(item), 1)
+    }
+    const steps: Array<[string, () => Promise<void>]> = []
+    for (const r of [...extraRules]) {
+      steps.push([`rule ${r.rule}`, async () => {
+        const read = async () => ((await get('tenant', `/v1/tenant/networks/${r.network}/firewall-rules`)) as any[]).find((x) => x.id === r.rule) ?? { status: 'Gone' }
+        const rule = await pollUntil('cleanup: rule at rest', read, (x) => !RULE_PENDING.has(x.status) || x.status === 'Deleting', existenceShape)
+        if (!GONE.has(rule.status) && rule.status !== 'Deleting') {
+          expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${r.network}/firewall-rules/${r.rule}`), 204)
+        }
+        await pollUntil('cleanup: rule gone', read, (x) => GONE.has(x.status), existenceShape)
+        forget(extraRules, r)
+      }])
+    }
+    for (const id of [...extraLbs]) {
+      steps.push([`load balancer ${id}`, async () => {
+        const read = () => get('tenant', `/v1/tenant/load-balancers/${id}`)
+        const lb = await read()
+        if (lb.status !== 'Deleting' && lb.status !== 'Deleted') {
+          await pollUntil('cleanup: lb at rest', read, (x) => !LB_PENDING.has(x.status), existenceShape)
+          expectStatus(await call('tenant', 'DELETE', `/v1/tenant/load-balancers/${id}`), 202)
+        }
+        await pollUntil('cleanup: lb deleted', read, (x) => x.status === 'Deleted', existenceShape)
+        forget(extraLbs, id)
+      }])
+    }
+    for (const id of [...extraVms]) {
+      steps.push([`vm ${id}`, async () => {
+        await deleteVmAndWait(id)
+        forget(extraVms, id)
+      }])
+    }
+    for (const id of [...extraNets]) {
+      steps.push([`network ${id}`, async () => {
+        const n = await get('tenant', `/v1/tenant/networks/${id}`)
+        if (n.status !== 'Deleting' && n.status !== 'Deleted') {
+          await waitNetwork('cleanup: network at rest', id, (x) => x.status !== 'Creating')
+          expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${id}`), 202)
+        }
+        await waitNetwork('cleanup: network deleted', id, (x) => x.status === 'Deleted')
+        forget(extraNets, id)
+      }])
+    }
+    if (quota !== null) {
+      steps.push(['quota', async () => {
+        expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/quota`, quota), 204)
+        log(`quota given back: ${JSON.stringify(quota)}`)
+      }])
+    }
+    await cleanUp(steps)
+  }
 
   test.beforeAll(async ({ browser }) => {
     test.setTimeout(30 * 60_000)
@@ -118,6 +274,7 @@ test.describe.serial('phase4 host', () => {
       ['vm-35 hand-off', async () => {
         fs.rmSync(VM35_HAND_OFF, { recursive: true, force: true })
       }],
+      ['FW-08 and LB-18 leftovers', () => dropExtras(null)],
       ['load balancer', async () => {
         if (lbId === '') {
           return
@@ -575,5 +732,128 @@ test.describe.serial('phase4 host', () => {
     const actions = await activityOf(`rg-lbp4-${RUN}`)
     log(`OBS-12 activity: ${actions.join(', ')}`)
     expect(countOf(actions, 'load_balancer.deleted')).toBe(1)
+  })
+
+  // plan.md FW-08 (titan-ops features/network/design.md#firewall-default-policy, #ipv6-public;
+  // OpenViCloud/titan-incus-worker:resource/network/create.go DefaultAction, defaultActionsOf): a network made without
+  // policies drops what comes from outside it and lets its VMs out, and VMs of one network still reach each other; a
+  // network sent Allow/Allow lets both through. The spec checks the policies the API reads back; the measured parts
+  // are the agent's commands at fw08-before and fw08-after-rule, from outside the network and in-guest log reads.
+  test('FW-08 a network made without policies: Deny in, Allow out; a TCP 22 rule opens 22 only; VMs of one network reach each other', async () => {
+    test.setTimeout(2 * HOLD_MS + 40 * 60_000)
+    const { block, uplink } = await clusterOf()
+    log(`FW-08 ipv6Block=${block} uplink=${uplink}`)
+    test.skip(!block, 'the cluster has no IPv6 block')
+    const { smallTier } = await envOf()
+    const gateway = gatewayOf(block!)
+    const project = projectOf(tenantId)
+    let quota: Record<string, number> | null = null
+    try {
+      quota = await raiseFor({ vms: 3, networks: 2, lbs: 0 })
+      const netA = await addNetwork(`rg-netfwa-${RUN}`, '10.81.0.0/24', { defaultIngressPolicy: 0, defaultEgressPolicy: 0 })
+      const netB = await addNetwork(`rg-netfwb-${RUN}`, '10.82.0.0/24')
+      log(`FW-08 A ingress=${netA.defaultIngressPolicy} egress=${netA.defaultEgressPolicy}; B ingress=${netB.defaultIngressPolicy} egress=${netB.defaultEgressPolicy}`)
+      expect([netA.defaultIngressPolicy, netA.defaultEgressPolicy]).toEqual(['Allow', 'Allow'])
+      expect([netB.defaultIngressPolicy, netB.defaultEgressPolicy]).toEqual(['Deny', 'Allow'])
+      const vmFa = await createVm(`rg-vmfwa-${RUN}`, smallTier, netA.id, { userData: outboundUserData(gateway) })
+      extraVms.push(vmFa)
+      const vmFb = await createVm(`rg-vmfwb-${RUN}`, smallTier, netB.id, { userData: outboundUserData(gateway) })
+      extraVms.push(vmFb)
+      const b = await waitVm('FW-08 vm B running with its IPv4', vmFb, (v) => runs(v) && typeof v.ipAddress === 'string')
+      const vmFb2 = await createVm(`rg-vmfwb2-${RUN}`, smallTier, netB.id, { userData: eastUserData(b.ipAddress) })
+      extraVms.push(vmFb2)
+      await waitVm('FW-08 vm A running', vmFa, runs)
+      await waitVm('FW-08 vm B2 running', vmFb2, runs)
+      const ipv6A = (await pollUntil('FW-08 vm A public ipv6', () => getVm(vmFa), (v) => typeof v.publicIpv6Address === 'string', vmShape)).publicIpv6Address
+      const ipv6B = (await pollUntil('FW-08 vm B public ipv6', () => getVm(vmFb), (v) => typeof v.publicIpv6Address === 'string', vmShape)).publicIpv6Address
+      // a few lines of each loop before the hold (cloud-init's runcmd starts it after boot)
+      await sleep(90_000)
+      const [vmA8, vmB8, vmB28] = [incusName('vm', vmFa), incusName('vm', vmFb), incusName('vm', vmFb2)]
+      const outside = (ip: string) => [`ping -6 -c3 ${ip}`, `nc -6 -vz -w 5 ${ip} 22`, `nc -6 -vz -w 5 ${ip} 80`]
+      const tail = (vm: string, file: string) => `incus exec ${vm} --project ${project} -- tail -n 8 ${file}`
+      const go = await hold('fw08-before', {
+        project, networkA: `net-${netA.id}`, networkB: `net-${netB.id}`, vmA: vmA8, vmB: vmB8, vmB2: vmB28,
+        ipv6A, ipv6B, ipv4B: b.ipAddress, uplink, uplinkGateway: gateway,
+        devPrecondition: 'dev only, phase4.py host: ip -6 addr show ovnbr; uplinkGateway absent => FW-08 INCONCLUSIVE',
+        uplinkCheck: `phase4.py host: incus network get ${uplink} ipv6.gateway (should be uplinkGateway/64: the guests' loops target it)`,
+        fromOutside: FROM_OUTSIDE,
+        outside: [...outside(ipv6A), ...outside(ipv6B)],
+        host: [tail(vmA8, '/var/log/rg-out.log'), tail(vmB8, '/var/log/rg-out.log'), tail(vmB28, '/var/log/rg-east.log')],
+        expect: 'A: ping 3 received, 22 succeeded, 80 refused; B: ping 100% loss, 22 and 80 timed out; '
+          + 'rg-out.log of A and B: ping6=ok tcp22=ok; rg-east.log of B2: ping4=ok',
+      })
+      if (!go) {
+        test.skip(true, 'host step not run')
+      }
+      const rule = await addRule(netB.id, { direction: 'Ingress', protocol: 'TCP', startPort: 22, endPort: 22, cidr: '::/0' })
+      // lines of vm B's loop written after the rule is enabled
+      await sleep(45_000)
+      await hold('fw08-after-rule', {
+        project, acl: `acl-${netB.id}`, ruleId: rule, rule: 'Ingress TCP 22 ::/0 on network B, enabled', vmB: vmB8, vmB2: vmB28, ipv6B,
+        fromOutside: FROM_OUTSIDE,
+        outside: outside(ipv6B),
+        host: [tail(vmB8, '/var/log/rg-out.log'), tail(vmB28, '/var/log/rg-east.log')],
+        expect: 'B: 22 succeeded; ping 100% loss, 80 timed out; rg-out.log of B: lines after the rule still ping6=ok tcp22=ok; '
+          + 'rg-east.log of B2: ping4=ok',
+      })
+    } finally {
+      await dropExtras(quota)
+    }
+  })
+
+  // plan.md LB-18 (titan-ops features/load-balancer/design.md#lb-and-vm-network;
+  // titan-ops features/network/design.md#firewall-default-policy): the network's ACL sees a packet after the load
+  // balancer changed its destination, so on a network made without policies the VIP answers only once a rule lets the
+  // target port in. The measured parts are the agent's commands at lb18-before and lb18-after-rule.
+  test('LB-18 a network made without policies: the VIP is silent until an Ingress TCP 8080 rule, then the backend answers', async () => {
+    test.setTimeout(2 * HOLD_MS + 30 * 60_000)
+    const { block } = await clusterOf()
+    log(`LB-18 ipv6Block=${block}`)
+    test.skip(!block, 'the cluster has no IPv6 block')
+    const { smallTier } = await envOf()
+    const project = projectOf(tenantId)
+    let quota: Record<string, number> | null = null
+    try {
+      quota = await raiseFor({ vms: 1, networks: 1, lbs: 1 })
+      const net = await addNetwork(`rg-netlb18-${RUN}`, '10.83.0.0/24')
+      log(`LB-18 network ingress=${net.defaultIngressPolicy} egress=${net.defaultEgressPolicy}`)
+      expect([net.defaultIngressPolicy, net.defaultEgressPolicy]).toEqual(['Deny', 'Allow'])
+      const vm = await createVm(`rg-vmlb18-${RUN}`, smallTier, net.id, { userData: userDataOf('L18', false, null) })
+      extraVms.push(vm)
+      await waitVm('LB-18 backend running', vm, runs)
+      const backend = await pollUntil('LB-18 backend public ipv6', () => getVm(vm), (v) => typeof v.publicIpv6Address === 'string', vmShape)
+      const made = await call('tenant', 'POST', '/v1/tenant/load-balancers', { name: `rg-lb18-${RUN}`, networkId: net.id,
+        listeners: [{ protocol: 'TCP', port: 80, targetPort: 8080 }], backends: [{ vmId: vm }] }, newKey())
+      expectStatus(made, 202)
+      const lb18 = bodyOf(made).loadBalancerId as string
+      extraLbs.push(lb18)
+      const lb = await pollUntil('LB-18 lb on Incus', () => get('tenant', `/v1/tenant/load-balancers/${lb18}`), (r) => r.status === 'Available', existenceShape)
+      // the backend's http.server up (cloud-init's runcmd) and a round of the load balancer's health check
+      await sleep(60_000)
+      const backend18 = incusName('vm', vm)
+      const curl = `curl -6 -g -sS -m 10 http://[${lb.vip}]:80/`
+      const go = await hold('lb18-before', {
+        project, network: `net-${net.id}`, acl: `acl-${net.id}`, vip: lb.vip, listener: 'TCP 80 -> 8080',
+        backend: backend18, backendIpv6: backend.publicIpv6Address,
+        fromOutside: FROM_OUTSIDE,
+        outside: [curl],
+        host: [`incus exec ${backend18} --project ${project} -- ss -ltn`],
+        expect: 'curl: (28) timed out, exit=28 (no answer, not a refusal); ss: a LISTEN line on :8080 (the backend serves; only the ACL drops)',
+      })
+      if (!go) {
+        test.skip(true, 'host step not run')
+      }
+      const rule = await addRule(net.id, { direction: 'Ingress', protocol: 'TCP', startPort: 8080, endPort: 8080, cidr: '::/0' })
+      // a round of the health check after the rule
+      await sleep(30_000)
+      await hold('lb18-after-rule', {
+        project, acl: `acl-${net.id}`, ruleId: rule, rule: 'Ingress TCP 8080 ::/0, enabled', vip: lb.vip,
+        fromOutside: FROM_OUTSIDE,
+        outside: [curl],
+        expect: 'curl prints backend-L18 (the backend\'s page on 8080), exit=0',
+      })
+    } finally {
+      await dropExtras(quota)
+    }
   })
 })

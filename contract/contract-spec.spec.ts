@@ -188,6 +188,11 @@ test.describe.serial('contract-spec', () => {
     // (titan-ops architecture/http-contract.md#create-returns-id), so 202 does not always mean "no body".
     await assertDeclaredCode('CON-10 network create (not exercised here)', 'POST', '/v1/tenant/networks', 202, true)
 
+    // key addition create: 202 with an id-only body; its GET 200 with a body — the codes SSH-10 receives on a running VM
+    // (OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/VmKeyAdditions/CreateKeyAdditionEndpoint.cs Configure: Produces 202)
+    await assertDeclaredCode('CON-10 key addition create (received in SSH-10)', 'POST', '/v1/tenant/vms/{vmId}/key-additions', 202, true)
+    await assertDeclaredCode('CON-10 key addition get (received in SSH-10)', 'GET', '/v1/tenant/vms/{vmId}/key-additions/{keyAdditionId}', 200, true)
+
     // delete rule: 204, no body
     await ruleSettled(ruleId)
     const deleteRuleReply = await call('tenant', 'DELETE', `/v1/tenant/networks/${networkId}/firewall-rules/${ruleId}`)
@@ -207,7 +212,7 @@ test.describe.serial('contract-spec', () => {
   })
 
   // titan-ops features/public-api/design.md#state-enums — every status (VM, network, firewall rule, VM snapshot,
-  // volume, volume snapshot, load balancer, and tenant/invoice/topup) is a value the spec's enum declares for that
+  // VM key addition, volume, volume snapshot, load balancer, and tenant/invoice/topup) is a value the spec's enum declares for that
   // field (null only where the spec marks the field nullable: assertEnumField), and the old currentState/desiredState/currentExistence/desiredExistence/transition fields are
   // gone from every one of those rows. Lists may be empty elsewhere in the run, but the run network + a fresh rule
   // make the network and firewall-rule checks non-empty here.
@@ -269,6 +274,11 @@ test.describe.serial('contract-spec', () => {
           for (const snap of snapshots) {
             assertEnumField(spec, 'VmSnapshotQueryResult', 'status', snap)
             assertNoOldFields('VmSnapshotQueryResult', snap)
+          }
+          const additions = await get('tenant', `${path}/${row.id}/key-additions`) as any[]
+          for (const addition of additions) {
+            assertEnumField(spec, 'VmKeyAdditionQueryResult', 'status', addition)
+            assertNoOldFields('VmKeyAdditionQueryResult', addition)
           }
         }
       }
