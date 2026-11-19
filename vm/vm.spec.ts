@@ -743,15 +743,18 @@ test.describe.serial('vm', () => {
     const { otherTier } = await envOf()
     vmB = await createVm(nameB, otherTier, networkId)
     made.push(vmB)
-    const vm = await waitVm('VM-02', vmB, (v) => runs(v) && v.ipAddress !== null)
+    // Only until it runs: SSH-12 adds a key at this first Running read, before the guest agent is up; the address
+    // is waited for after SSH-12.
+    const vm = await waitVm('VM-02', vmB, (v) => runs(v))
     expect(['Running', 'Ready', 'Stopped', 'Frozen', 'Error']).toContain(vm.status)
     expect(vm.vmOfferingId).toBe(otherTier)
   })
 
   // titan-ops features/vm/user-stories.md#us-vm-add-key · titan-ops features/vm/design.md#vm-key-addition ·
   // OpenViCloud/titan-incus-worker:resource/vmkeyaddition/report.go (reasonAgentNotRunning, reasonCreateFailed) ·
-  // titan-ops architecture/provider-commands.md#retry-on-workflow. Right after VM-02, before any SSH session to vmB, so
-  // its guest agent may not be up yet; an addition that came through (the agent was up in time) is recorded, not red.
+  // titan-ops architecture/provider-commands.md#retry-on-workflow. Right after VM-02's first Running read, before
+  // vmB has an address or any SSH session, so its guest agent may not be up yet; an addition that came through (the
+  // agent was up in time) is recorded, not red.
   test('SSH-12 a key addition to a VM whose guest agent is not up yet ends Failed with the still-starting reason', async () => {
     test.setTimeout(10 * 60_000)
     const nameNow = (await getVm(vmB)).name as string
@@ -779,6 +782,11 @@ test.describe.serial('vm', () => {
     expect(done.requestFailureReason).not.toBe('Adding the key failed due to a system error. Please try again or contact support.')
     expect(Date.parse(done.requestFailedAt)).not.toBeNaN()
     expect(countOf(after, 'vm.add_keys_failed') - countOf(before, 'vm.add_keys_failed')).toBe(1)
+  })
+
+  test('VM-02 the VM of the next tier gets its address', async () => {
+    const vm = await waitVm('VM-02', vmB, (v) => runs(v) && v.ipAddress !== null)
+    expect(vm.ipAddress).not.toBeNull()
   })
 
   // Public IPv6 is the network's (titan-ops features/network/design.md#ipv6-public): the VM has no switch, and on the run

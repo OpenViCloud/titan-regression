@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -73,6 +74,8 @@ FAKE_KUBECTL = textwrap.dedent('''\
         count = sum(os.environ["FAKE_POD_PASSWORD"] in line for line in sys.stdin.read().splitlines())
         print(count)
         sys.exit(0 if count else 1)
+    elif args[:1] == ["cp"]:
+        pathlib.Path(args[2]).write_text(os.environ.get("FAKE_CP_" + pathlib.Path(args[1]).name, ""))
     elif args[:1] == ["exec"] and "touch" in args:
         (state / "pod").mkdir(exist_ok=True)
         (state / "pod" / pathlib.Path(args[-1]).name).write_text("")
@@ -289,6 +292,251 @@ class HostTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertNotIn("ssh ", calls)
         self.assertRegex((state.parent / "local.log").read_text(), r"\$ echo here\nhere\nexit=0\n$")
+
+
+SETUP_FACTS = {"project": "t-1", "vmA": "vma", "vmB": "vmb", "volume": "vol1", "net6": "net-6", "netEmpty": "net-e",
+               "acl": "acl-6", "vip": "2001:db8::1:1", "ipv6A": "2001:db8::a"}
+
+
+def hold_line(step, facts, at="10:00:00"):
+    return f"2026-11-19T{at}.000Z HOLD {step} " + json.dumps(facts, separators=(",", ":"))
+
+
+class StepTableTest(unittest.TestCase):
+    def test_every_hold_of_phase4_host_but_vm35_has_its_commands(self):
+        spec = (HERE / "phase4" / "phase4-host.spec.ts").read_text()
+        holds = set(re.findall(r"hold\('([a-z0-9-]+)'", spec))
+        self.assertIn("setup", holds)
+        self.assertEqual(holds - {"vm35"} - set(phase4.phase4_steps.STEPS), set())
+        self.assertIn("cln02", phase4.phase4_steps.STEPS)
+
+    def test_every_step_renders_from_its_holds_facts_and_setups(self):
+        spec = (HERE / "phase4" / "phase4-host.spec.ts").read_text()
+        facts = {**SETUP_FACTS, "vm": "vmx", "vmSnapshot": "s1", "network": "net-x", "outside": [], "host": [],
+                 "alias": "tpl-1", "snapshot": "s2", "ruleId": "r1", "direction": "ingress", "obs05Target": "fp1",
+                 "env": "release", "api": "https://api", "keys": "/k", "guestKnownHosts": "/kh"}
+        for step, commands in phase4.phase4_steps.STEPS.items():
+            for cmd in commands(facts, facts):
+                with self.subTest(step=step, command=cmd.text):
+                    phase4.phase4_steps.render(cmd.text, facts)
+        self.assertTrue(spec)
+
+    def test_an_unknown_name_is_an_error_and_key_tokens_stay(self):
+        self.assertEqual(phase4.phase4_steps.render("grep {V} {vm}", {"vm": "vm1"}), "grep {V} vm1")
+        with self.assertRaises(KeyError):
+            phase4.phase4_steps.render("incus stop {vm}", {})
+
+
+class StepTest(unittest.TestCase):
+    def go_log(self, step):
+        return {"FAKE_LOG_AFTER_TOUCH": f"2026-11-19T10:00:30.000Z GO {step}"}
+
+    def test_setup_runs_its_reads_keeps_its_facts_and_answers_go(self):
+        code, out, calls, state = run("step", "setup", *KUBE, *SSH, "--log", "{tmp}/setup.log", "--state", "{tmp}/phase4-state.json", "--api", "https://api.x",
+                                      FAKE_LOG_0=hold_line("setup", SETUP_FACTS), **self.go_log("setup"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("sudo incus network acl show acl-6 --project t-1", calls)
+        self.assertIn("sudo incus exec --project t-1 vma -- sh -c 'wc -l < /home/ubuntu/.ssh/authorized_keys; uptime -s'", calls)
+        self.assertNotIn("curl", calls)  # outside on the release environment: this machine, not the host
+        log = (state.parent / "setup.log").read_text()
+        self.assertIn("$ (this machine) curl -s https://api.x/v1/os-images", log)
+        self.assertEqual(json.loads((state.parent / "phase4-state.json").read_text())["setup"]["vmA"], "vma")
+        self.assertNotIn("phase4-state", " ".join(p.name for p in (state.parent).glob("*.log")))
+        self.assertTrue((state / "pod" / "go-setup").exists())
+
+    def test_a_later_step_takes_the_project_from_setups_facts(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        (tmp / "phase4-state.json").write_text(json.dumps({"setup": SETUP_FACTS, "recorded": {}}))
+        code, out, calls, state = run("step", "obs01", *KUBE, *SSH, "--log", str(tmp / "w.log"), "--state", str(tmp / "phase4-state.json"),
+                                      FAKE_LOG_0=hold_line("obs01", {"vm": "vmc"}), **self.go_log("obs01"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("sudo incus stop --project t-1 vmc", calls)
+        self.assertTrue((state / "pod" / "go-obs01").exists())
+
+    def test_another_pending_step_runs_nothing(self):
+        code, out, calls, state = run("step", "obs01", *KUBE, *SSH, "--log", "{tmp}/w.log", "--state", "{tmp}/phase4-state.json",
+                                      FAKE_LOG_0=hold_line("obs02", {"vm": "vmc", "project": "t-1"}))
+        self.assertEqual(code, 2, out)
+        self.assertIn("the pending HOLD is obs02, not obs01", out)
+        self.assertNotIn("incus", calls)
+        self.assertFalse((state / "pod").exists())
+
+    def test_no_go_leaves_the_answer(self):
+        code, out, calls, state = run("step", "net25", *KUBE, *SSH, "--log", "{tmp}/r.log", "--state", "{tmp}/phase4-state.json", "--no-go",
+                                      FAKE_LOG_0=hold_line("net25", {"network": "net-d", "project": "t-1"}))
+        self.assertEqual(code, 0, out)
+        self.assertIn("sudo incus network show net-d --project t-1", calls)
+        self.assertFalse((state / "pod").exists())
+
+    def test_no_master_stops_before_the_answer(self):
+        code, out, calls, state = run("step", "obs01", *KUBE, *SSH, "--log", "{tmp}/w.log", "--state", "{tmp}/phase4-state.json", FAKE_NO_MASTER="1",
+                                      FAKE_LOG_0=hold_line("obs01", {"vm": "vmc", "project": "t-1"}))
+        self.assertEqual(code, 2, out)
+        self.assertFalse((state / "pod").exists())
+
+    def test_vm24_restart_reads_again_until_the_guest_answers_with_a_new_boot(self):
+        keys = pathlib.Path(tempfile.mkdtemp())
+        for k in "vux":
+            (keys / f"{k}.pub").write_text(f"ssh-ed25519 AAAAC3{k}body rg-p4-{k}\n")
+        guest = {"uptime -s": [["1\n2026-11-19 09:00:00", 0], ["", 255], ["1\n2026-11-19 09:00:00", 0],
+                               ["1\n2026-11-19 10:05:00", 0]]}
+        code, out, calls, state = run("step", "vm24-restart", *KUBE, *SSH, "--log", "{tmp}/w.log", "--state", "{tmp}/phase4-state.json", "--keys", str(keys),
+                                      FAKE_LOG_0=hold_line("vm24-restart", {"vm": "vma", "project": "t-1"}),
+                                      FAKE_GUEST=json.dumps(guest), **self.go_log("vm24-restart"))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls.count("uptime -s"), 4)
+        self.assertLess(calls.index("sudo incus restart --project t-1 vma"), calls.rindex("uptime -s"))
+        self.assertIn("grep -c 'AAAAC3xbody' /home/ubuntu/.ssh/authorized_keys", calls)
+        self.assertIn("grep -c AAAAC3vbody /etc/ssh/openvicloud/ubuntu", calls)
+
+    def test_obs05_after_sync_deletes_the_recorded_image_only_when_the_alias_moved(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        state_file = tmp / "phase4-state.json"
+        state_file.write_text(json.dumps({"setup": SETUP_FACTS, "recorded": {}}))
+        target = "images/aliases/tpl-1"
+        code, out, calls, _ = run("step", "obs05", *KUBE, *SSH, "--log", str(tmp / "w.log"), "--state", str(tmp / "phase4-state.json"),
+                                  FAKE_LOG_0=hold_line("obs05", {"alias": "tpl-1"}), FAKE_GUEST=json.dumps({target: [["fpold", 0]]}),
+                                  **self.go_log("obs05"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("sudo incus image alias delete tpl-1", calls)
+        self.assertEqual(json.loads(state_file.read_text())["recorded"]["obs05Target"], "fpold")
+        for now, deleted in (("fpold", False), ("fpnew", True)):
+            code, out, calls, _ = run("step", "obs05-after-sync", *KUBE, *SSH, "--log", str(tmp / "w.log"), "--state", str(tmp / "phase4-state.json"),
+                                      FAKE_LOG_0=hold_line("obs05-after-sync", {"alias": "tpl-1"}),
+                                      FAKE_GUEST=json.dumps({target: [[now, 0]]}), **self.go_log("obs05-after-sync"))
+            with self.subTest(now=now):
+                self.assertEqual(code, 0, out)
+                self.assertEqual("image delete --project default fpold" in calls, deleted)
+        self.assertIn("skipped: the alias still points at the image recorded at obs05", (tmp / "w.log").read_text())
+
+    def test_fw08_runs_the_facts_commands_outside_here_and_on_the_host_with_sudo(self):
+        facts = {"project": "t-1", "uplink": "ovnup", "devPrecondition": "dev only", "outside": ["echo out-1"],
+                 "host": ["incus exec vmb --project t-1 -- tail -n 8 /var/log/rg-out.log"]}
+        code, out, calls, state = run("step", "fw08-before", *KUBE, *SSH, "--log", "{tmp}/v6.log", "--state", "{tmp}/phase4-state.json",
+                                      FAKE_LOG_0=hold_line("fw08-before", facts), **self.go_log("fw08-before"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("sudo incus network get ovnup ipv6.gateway", calls)
+        self.assertIn("sudo incus exec vmb --project t-1 -- tail -n 8 /var/log/rg-out.log", calls)
+        self.assertNotIn("ovnbr", calls)
+        self.assertNotIn("echo out-1", calls)
+        self.assertRegex((state.parent / "v6.log").read_text(), r"\$ \(this machine\) echo out-1\nout-1\nexit=0")
+        code, out, calls, _ = run("step", "fw08-before", *KUBE, *SSH, "--log", "{tmp}/v6.log", "--state", "{tmp}/phase4-state.json", "--env", "dev",
+                                  FAKE_LOG_0=hold_line("fw08-before", facts), **self.go_log("fw08-before"))
+        self.assertIn("ip -6 addr show ovnbr", calls)
+        self.assertIn("echo out-1", calls)  # dev: from outside the cluster is the host
+
+    def test_a_missing_option_runs_nothing(self):
+        code, out, calls, state = run("step", "setup", *KUBE, *SSH, "--log", "{tmp}/setup.log", "--state", "{tmp}/phase4-state.json",
+                                      FAKE_LOG_0=hold_line("setup", SETUP_FACTS), **self.go_log("setup"))
+        self.assertEqual(code, 2, out)
+        self.assertIn("step setup needs api", out)
+        self.assertNotIn("incus", calls)
+        self.assertFalse((state / "pod").exists())
+
+    def test_setup_clears_values_an_earlier_run_recorded_and_a_failed_read_records_none(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        state_file = tmp / "phase4-state.json"
+        state_file.write_text(json.dumps({"setup": {}, "recorded": {"obs05Target": "fpold"}}))
+        run("step", "setup", *KUBE, *SSH, "--log", str(tmp / "s.log"), "--state", str(tmp / "phase4-state.json"), "--api", "https://api.x",
+            FAKE_LOG_0=hold_line("setup", SETUP_FACTS), **self.go_log("setup"))
+        self.assertEqual(json.loads(state_file.read_text())["recorded"], {})
+        run("step", "obs05", *KUBE, *SSH, "--log", str(tmp / "w.log"), "--state", str(tmp / "phase4-state.json"), FAKE_LOG_0=hold_line("obs05", {"alias": "tpl-1"}),
+            FAKE_GUEST=json.dumps({"images/aliases/tpl-1": [["Error: not found", 1]]}), **self.go_log("obs05"))
+        self.assertEqual(json.loads(state_file.read_text())["recorded"], {"obs05Target": None})
+        _, _, calls, _ = run("step", "obs05-after-sync", *KUBE, *SSH, "--log", str(tmp / "w.log"), "--state", str(tmp / "phase4-state.json"),
+                             FAKE_LOG_0=hold_line("obs05-after-sync", {"alias": "tpl-1"}),
+                             FAKE_GUEST=json.dumps({"images/aliases/tpl-1": [["fpnew", 0]]}), **self.go_log("obs05-after-sync"))
+        self.assertNotIn("image delete", calls)
+
+    def test_a_failed_write_stops_the_step_without_an_answer(self):
+        code, out, calls, state = run("step", "obs01", *KUBE, *SSH, "--log", "{tmp}/w.log", "--state",
+                                      "{tmp}/phase4-state.json", FAKE_EXIT="1",
+                                      FAKE_LOG_0=hold_line("obs01", {"vm": "vmc", "project": "t-1"}), **self.go_log("obs01"))
+        self.assertEqual(code, 1, out)
+        self.assertIn("a write of step obs01 failed (exit 1)", out)
+        self.assertFalse((state / "pod").exists())
+
+    def test_obs11_answers_go_when_the_rule_is_gone(self):
+        guest = {"grep -c r1": [["0", 1]]}
+        facts = {"acl": "acl-6", "ruleId": "r1", "direction": "ingress", "project": "t-1"}
+        code, out, calls, state = run("step", "obs11", *KUBE, *SSH, "--log", "{tmp}/w.log", "--state",
+                                      "{tmp}/phase4-state.json", FAKE_LOG_0=hold_line("obs11", facts),
+                                      FAKE_GUEST=json.dumps(guest), **self.go_log("obs11"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("sudo incus network acl rule remove acl-6 ingress description=r1 --project t-1", calls)
+        self.assertTrue((state / "pod" / "go-obs11").exists())
+
+    def test_a_step_reading_the_keys_runs_nothing_without_keys(self):
+        code, out, calls, state = run("step", "vm24-restart", *KUBE, *SSH, "--log", "{tmp}/w.log", "--state",
+                                      "{tmp}/phase4-state.json",
+                                      FAKE_LOG_0=hold_line("vm24-restart", {"vm": "vma", "project": "t-1"}))
+        self.assertEqual(code, 2, out)
+        self.assertIn("needs --keys", out)
+        self.assertNotIn("incus", calls)
+
+    def test_writes_lists_the_steps_with_a_host_write(self):
+        self.assertEqual(len(phase4.phase4_steps.WRITES), 18)
+        self.assertNotIn("net25", phase4.phase4_steps.WRITES)
+        self.assertIn("obs11", phase4.phase4_steps.WRITES)
+
+    def test_cln02_needs_no_hold(self):
+        code, out, calls, state = run("step", "cln02", *SSH, "--log", "{tmp}/cln.log", "--state", "{tmp}/phase4-state.json", "--project", "t-9")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("kubectl", calls)
+        self.assertIn("project=t-9", calls)
+
+
+class Cli10Test(unittest.TestCase):
+    FAKE_CLI = textwrap.dedent('''\
+        #!/usr/bin/env python3
+        import os, pathlib, sys
+        state = pathlib.Path(os.environ["FAKE_STATE"])
+        with open(state / "calls", "a") as calls:
+            calls.write("cli " + " ".join(sys.argv[1:]) + " token-set=" + str(bool(os.environ.get("OPENVICLOUD_TOKEN"))) + "\\n")
+        (state / "cli-env").write_text(os.environ.get("OPENVICLOUD_API_URL", "") + " " + os.environ.get("XDG_CONFIG_HOME", ""))
+        print(os.environ.get("FAKE_CLI_OUT", "alive"))
+        sys.exit(int(os.environ.get("FAKE_CLI_EXIT", "0")))
+    ''')
+    FACTS = {"vmName": "rg-vmedge-1", "vmId": "id-1", "token": "/work/cli-10/token", "key": "/work/cli-10/key",
+             "command": "vm ssh <vmName> -- …"}
+
+    def cli(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        (tmp / "openvicloud").write_text(self.FAKE_CLI)
+        (tmp / "openvicloud").chmod(0o755)
+        return str(tmp / "openvicloud")
+
+    def run_cli10(self, **env):
+        return run("cli10", "--kubeconfig", "kc", "--job", "regression-edge-p1", "--cli", self.cli(), "--api",
+                   "https://api.x", "--log", "{tmp}/cli10.log", "--seconds", "0",
+                   **{"FAKE_LOG_0": hold_line("cli10", self.FACTS), "FAKE_LOG_AFTER_TOUCH": "2026-11-19T10:06:00.000Z GO cli10",
+                      "FAKE_CP_token": "sekret-token-123", "FAKE_CP_key": "-----BEGIN OPENSSH PRIVATE KEY-----", **env})
+
+    def test_the_session_runs_here_with_the_token_in_the_environment_only_then_go(self):
+        code, out, calls, state = self.run_cli10()
+        self.assertEqual(code, 0, out)
+        self.assertIn("L_CLI10=PASS", out)
+        self.assertIn("cli vm ssh rg-vmedge-1 -- -i ", calls)
+        self.assertIn("token-set=True", calls)
+        self.assertTrue((state / "pod" / "go-cli10").exists())
+        log = (state.parent / "cli10.log").read_text()
+        for text in (out, calls, log):
+            self.assertNotIn("sekret-token-123", text)
+        self.assertTrue(log.rstrip().endswith("L_CLI10=PASS"))
+        self.assertTrue((state / "cli-env").read_text().startswith("https://api.x "))
+
+    def test_a_token_that_cannot_be_copied_out_is_not_covered_and_skips(self):
+        code, out, calls, state = self.run_cli10(FAKE_CP_token="")
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_CLI10=NOT_COVERED could not copy /work/cli-10/token out of the pod", out)
+        self.assertNotIn("cli vm ssh", calls)
+        self.assertTrue((state / "pod" / "skip-cli10").exists())
+
+    def test_a_session_that_did_not_end_alive_fails_and_still_goes(self):
+        code, out, _, state = self.run_cli10(FAKE_CLI_EXIT="255", FAKE_CLI_OUT="Connection closed")
+        self.assertEqual(code, 1, out)
+        self.assertIn("L_CLI10=FAIL exit=255 alive=False", out)
+        self.assertTrue((state / "pod" / "go-cli10").exists())
 
 
 class KeysTest(unittest.TestCase):

@@ -101,7 +101,7 @@ function gatewayOf(block: string): string {
 }
 
 // Where the checks "from outside the network" run (plan.md FW-08, LB-18): the runner's pod has no IPv6 route out
-const FROM_OUTSIDE = 'dev: python3 phase4.py host (on titan-incus); release env: python3 phase4.py host --local (over the Internet; this machine without IPv6 => N/A)'
+const FROM_OUTSIDE = 'dev: on titan-incus (phase4.py step --env dev, or host); release env: this machine (phase4.py step, or host --local; over the Internet, this machine without IPv6 => N/A)'
 
 test.describe.serial('phase4 host', () => {
   test.describe.configure({ timeout: 60 * 60_000 })
@@ -771,16 +771,19 @@ test.describe.serial('phase4 host', () => {
       const [vmA8, vmB8, vmB28] = [incusName('vm', vmFa), incusName('vm', vmFb), incusName('vm', vmFb2)]
       const outside = (ip: string) => [`ping -6 -c3 ${ip}`, `nc -6 -vz -w 5 ${ip} 22`, `nc -6 -vz -w 5 ${ip} 80`]
       const tail = (vm: string, file: string) => `incus exec ${vm} --project ${project} -- tail -n 8 ${file}`
+      // B out to a host that listens on 22: VM A (Allow/Allow, sshd). On the release environment the uplink gateway
+      // that the loops target does not answer on 22, so their tcp22 says nothing about B's egress there.
+      const bToA = `incus exec ${vmB8} --project ${project} -- sh -c 'nc -6 -z -w 5 ${ipv6A} 22; echo bToA22=$?'`
       const go = await hold('fw08-before', {
         project, networkA: `net-${netA.id}`, networkB: `net-${netB.id}`, vmA: vmA8, vmB: vmB8, vmB2: vmB28,
         ipv6A, ipv6B, ipv4B: b.ipAddress, uplink, uplinkGateway: gateway,
-        devPrecondition: 'dev only, phase4.py host: ip -6 addr show ovnbr; uplinkGateway absent => FW-08 INCONCLUSIVE',
-        uplinkCheck: `phase4.py host: incus network get ${uplink} ipv6.gateway (should be uplinkGateway/64: the guests' loops target it)`,
+        devPrecondition: 'dev only, on the host: ip -6 addr show ovnbr; uplinkGateway absent => FW-08 INCONCLUSIVE',
+        uplinkCheck: `on the host: incus network get ${uplink} ipv6.gateway (should be uplinkGateway/64: the guests' loops target it)`,
         fromOutside: FROM_OUTSIDE,
         outside: [...outside(ipv6A), ...outside(ipv6B)],
-        host: [tail(vmA8, '/var/log/rg-out.log'), tail(vmB8, '/var/log/rg-out.log'), tail(vmB28, '/var/log/rg-east.log')],
+        host: [tail(vmA8, '/var/log/rg-out.log'), tail(vmB8, '/var/log/rg-out.log'), tail(vmB28, '/var/log/rg-east.log'), bToA],
         expect: 'A: ping 3 received, 22 succeeded, 80 refused; B: ping 100% loss, 22 and 80 timed out; '
-          + 'rg-out.log of A and B: ping6=ok tcp22=ok; rg-east.log of B2: ping4=ok',
+          + 'rg-out.log of A and B: ping6=ok (tcp22=ok on dev only); rg-east.log of B2: ping4=ok; bToA22=0',
       })
       if (!go) {
         test.skip(true, 'host step not run')
@@ -792,9 +795,9 @@ test.describe.serial('phase4 host', () => {
         project, acl: `acl-${netB.id}`, ruleId: rule, rule: 'Ingress TCP 22 ::/0 on network B, enabled', vmB: vmB8, vmB2: vmB28, ipv6B,
         fromOutside: FROM_OUTSIDE,
         outside: outside(ipv6B),
-        host: [tail(vmB8, '/var/log/rg-out.log'), tail(vmB28, '/var/log/rg-east.log')],
-        expect: 'B: 22 succeeded; ping 100% loss, 80 timed out; rg-out.log of B: lines after the rule still ping6=ok tcp22=ok; '
-          + 'rg-east.log of B2: ping4=ok',
+        host: [tail(vmB8, '/var/log/rg-out.log'), tail(vmB28, '/var/log/rg-east.log'), bToA],
+        expect: 'B: 22 succeeded; ping 100% loss, 80 timed out; rg-out.log of B: lines after the rule still ping6=ok '
+          + '(tcp22=ok on dev only); rg-east.log of B2: ping4=ok; bToA22=0',
       })
     } finally {
       await dropExtras(quota)

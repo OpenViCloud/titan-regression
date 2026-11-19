@@ -81,6 +81,20 @@ class Tally(unittest.TestCase):
         self.assertEqual(extra, ["ZZ-09"])
 
 
+    def test_a_word_shaped_like_an_id_whose_prefix_the_plan_lacks_is_not_an_id(self):
+        log = "  ✓  1 [chromium] › a.spec.ts:1:1 › x › FW-01 user data over 32768 bytes of UTF-8 is 400 (1s)\n"
+        prefixes = count_cases.plan_prefixes(count_cases.plan_ids(PLAN))
+        marks = count_cases.log_marks(log, prefixes)
+        self.assertEqual(marks, {"FW-01": "pass"})
+        _, _, extra = count_cases.tally(count_cases.plan_ids(PLAN), marks)
+        self.assertEqual(extra, [])
+
+    def test_an_unplanned_number_of_a_planned_prefix_is_still_reported(self):
+        prefixes = count_cases.plan_prefixes(count_cases.plan_ids(PLAN))
+        marks = count_cases.log_marks("  ✓  1 [chromium] › a.spec.ts:1:1 › x › FW-09 stray (1s)\n", prefixes)
+        _, _, extra = count_cases.tally(count_cases.plan_ids(PLAN), marks)
+        self.assertEqual(extra, ["FW-09"])
+
 class TwoLanes(unittest.TestCase):
     """Both lanes' runner.log go into one count: an ID is counted once, with its worst mark."""
 
