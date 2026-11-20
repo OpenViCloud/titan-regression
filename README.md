@@ -218,21 +218,21 @@ every tenant of the cluster feels it, so on the release environment it runs only
 hand: without it the spec skips as N/A after 10 minutes), and only in the sequential run, never beside another module.
 `backup/command-wait` (BAK-20; job `regression-command-wait-<label>`, a job of its own so the sequential run never waits
 on the agent) makes a VM `rg-bak20-*`, logs `HOLD bak20 {vmId, vmName, backupKey, …}` and waits for the agent (35 minutes
-at most; no answer is N/A), who answers with `phase4.py bak20` (§Phase 4): it creates a Job from CronJob
+at most; no answer is N/A), who answers with `phase4.py bak20` (§Phase 4): when the VM has no backup row of the day yet it creates a Job from CronJob
 `control-plane-job-backup-schedule` (one pass of the hourly backup schedule: today's backup of every VM and volume of
-every tenant that has none yet, so on the release environment only under an approved `L-x`, and only until the first
+every tenant that has none yet or whose backup of the day failed, and the cluster config once the disks of the day ended, so on the release environment only under an approved `L-x`, and only until the first
 real customer; run it beside no other module, whose VMs' commands would wait behind those backups), reads the VM's rows of `core.provider_commands` in the `titan-db` primary with `psql` (`SELECT` only),
 answers `go-bak20` once the VM's `vm.backup` row is `Leased`, then reads them until the backup and the snapshot's
-`vm-snapshot.create` row end; its `L_BAK20=` line is the verdict of the row's SQL part, the spec's ✓ the API part.
+`vm-snapshot.create` row end (or 600 s after the backup ended); its `L_BAK20=` line is the verdict of the row's SQL part, the spec's ✓ the API part.
 
 Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — state changed on the Incus host outside
 OpenViCloud, needs an approved `L-x` command (OBS-13 only reads the host's trust list), run by the agent with the
 spec of `phase4/`; `site` — the public site through Playwright MCP on the agent's machine;
 `worker`, `control-plane-image` — read-only `gh`/`curl`/`kubectl` and `go test` of a worker clone on the agent's machine.
 
-Four things change state every tenant of the environment shares: ADM-06 (a global price), ADM-15 (the cluster's
-`incus-worker` stopped, and `incus-worker-inventory` where it runs), `billing/seed-invoices.sql` (written straight into the database) and the `L-x` writes on the
-Incus host. On prd they run only until the first real customer is approved
+Five things change state every tenant of the environment shares: ADM-06 (a global price), ADM-15 (the cluster's
+`incus-worker` stopped, and `incus-worker-inventory` where it runs), `billing/seed-invoices.sql` (written straight into the database), the `L-x` writes on the
+Incus host, and BAK-20's Job from CronJob `control-plane-job-backup-schedule` (a pass of every tenant's backups of the day, early). On prd they run only until the first real customer is approved
 (`titan-ops status/known-state.md#first-real-customer`).
 Until the specs are split or skip themselves, that stops the whole `admin` module (ADM-03 shares the serial
 `admin/admin.spec.ts` with ADM-06, and `run-module.sh` runs the whole directory, ADM-08 and ADM-09 included) and CC-03
@@ -305,7 +305,7 @@ already `Done` or `Failed` ⇒ `skip-bak20`, `L_BAK20=NOT_COVERED` (exit 4); no 
 rg-bak20-<epoch> --from=cronjob/control-plane-job-backup-schedule` in the control plane's namespace (a row the hourly
 pass queued already needs none). Once the row is `Leased` it answers `go-bak20` (not `Leased` within
 `--leased-minutes`, default 30, or ended first ⇒ skip, NOT_COVERED), the spec posts the VM snapshot, and the reads go on
-until the backup and the snapshot's row have ended (`--watch-minutes`, default 45); then it deletes the Job it created.
+until the backup and the snapshot's row have ended, or 600 s after the backup ended (`--watch-minutes`, default 45); then it deletes the Job it created.
 Last line `L_BAK20=PASS` (exit 0: every read with the backup `Leased` had the snapshot's row `Pending` with `attempts` 0,
 both rows ended `Done`), `FAIL <what>` (exit 1), or `NOT_COVERED <why>` (exit 4; after go: no read had the snapshot's
 row while the backup was `Leased`).
