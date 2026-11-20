@@ -223,7 +223,7 @@ at most; no answer is N/A), who answers with `phase4.py bak20` (§Phase 4): when
 every tenant that has none yet or whose backup of the day failed, and the cluster config once the disks of the day ended, so on the release environment only under an approved `L-x`, and only until the first
 real customer; run it beside no other module, whose VMs' commands would wait behind those backups), reads the VM's rows of `core.provider_commands` in the `titan-db` primary with `psql` (`SELECT` only),
 answers `go-bak20` once the VM's `vm.backup` row is `Leased`, then reads them until the backup and the snapshot's
-`vm-snapshot.create` row end (or 600 s after the backup ended); its `L_BAK20=` line is the verdict of the row's SQL part, the spec's ✓ the API part.
+`vm-snapshot.create` row end (or 600 s after the backup ended); its `L_BAK20=` line is the verdict of the row's SQL part.
 
 Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — state changed on the Incus host outside
 OpenViCloud, needs an approved `L-x` command (OBS-13 only reads the host's trust list), run by the agent with the
@@ -303,7 +303,7 @@ At `HOLD bak20` of `backup/command-wait` (job `regression-command-wait-<label>`)
 (every `--every` seconds, default 3; logged when the rows change). Today's `vm.backup` row (`backupKey` of the hold)
 already `Done` or `Failed` ⇒ `skip-bak20`, `L_BAK20=NOT_COVERED` (exit 4); no row yet ⇒ `kubectl create job
 rg-bak20-<epoch> --from=cronjob/control-plane-job-backup-schedule` in the control plane's namespace (a row the hourly
-pass queued already needs none; the rows unreadable or the Job not created ⇒ skip, NOT_COVERED). Once the row is `Leased` it answers `go-bak20` (not `Leased` within
+pass queued already needs none). Once the row is `Leased` it answers `go-bak20` (not `Leased` within
 `--leased-minutes`, default 30, or ended first ⇒ skip, NOT_COVERED), the spec posts the VM snapshot, and the reads go on
 until the backup and the snapshot's row have ended, or 600 s after the backup ended (`--watch-minutes`, default 45); then it deletes the Job it created.
 Last line `L_BAK20=PASS` (exit 0: every read with the backup `Leased` had the snapshot's row `Pending` with `attempts` 0,
