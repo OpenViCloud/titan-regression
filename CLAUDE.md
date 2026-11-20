@@ -28,7 +28,7 @@ Repo này không có hệ thống nào để chạy: spec chạy bằng runner `
 ├── lanes.json       # module nào chạy ở lane nào, lane chờ nhau ở đâu
 ├── lanes-dev.json, lanes-dev-sequential.json  # cùng thứ cho cụm dev: hai lane / một lane, chỉ module có Dev = yes, max_pods 1
 ├── patch-job.py     # trỏ volume `specs` của một job vào ConfigMap riêng của nó, thêm env `--env NAME=VALUE` (run-module.sh dùng)
-├── phase4.py        # phía agent của Phase 4 (phase4/): keys, connect, wait, go/skip, host, step, cli10, vm35, sample, disconnect — README §Phase 4
+├── phase4.py        # phía agent của Phase 4 (phase4/): keys, connect, wait, go/skip, host, step, cli10, bak20, vm35, sample, disconnect — README §Phase 4
 ├── phase4_steps.py  # lệnh host của từng HOLD của phase4/ cho `phase4.py step` (bước nào ghi host: WRITES)
 ├── test_*.py        # test của các script trên — python3 test_count_cases.py …
 ├── selftest/        # test của lib không cần Playwright; ngoài lib/ vì runner chép mọi file của lib/ vào e2e/ và `testMatch`
@@ -82,7 +82,7 @@ Hai lane (`lanes.json`) chạy cùng lúc, mỗi lane một tenant test; `admin-
 | `billing` | b | đo usage trên tenant của lane | ví `admin-test` (ghi, assert đúng số); danh sách topup Pending (BIL-10 tạo một cái tạm); audit log (BIL-07 ghi một dòng); giá tier và volume offering mà nó so chi phí |
 | `concurrency` | a | nâng `maxNetworks` cho network của CC-05…CC-12, trả lại | ví `admin-test` (assert đúng số, trả hoá đơn 4444 do `seed-invoices.sql` của lane b); CC-05 lấy hai /64 IPv6 từ khối của cluster, CC-06, CC-07, CC-10, CC-11, CC-12 thêm một (network IPv6 chung của chúng) khi cluster có khối |
 | `admin` | a | cộng 1 ₫ vào ví tenant của lane (ADM-08), đổi rồi trả `debtCeiling`; ADM-13 nâng `maxNetworks` cho network IPv6, trả lại | danh sách topup Pending (ADM-08 đòi nút Confirm trên mọi hàng Pending); audit log của mọi tenant; giá một tier +1 rồi trả (ADM-06, tier khác với tier của `billing`); ADM-15 dừng `incus-worker` của cụm, cả `incus-worker-inventory` nơi có (`run-module.sh` làm khi `REGRESSION_WORKER_APPS` nêu Application của worker — trên prd chỉ dưới `L-x` đã duyệt, không ai làm tay; trên dev agent làm tay được; chỉ ở lượt tuần tự, không pilot; spec ở `admin/stuck-requests/`, job riêng: `run-module.sh` nạp phẳng một thư mục) — mọi lệnh của mọi tenant chờ tới khi nó chạy lại; ADM-13 lấy một /64 IPv6 |
-| `backup` | a | không | chỉ đọc: `GET /v1/admin/backups`, `GET /v1/admin/backup-target`, `GET /v1/tenant/wallet` của lane (BAK-07); `POST /v1/admin/backup-target/test` ghi một object thử vào bucket backup (BAK-05) |
+| `backup` | a | không; job `backup/command-wait` (BAK-20, ngoài `lanes.json`, chỉ ở lượt tuần tự) tạo rồi xoá một VM `rg-bak20-*` và một snapshot của nó | chỉ đọc: `GET /v1/admin/backups`, `GET /v1/admin/backup-target`, `GET /v1/tenant/wallet` của lane (BAK-07); `POST /v1/admin/backup-target/test` ghi một object thử vào bucket backup (BAK-05); BAK-20: agent tạo Job từ CronJob `control-plane-job-backup-schedule` — một lượt lịch backup cho mọi VM, volume của mọi tenant chưa có bản hôm nay (`L-x` trên prd, tới khách thật đầu tiên) |
 | `portal-ui` | a | nâng `maxNetworks` (IPv6; UI-30, UI-31 thêm 1 cho network của chúng), để lại topup Pending (UI-07, UI-18; chỉ khi portal có `topUpEnabled: true`) | lấy một /64 IPv6 từ khối của cluster |
 | `tenant-suspend` | a | treo tenant của lane rồi trả `Active` | không |
 | `network-lifecycle` | a | xoá và tạo lại network của lane | không |

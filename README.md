@@ -23,7 +23,7 @@ which signs in with the test accounts there, so no credential passes through the
 | `check-removed-fields.py` | Fails when a spec or a helper under `lib/` still reads a field that left the control plane's `/v1` contract and the Spec column below does not mark a case of its test; run it with the two control plane commits a contract change lies between |
 | `run-lanes.py`, `lanes.json`, `lanes-dev.json`, `lanes-dev-sequential.json` | Runs the modules as lanes, one lane per test tenant, lanes side by side (below); the two dev plans cover the Dev column |
 | `patch-job.py` | Points a job's `specs` volume at a ConfigMap of its own, so jobs started together never read each other's specs; `--env NAME=VALUE` adds a variable to the job |
-| `phase4.py` | The agent's commands for the Phase 4 module (§Phase 4) |
+| `phase4.py` | The agent's commands for the Phase 4 module, and for the holds of `cli/edge` and `backup/command-wait` (§Phase 4) |
 | `phase4_steps.py` | The host commands of each HOLD of `phase4/`, run by `phase4.py step` (§Phase 4) |
 | `selftest/`, `test_*.py` | Tests of the helpers and scripts above |
 | [`CLAUDE.md`](CLAUDE.md) | How specs are written and the assumptions a run on the release environment makes |
@@ -176,7 +176,7 @@ create a network and beta-user may hold one.
 | 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-14 (host, not covered), CAT-16 (host) |
 | 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21, NET-27 (host, not covered), NET-25 (host) |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-08 (host), FW-14 (host, not covered) |
-| 5 | `vm` | VMs: create per tier (cluster named or taken from the network), stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys and SSH sessions; console password, console tickets and console sessions; stop timeout | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered), VM-35 (host); SSH-12 and ACT-01 (extended); SSH-08 and CSL-06 (inside SSH-08) also a job of its own at the release environment's run, `vm/ssh-sessions` |
+| 5 | `vm` | VMs: create per tier (cluster named or taken from the network), stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys and SSH sessions; console password, console tickets and console sessions; stop timeout | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered), VM-35 (host); SSH-08 and CSL-06 (inside SSH-08) also a job of its own at the release environment's run, `vm/ssh-sessions` |
 | 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-14, VMS-15, VMS-20 (host, not covered), VMS-17 (host) |
 | 7 | `volume` | volumes and volume snapshots: create, attach/detach, restore, delete | yes | yes | yes, except VOL-18 (host, not covered), VOL-21, VOL-22 (not covered) |
 | 8 | `load-balancer` | L4 load balancer on an IPv6 network: create, VIP, reconfigure, backend VM delete refused, delete (cluster without an IPv6 block: only the negative cases that need no IPv6 network) | yes | yes | yes, except LB-12 and LB-16 (host, not covered), LB-18 (host) |
@@ -184,11 +184,11 @@ create a network and beta-user may hold one.
 | 10 | `api-token` | API tokens: create, call the API with one, duplicate name/secret, delete ⇒ `401`, unknown token | yes | yes | yes |
 | 11 | `cli` | `openvicloud`: version, web sign-in, `OPENVICLOUD_TOKEN`, `tenant get` matches the API, `vm ssh` + `scp` into a real VM, sign-out | yes | yes | yes, except CLI-21's power-off line read by the agent in the worker log; CLI-06..11 also a job of its own at the release environment's run, `cli/edge` |
 | 12 | `billing` | metering, costs, invoices, paying from the wallet, top-ups, promo credit, `/healthz/wallet` | yes | yes | yes, except BIL-18 (not covered); BIL-14 and BIL-26 are agent SQL steps (`billing/check-wallets.sql`, `billing/sweep-credit.sql`); BIL-25 rolls the control plane only with `REGRESSION_CP_ROLL_SECONDS` (a step of the sequential run); BIL-24's invoice part skips where no invoice is older than 90 days; BIL-16's per-record part, BIL-24's and BIL-25's row counts read by the agent in SQL |
-| 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS; the metrics host behind Cloudflare Access | no: CON-09 reads the TLS certificates; dev serves plain HTTP | yes | yes, except CON-15, CON-17 (not covered); CON-11 (extended) |
+| 13 | `contract` | HTTP contract: status codes, Idempotency-Key, error envelope, auth, CORS, TLS; the metrics host behind Cloudflare Access | no: CON-09 reads the TLS certificates; dev serves plain HTTP | yes | yes, except CON-15, CON-17 (not covered) |
 | 14 | `concurrency` | double clicks, invoice paid twice at once, two public IPv6 creates at once, one tenant's two creates never run at once | yes | yes | yes, except CC-14 (not covered); CC-04's command count read by the agent in SQL, CC-13's command order by the agent in the worker log |
 | 15 | `admin` | admin API: networks/VMs of every tenant, VM deleted on a tenant's behalf + audit, clusters, prices; the operator metrics tier (targets, alert rules, alert delivery) and the admin portal's Metrics link | yes | yes | yes (API), except ADM-15 (`L-x`, a job of its own measured at the release environment's run: `run-module.sh` on `admin/stuck-requests`, with `REGRESSION_WORKER_APPS`), ADM-19 (not covered); ADM-17 reads services inside the cluster, so it runs only in the runner pod |
-| 16 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus, no wallet row; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: the `Database` objects `keycloak` (Keycloak) and `chat` (the landing assistant), ArgoCD's health checks, schema `public` for its owner only, the name CNPG archives under and `ContinuousArchiving` (`kubectl` reads) | yes | yes | yes, except BAK-11, BAK-13 (extended), BAK-20, BAK-21 (plan only) (API and admin portal screens); `(host)`, `L-x` and `kubectl` cases in Phase 4 of the release |
-| 17 | `portal-ui` | customer portal end to end, signed in | no: UI-28 needs a portal without `topUpEnabled`, as the release environment's; dev's sets it (UI-07 and UI-18, which need it set, are N/A at the release environment's run) | yes | yes, except UI-41 (extended) |
+| 16 | `backup` | backup target and status API: the configured target without a secret and equal to CNPG's, 401/403, no PUT route, Test, `GET /v1/admin/backups` health of the Postgres backup and one item per VM and volume on Incus and per cluster, no wallet row; a VM snapshot waits behind its VM's backup; admin portal Backups page; daily VM and volume backups in the bucket and a disk restore (host, `L-x`); titan-db on the cluster: the `Database` objects `keycloak` (Keycloak) and `chat` (the landing assistant), ArgoCD's health checks, schema `public` for its owner only, the name CNPG archives under and `ContinuousArchiving` (`kubectl` reads) | yes | yes | yes (API and admin portal screens), except BAK-20 (`L-x`, a job of its own: `run-module.sh` on `backup/command-wait`, answered by `phase4.py bak20`), BAK-21 (host, not covered: no procedure for the release environment); `(host)`, `L-x` and `kubectl` cases in Phase 4 of the release |
+| 17 | `portal-ui` | customer portal end to end, signed in | no: UI-28 needs a portal without `topUpEnabled`, as the release environment's; dev's sets it (UI-07 and UI-18, which need it set, are N/A at the release environment's run) | yes | yes |
 | 18 | `tenant-suspend` | suspended ⇒ writes refused, reads allowed; reactivated | yes | yes | yes |
 | 19 | `network-lifecycle` | deletes the run's network (with its rules), recreates the same name | yes | yes | yes |
 | 20 | `login-page` | Keycloak sign-in page: layout, colours, font, brand, sign-up form, language, redirect URIs per client (no sign-in) | yes | yes | yes |
@@ -216,6 +216,14 @@ when `REGRESSION_WORKER_APPS` lists the ArgoCD Applications that would bring the
 `root-local,incus-worker-local`, release environment `incus-worker-prd`), and puts their auto-sync and the replicas back;
 every tenant of the cluster feels it, so on the release environment it runs only under an approved `L-x` (never by
 hand: without it the spec skips as N/A after 10 minutes), and only in the sequential run, never beside another module.
+`backup/command-wait` (BAK-20; job `regression-command-wait-<label>`, a job of its own so the sequential run never waits
+on the agent) makes a VM `rg-bak20-*`, logs `HOLD bak20 {vmId, vmName, backupKey, …}` and waits for the agent (35 minutes
+at most; no answer is N/A), who answers with `phase4.py bak20` (§Phase 4): it creates a Job from CronJob
+`control-plane-job-backup-schedule` (one pass of the hourly backup schedule: today's backup of every VM and volume of
+every tenant that has none yet, so on the release environment only under an approved `L-x`, and only until the first
+real customer; run it beside no other module, whose VMs' commands would wait behind those backups), reads the VM's rows of `core.provider_commands` in the `titan-db` primary with `psql` (`SELECT` only),
+answers `go-bak20` once the VM's `vm.backup` row is `Leased`, then reads them until the backup and the snapshot's
+`vm-snapshot.create` row end; its `L_BAK20=` line is the verdict of the row's SQL part, the spec's ✓ the API part.
 
 Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — state changed on the Incus host outside
 OpenViCloud, needs an approved `L-x` command (OBS-13 only reads the host's trust list), run by the agent with the
@@ -287,6 +295,20 @@ key out of the pod into a directory only it reads, runs `vm ssh <vmName> -- … 
 in `OPENVICLOUD_TOKEN` (never in an argument or the log) and an empty `XDG_CONFIG_HOME`, deletes the directory, answers
 `go-cli10`, and ends the log with `L_CLI10=PASS` (exit 0) or `L_CLI10=FAIL <what>` (exit 1); when the token or the
 key cannot be copied out it answers `skip-cli10` and ends with `L_CLI10=NOT_COVERED <why>` (exit 4).
+
+At `HOLD bak20` of `backup/command-wait` (job `regression-command-wait-<label>`), `phase4.py bak20 --kubeconfig
+<kubeconfig> --job regression-command-wait-<label> --log <evidence log>` reads, in the pod of
+`-l cnpg.io/cluster=titan-db,cnpg.io/instanceRole=primary` (any namespace),
+`psql -U postgres -d titan -At -F '|' -c "SELECT kind, key, status, attempts FROM core.provider_commands WHERE resource_id = '<vmId>' ORDER BY created_at, key"`
+(every `--every` seconds, default 3; logged when the rows change). Today's `vm.backup` row (`backupKey` of the hold)
+already `Done` or `Failed` ⇒ `skip-bak20`, `L_BAK20=NOT_COVERED` (exit 4); no row yet ⇒ `kubectl create job
+rg-bak20-<epoch> --from=cronjob/control-plane-job-backup-schedule` in the control plane's namespace (a row the hourly
+pass queued already needs none). Once the row is `Leased` it answers `go-bak20` (not `Leased` within
+`--leased-minutes`, default 30, or ended first ⇒ skip, NOT_COVERED), the spec posts the VM snapshot, and the reads go on
+until the backup and the snapshot's row have ended (`--watch-minutes`, default 45); then it deletes the Job it created.
+Last line `L_BAK20=PASS` (exit 0: every read with the backup `Leased` had the snapshot's row `Pending` with `attempts` 0,
+both rows ended `Done`), `FAIL <what>` (exit 1), or `NOT_COVERED <why>` (exit 4; after go: no read had the snapshot's
+row while the backup was `Leased`).
 
 At `HOLD vm35` of `phase4/`, `phase4.py vm35` waits for a `status:` line from `cloud-init status --wait` in the held VM,
 reads `getent shadow ubuntu`, `passwd -S ubuntu` and `cloud-init.vendor-data` of it and of the held VM without a console

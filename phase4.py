@@ -18,6 +18,7 @@ evidence as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>`.
                               --state <file> [--keys <dir>] [--guest-known-hosts <file>] [--api <url>]
                               [--env release|dev] [--project <t-…>] [--no-go]
     python3 phase4.py cli10 --kubeconfig <kc> --job <job> --cli <openvicloud> --api <url> --log <file> [--seconds 330]
+    python3 phase4.py bak20 --kubeconfig <kc> --job <job> --log <file> [--every 3] [--leased-minutes 30] [--watch-minutes 45]
     python3 phase4.py disconnect --control <socket> --target <user@host>
 
 <job> is the name run-module.sh gives the job (regression-<module>-<label>). The host command runs through the
@@ -43,6 +44,15 @@ go-<step>; with --no-go it exits 0 and the agent answers; a host write that fail
 cln02 has no HOLD. cli10 answers HOLD cli10 of cli/edge: the session of CLI-10 from this machine, the token only in
 OPENVICLOUD_TOKEN; last line L_CLI10=PASS (exit 0, go) | FAIL <what> (exit 1, go) | NOT_COVERED <why> (exit 4,
 skip-cli10: the token or the key could not be copied out of the pod).
+
+bak20 answers HOLD bak20 of backup/command-wait (BAK-20, titan-ops features/provider/design.md#tenant-lane): it reads the
+held VM's rows of core.provider_commands (psql SELECT in the titan-db primary pod, read only), creates a Job from CronJob
+control-plane-job-backup-schedule when today's vm.backup row of the VM is not there yet, answers go-bak20 once that row is
+Leased, then reads the rows every <every> seconds (logged when they change) until the backup and the snapshot's
+vm-snapshot.create row have ended, and deletes the Job it created. Last line L_BAK20=PASS (exit 0: the snapshot's row
+read Pending with attempts 0 every time the backup was Leased, then both Done) | FAIL <what> (exit 1) | NOT_COVERED <why>
+(exit 4; skip-bak20 when it comes before the answer: today's backup of the VM already ended, the Job could not be
+created, the backup was not seen Leased in time; after go: no read had the snapshot's row while the backup was Leased).
 
 Exit 2: usage, the pending HOLD is not the step asked for, or no ControlMaster on the socket. wait: exit 3 = the runner finished with no HOLD pending.
 """
@@ -658,6 +668,149 @@ def cmd_cli10(args):
     return 0 if verdict.endswith("PASS") else 1
 
 
+BACKUP_CRONJOB = "control-plane-job-backup-schedule"
+SNAPSHOT_CREATE = "vm-snapshot.create"
+UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+PG_PRIMARY = "cnpg.io/cluster=titan-db,cnpg.io/instanceRole=primary"
+ENDED = ("Done", "Failed")
+
+
+def command_rows(text):
+    """[(kind, key, status, attempts)] of `psql -At -F '|'` output of COMMANDS_OF."""
+    rows = []
+    for line in text.splitlines():
+        parts = line.split("|")
+        if len(parts) == 4 and parts[3].strip().isdigit():
+            rows.append((parts[0], parts[1], parts[2], int(parts[3])))
+    return rows
+
+
+def commands_of(vm_id):
+    """The SELECT of the VM's command rows; the id is checked against UUID before it reaches SQL."""
+    return ("SELECT kind, key, status, attempts FROM core.provider_commands "
+            f"WHERE resource_id = '{vm_id}' ORDER BY created_at, key")
+
+
+def backup_of(rows, key):
+    return next((r for r in rows if r[1] == key), None)
+
+
+def snapshots_of(rows):
+    return [r for r in rows if r[0] == SNAPSHOT_CREATE]
+
+
+def bak20_verdict(readings, key):
+    """(word, why) of BAK-20's SQL part from the readings taken after go-bak20 (each a list of command_rows)."""
+    leased = [r for r in readings if (backup_of(r, key) or (None, None, None))[2] == "Leased" and snapshots_of(r)]
+    for rows in leased:
+        for _, snap_key, status, attempts in snapshots_of(rows):
+            if status != "Pending" or attempts != 0:
+                return "FAIL", f"{snap_key} {status} attempts={attempts} while the backup was Leased"
+    last = readings[-1] if readings else []
+    backup = backup_of(last, key)
+    if backup is None or backup[2] != "Done":
+        return "FAIL", f"the backup ended {backup[2] if backup else 'without a row'}, not Done"
+    snaps = snapshots_of(last)
+    if not snaps:
+        return "FAIL", "no vm-snapshot.create row of the VM: the spec's POST did not land"
+    if snaps[-1][2] != "Done":
+        return "FAIL", f"{snaps[-1][1]} ended {snaps[-1][2]}, not Done"
+    if not leased:
+        return "NOT_COVERED", "no read had the snapshot's row while the backup was Leased (the backup ended first)"
+    return "PASS", f"readings={len(leased)} with the snapshot's row Pending attempts=0 while the backup was Leased"
+
+
+def cmd_bak20(args):
+    """BAK-20 at HOLD bak20 of backup/command-wait: the backup made Leased, then the snapshot's row read while it is."""
+    kube = Kube(args.kubeconfig, args.job)
+    facts = wait_for(kube, "bak20", args.timeout_minutes)
+    if facts is None:
+        return 2
+    vm_id, key = facts.get("vmId", ""), facts.get("backupKey", "")
+    if not UUID.match(vm_id) or not re.match(rf"^vm-backup-{re.escape(vm_id)}-\d{{8}}$", key):
+        print(f"HOLD bak20 facts out of shape: vmId={vm_id!r} backupKey={key!r}")
+        return 2
+    log = Log(args.log, f"phase4.py bak20 · job {args.job}")
+    cp_ns = kube.namespace_of("cronjob", BACKUP_CRONJOB)
+    primaries = kube.json("get", "pods", "-A", "-l", PG_PRIMARY)["items"]
+    if len(primaries) != 1:
+        print(f"not exactly one pod {PG_PRIMARY} on this cluster")
+        return 2
+    pg_ns, pg_pod = primaries[0]["metadata"]["namespace"], primaries[0]["metadata"]["name"]
+    sql = commands_of(vm_id)
+    shown = f"kubectl exec -n {pg_ns} {pg_pod} -c postgres -- psql -U postgres -d titan -At -F '|' -c \"{sql}\""
+    last = {"text": None}
+
+    def read():
+        out = kube.run("exec", "-n", pg_ns, pg_pod, "-c", "postgres", "--", "psql", "-U", "postgres", "-d", "titan",
+                       "-At", "-F", "|", "-c", sql)
+        text = out.stdout + out.stderr
+        if text != last["text"] or out.returncode != 0:
+            log.entry(shown, text, out.returncode)
+            sys.stdout.write(text)
+            last["text"] = text
+        return command_rows(out.stdout) if out.returncode == 0 else None
+
+    job = None
+
+    def finish(word, why, answer_skip=False):
+        if answer_skip:
+            answer(kube, "bak20", "skip", log)
+        if job:
+            out = kube.run("delete", "job", job, "-n", cp_ns, "--ignore-not-found")
+            log.entry(f"kubectl delete job {job} -n {cp_ns}", out.stdout + out.stderr, out.returncode)
+        verdict = f"L_BAK20={word}" + (f" {why}" if why else "")
+        with open(args.log, "a", encoding="utf-8") as fh:
+            fh.write(verdict + "\n")
+        print(verdict)
+        return {"PASS": 0, "FAIL": 1}.get(word, 4)
+
+    rows = read()
+    if rows is None:
+        return finish("NOT_COVERED", "could not read core.provider_commands", answer_skip=True)
+    backup = backup_of(rows, key)
+    if backup and backup[2] in ENDED:
+        return finish("NOT_COVERED", f"today's backup of the VM is already {backup[2]}", answer_skip=True)
+    if backup is None:
+        job = f"rg-bak20-{int(time.time())}"
+        out = kube.run("create", "job", job, f"--from=cronjob/{BACKUP_CRONJOB}", "-n", cp_ns)
+        log.entry(f"kubectl create job {job} --from=cronjob/{BACKUP_CRONJOB} -n {cp_ns}", out.stdout + out.stderr,
+                  out.returncode)
+        if out.returncode != 0:
+            job = None
+            return finish("NOT_COVERED", f"could not create a Job from CronJob {BACKUP_CRONJOB}", answer_skip=True)
+    deadline = time.monotonic() + args.leased_minutes * 60
+    while True:
+        status = (backup_of(rows or [], key) or (None, None, "absent"))[2]
+        if status == "Leased":
+            break
+        if status in ENDED:
+            return finish("NOT_COVERED", f"the backup ended {status} before a read saw it Leased", answer_skip=True)
+        if time.monotonic() >= deadline:
+            return finish("NOT_COVERED", f"the backup was not Leased in {args.leased_minutes:g} minutes ({status})",
+                          answer_skip=True)
+        time.sleep(args.every)
+        rows = read()
+    said = answer(kube, "bak20", "go", log)
+    if said != 0:
+        return finish("FAIL", "the spec did not take go-bak20")
+    readings, backup_ended_at = [], None
+    deadline = time.monotonic() + args.watch_minutes * 60
+    while time.monotonic() < deadline:
+        time.sleep(args.every)
+        rows = read()
+        if rows is None:
+            continue
+        readings.append(rows)
+        backup = backup_of(rows, key)
+        snaps = snapshots_of(rows)
+        if backup and backup[2] in ENDED:
+            backup_ended_at = backup_ended_at or time.monotonic()
+            if (snaps and snaps[-1][2] in ENDED) or time.monotonic() - backup_ended_at > 600:
+                break
+    return finish(*bak20_verdict(readings, key))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -723,6 +876,14 @@ def main(argv=None):
     p.add_argument("--seconds", type=int, default=330, help="the session's silence (CLI-10: 330)")
     p.add_argument("--timeout-minutes", type=float, default=80)
     p.set_defaults(func=cmd_cli10)
+    p = sub.add_parser("bak20")
+    kube_args(p)
+    p.add_argument("--log", required=True)
+    p.add_argument("--every", type=float, default=3, help="seconds between two reads of the VM's command rows")
+    p.add_argument("--leased-minutes", type=float, default=30, help="until today's backup of the VM is Leased")
+    p.add_argument("--watch-minutes", type=float, default=45, help="after go, until the backup and the snapshot end")
+    p.add_argument("--timeout-minutes", type=float, default=80, help="until HOLD bak20")
+    p.set_defaults(func=cmd_bak20)
     p = sub.add_parser("sample")
     ssh_opts(p)
     p.add_argument("--project", required=True)

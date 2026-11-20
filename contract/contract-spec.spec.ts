@@ -226,6 +226,22 @@ test.describe.serial('contract-spec', () => {
       }
     }
 
+    // The spec's half of the row holds whatever the lists hold: every schema of a route read below declares its status
+    // as a string enum (enumOf) and declares none of the old fields. The VM, volume, load balancer, snapshot and key
+    // addition lists are often empty at contract time; the network and rule rows are not.
+    // OpenViCloud/titan-control-plane:api/openapi-v1.json (GET /v1/tenant/vms/{vmId}/key-additions answers an array of
+    // VmKeyAdditionQueryResult) · OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/VmKeyAdditions/ListKeyAdditionsEndpoint.cs (Configure)
+    const schemas = ['NetworkQueryResult', 'FirewallRuleQueryResult', 'VmQueryResult', 'VmSnapshotQueryResult',
+      'VmKeyAdditionQueryResult', 'VolumeQueryResult', 'VolumeSnapshotQueryResult', 'LoadBalancerQueryResult',
+      'TenantQueryResult', 'InvoiceQueryResult', 'TopUpQueryResult']
+    for (const schemaName of schemas) {
+      const { values } = enumOf(spec, schemaName, 'status')
+      expect(values.length, `${schemaName}.status declares at least one value`).toBeGreaterThan(0)
+      const declared = Object.keys(spec.components.schemas[schemaName].properties)
+      expect(declared.filter((f) => oldFields.includes(f)), `${schemaName} declares none of the old state fields`).toEqual([])
+      log(`CON-11 spec ${schemaName}.status: ${values.join(',')}`)
+    }
+
     const networks = await get('tenant', '/v1/tenant/networks') as any[]
     expect(networks.length).toBeGreaterThan(0)
     for (const row of networks) {
@@ -250,8 +266,8 @@ test.describe.serial('contract-spec', () => {
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${networkId}/firewall-rules/${ruleId}`), 204)
     ruleId = ''
 
-    // These lists may legitimately be empty at contract time (no VM/volume/LB created by this module) —
-    // the check still holds vacuously, and the network/rule checks above cover the non-empty case.
+    // These lists may legitimately be empty at contract time (no VM/volume/LB created by this module): the row half
+    // then holds vacuously, the spec half above holds anyway, and the network/rule checks cover a non-empty row.
     for (const [path, schema] of [
       ['/v1/tenant/vms', 'VmQueryResult'],
       ['/v1/tenant/volumes', 'VolumeQueryResult'],
@@ -276,6 +292,7 @@ test.describe.serial('contract-spec', () => {
             assertNoOldFields('VmSnapshotQueryResult', snap)
           }
           const additions = await get('tenant', `${path}/${row.id}/key-additions`) as any[]
+          log(`CON-11 VM ${row.id}: ${snapshots.length} snapshot(s), ${additions.length} key addition(s)`)
           for (const addition of additions) {
             assertEnumField(spec, 'VmKeyAdditionQueryResult', 'status', addition)
             assertNoOldFields('VmKeyAdditionQueryResult', addition)
