@@ -1,9 +1,9 @@
 import * as fs from 'node:fs'
 import { RESULTS, log, sleep } from './api'
 
-// The steps of phase4/ and phase4-backup/ that the agent does on the Incus host. At each HOLD the spec logs what it
+// The steps of phase4/ that the agent does on the Incus host. At each HOLD the spec logs what it
 // holds and waits for RESULTS/go-<step> (or RESULTS/skip-<step>: the host step was not run), which `python3 phase4.py`
-// creates in the pod: `step`, `go|skip`, `vm35`, `bak18`, `cli10` (README.md §Phase 4).
+// creates in the pod: `step`, `go|skip`, `vm35`, `cli10` (README.md §Phase 4).
 
 export const HOLD_MS = 45 * 60_000
 

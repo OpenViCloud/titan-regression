@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The agent's side of Phase 4 (phase4/, phase4-backup/): each step one command, so nobody writes a shell loop by hand.
+"""The agent's side of Phase 4 (phase4/): each step one command, so nobody writes a shell loop by hand.
 
 A Phase 4 spec logs `HOLD <step> <facts JSON>` and waits for /work/results/go-<step> (or skip-<step>) in its pod; the
 agent does the step's host commands in between. Every host command and every answer goes to a log of the release's
@@ -11,7 +11,6 @@ evidence as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>`.
     python3 phase4.py go|skip <step> --kubeconfig <kc> --job <job> [--log <file>] # answers it, returns once the spec has
     python3 phase4.py host --control <socket> --target <user@host> --log <file> [--keys <dir>] -- '<command>'
     python3 phase4.py host --local --log <file> [--keys <dir>] -- '<command>'      # same entry, on this machine
-    python3 phase4.py bak18 --kubeconfig <kc> --job <job> --control <socket> --target <user@host> --log <file>
     python3 phase4.py vm35 --kubeconfig <kc> --job <job> --control <socket> --target <user@host> --log <file>
     python3 phase4.py sample --control <socket> --target <user@host> --project <t-…> --stop <file> --log <file> [--every 30]
                               [--read-timeout 60] [--lane a|b, default sequential]
@@ -25,16 +24,6 @@ evidence as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>`.
 ControlMaster socket with stdin closed and BatchMode on, and only when `ssh -O check` finds the master (else exit 2: no
 connection of its own, which would read the default known_hosts); `{V}`, `{U}`, `{X}` in a command become the
 base64 body of <keys>/v.pub, u.pub, x.pub (public halves only). A host command's exit code is this script's.
-
-bak18 (BAK-18, titan-ops features/backup/design.md#incus-backup) answers HOLD bak18 of phase4-backup/: it reads the
-copy bk<26> of the held VM on the host until it is there (the hourly backup-schedule run, `:00` UTC), logs the copy's
-devices and the volume's used_by, waits for a `reconcile cluster done` of the worker's reconciler (its inventory pod where there is one), not of its
-`loop=metrics`, after the copy was seen, reads both again while the copy still exists, then creates go-bak18; at HOLD bak18-gone
-it waits for that copy and the volume's copy bkv<26> to be gone (they hold the spec's network and its detach) and creates
-go-bak18-gone. Last line
-BAK18_HOST=PASS (exit 0) | FAIL <what> (exit 1, go-bak18 and go-bak18-gone still created: the spec measures the API
-side; the spec holds at bak18-gone whatever its API check says) | NOT_COVERED <why> (exit 4, skip-bak18, then
-go-bak18-gone: no copy before the timeout, no reconciler's `reconcile cluster done` after it, or the copy gone before one).
 
 vm35 (VM-35, titan-ops features/vm/design.md#console-password) answers HOLD vm35 of phase4/: it waits on the host for
 `cloud-init status --wait` of the held VM to print a `status:` line (FAIL unless it is `done`), reads `getent shadow ubuntu`, `passwd -S ubuntu` and
@@ -75,14 +64,6 @@ import phase4_steps  # noqa: E402
 POLL = float(os.environ.get("PHASE4_POLL_SECONDS", "10"))
 HOLD = re.compile(r"^\S+ HOLD (\S+) (\{.*\})\s*$")
 ANSWER = re.compile(r"^\S+ (GO|SKIP) (\S+)\s*$")
-RECONCILE_DONE = "reconcile cluster done"
-# the metrics runner ends its cycle with the same message, tagged with its loop; only the reconciler's line counts
-METRICS_LOOP = re.compile(r"(^|\s)loop=metrics(\s|$)")
-RECONCILE_WAIT_SECONDS = 6 * 60
-
-
-def reconciler_done(worker_log):
-    return any(RECONCILE_DONE in line and not METRICS_LOOP.search(line) for line in worker_log.splitlines())
 
 
 def now():
@@ -137,7 +118,6 @@ class Kube:
     def __init__(self, kubeconfig, job):
         self.kubeconfig, self.job = kubeconfig, job
         self.ns = self.namespace_of("cronjob", "titan-regression")
-        self.app_ns = self.namespace_of("deployment", "control-plane")
         self._pod = None
 
     def run(self, *args, input=None):
@@ -178,11 +158,6 @@ class Kube:
         """A command in the job's pod; with input, that text is its stdin."""
         return self.run("exec", *(["-i"] if input is not None else []), "-n", self.ns, self.pod(), "--", *command,
                         input=input)
-
-    def worker_logs(self, since):
-        inventory = self.json("get", "pods", "-n", self.app_ns, "-l", "app=incus-worker-inventory")["items"]
-        app = "incus-worker-inventory" if inventory else "incus-worker"
-        return self.run("logs", "-n", self.app_ns, "-l", f"app={app}", f"--since-time={since}", "--tail=-1").stdout
 
 
 def ssh_args(control, target):
@@ -301,90 +276,6 @@ def answer(kube, step, word, log):
 def cmd_answer(args):
     kube = Kube(args.kubeconfig, args.job)
     return answer(kube, args.step, args.word, Log(args.log, f"phase4.py {args.word} · job {args.job}"))
-
-
-def copy_verdict(copy, volume, vm, copy_name, vol):
-    """What is wrong with the copy and the volume's used_by (empty when nothing): the volume's device on the copy is
-    `{"type": "none"}`, root and NIC are there, used_by holds the VM and not the copy."""
-    problems = []
-    devices = copy.get("expanded_devices", {})
-    if devices.get(vol) != {"type": "none"}:
-        problems.append(f"device {vol} on {copy_name} is {json.dumps(devices.get(vol))}, not {{\"type\": \"none\"}}")
-    if not any(d.get("type") == "disk" and d.get("path") == "/" for d in devices.values()):
-        problems.append(f"no root disk on {copy_name}")
-    if not any(d.get("type") == "nic" for d in devices.values()):
-        problems.append(f"no nic on {copy_name}")
-    users = [u.split("?")[0].rsplit("/", 1)[-1] for u in volume.get("used_by", [])]
-    if users != [vm]:
-        problems.append(f"used_by of {vol} is {users}, not [{vm}]")
-    return problems
-
-
-def cmd_bak18(args):
-    kube = Kube(args.kubeconfig, args.job)
-    log = Log(args.log, f"phase4.py bak18 (ssh {args.target}, ControlMaster) · {args.target}")
-    held = pending_hold(kube.logs())
-    if not held or held[0] != "bak18":
-        print(f"the pending HOLD is {held[0] if held else 'none'}, not bak18")
-        return 2
-    facts = held[1]
-    project, vm, copy, vol = facts["project"], facts["vm"], facts["copy"], facts["volume"]
-    args.local = False
-
-    def query(path, logged=True):
-        command = f"sudo incus query '{path}?project={project}'"
-        code, output = run_command(args, command)
-        if logged:
-            log.entry(command, output, code)
-        return json.loads(output) if code == 0 else None
-
-    pool = None
-
-    def give_up(why):
-        # the spec holds at bak18-gone after a skip too: a copy seen but not measured still holds the network
-        answer(kube, "bak18", "skip", log)
-        wait_until_gone(args, kube, log, project, pool)
-        print(f"BAK18_HOST=NOT_COVERED {why}")
-        return 4
-
-    source = query(f"/1.0/instances/{vm}")
-    pool = next((d.get("pool") for d in (source or {}).get("expanded_devices", {}).values() if d.get("source") == vol), None)
-    if pool is None:
-        answer(kube, "bak18", "go", log)
-        wait_until_gone(args, kube, log, project, None)
-        print(f"BAK18_HOST=FAIL {'cannot read ' + vm if source is None else vol + ' is not attached to ' + vm}")
-        return 1
-    deadline = time.monotonic() + args.timeout_minutes * 60
-    reads = 0
-    while query(f"/1.0/instances/{copy}", logged=False) is None:
-        reads += 1
-        if time.monotonic() >= deadline:
-            return give_up(f"no {copy} on the host in {args.timeout_minutes} minutes ({reads} reads)")
-        time.sleep(POLL)
-    seen = now().strftime("%Y-%m-%dT%H:%M:%SZ")
-    first = query(f"/1.0/instances/{copy}")
-    if first is None:
-        return give_up(f"{copy} gone right after it was seen")
-    used = query(f"/1.0/storage-pools/{pool}/volumes/custom/{vol}")
-    # the same deadline as the copy's: the spec's hold started before this script, and waits no longer
-    reconcile_deadline = min(time.monotonic() + RECONCILE_WAIT_SECONDS, deadline)
-    while not reconciler_done(kube.worker_logs(seen)):
-        if time.monotonic() >= reconcile_deadline:
-            return give_up(f"no '{RECONCILE_DONE}' of the worker's reconciler since {seen}")
-        time.sleep(POLL)
-    log.entry(f"kubectl logs -n {kube.app_ns} <worker> --since-time={seen} | grep '{RECONCILE_DONE}' | grep -v loop=metrics", RECONCILE_DONE, 0)
-    after = query(f"/1.0/instances/{copy}")
-    if after is None:
-        return give_up(f"{copy} gone before a reconcile ended")
-    used_after = query(f"/1.0/storage-pools/{pool}/volumes/custom/{vol}")
-    problems = copy_verdict(first, used or {}, vm, copy, vol) + copy_verdict(after, used_after or {}, vm, copy, vol)
-    answer(kube, "bak18", "go", log)
-    wait_until_gone(args, kube, log, project, pool)
-    if problems:
-        print("BAK18_HOST=FAIL " + "; ".join(sorted(set(problems))))
-        return 1
-    print(f"BAK18_HOST=PASS {copy} seen {seen}, masked, used_by [{vm}], before and after a reconcile")
-    return 0
 
 
 CRYPT6 = re.compile(r"^\$6\$([./0-9A-Za-z]{1,16})\$[./0-9A-Za-z]{86}$")
@@ -519,39 +410,6 @@ def cmd_vm35(args):
     return 0
 
 
-def wait_until_gone(args, kube, log, project, pool):
-    """HOLD bak18-gone: the VM's copy holds a NIC on the spec's network until its upload ends (before that Incus refuses
-    the network delete: "The network is currently in use"), and the same backup run copies the attached volume next
-    (bkv<26>), during which a detach times out; so the spec cleans up only after both copies are gone."""
-    deadline = time.monotonic() + 5 * 60
-    while True:
-        held = pending_hold(kube.logs())
-        if held and held[0] == "bak18-gone":
-            break
-        if time.monotonic() >= deadline:
-            print("no HOLD bak18-gone after 5 minutes")
-            return
-        time.sleep(POLL)
-    facts = held[1]
-    copies = [(facts["copy"], f"sudo incus query '/1.0/instances/{facts['copy']}?project={project}'")]
-    if pool and facts.get("volumeCopy"):
-        copies.append((facts["volumeCopy"], f"sudo incus query "
-                       f"'/1.0/storage-pools/{pool}/volumes/custom/{facts['volumeCopy']}?project={project}'"))
-    deadline = time.monotonic() + args.gone_timeout_minutes * 60
-    for name, command in copies:
-        while True:
-            code, output = run_command(args, command)
-            if code != 0:
-                log.entry(command, output, code)
-                print(f"{name} gone")
-                break
-            if time.monotonic() >= deadline:
-                print(f"BAK18_COPY_STILL_THERE {name} after {args.gone_timeout_minutes} minutes: the spec's clean-up may fail")
-                break
-            time.sleep(POLL)
-    answer(kube, "bak18-gone", "go", log)
-
-
 def summaries(query, project, pool):
     """{object: one-line summary} of the project on the host: instances, networks, network ACLs, custom volumes with
     their snapshots, load balancers, image aliases (the objects Titan names); and the reads that failed."""
@@ -567,7 +425,6 @@ def summaries(query, project, pool):
         cfg, devices = i.get("config", {}), i.get("expanded_devices", {})
         nics = {k: v.get("network") for k, v in devices.items() if v.get("type") == "nic"}
         disks = {k: v.get("source") for k, v in devices.items() if v.get("type") == "disk" and v.get("path") != "/"}
-        # a backup copy masks the volumes of its VM as `none` (BAK-18)
         none = sorted(k for k, v in devices.items() if v.get("type") == "none")
         lines[f"instance {i['name']}"] = (f"status={i.get('status')} type={i.get('type')} titan-name={cfg.get('user.titan-name')} "
                                           f"limits.cpu={cfg.get('limits.cpu')} limits.memory={cfg.get('limits.memory')} "
@@ -876,14 +733,6 @@ def main(argv=None):
     p.add_argument("--read-timeout", type=float, default=60)
     p.add_argument("--lane", default="sequential", help="a or b in a run of two lanes, for the log's first line")
     p.set_defaults(func=cmd_sample)
-    p = sub.add_parser("bak18")
-    kube_args(p)
-    ssh_opts(p)
-    p.add_argument("--log", required=True)
-    # under the spec's holds (60 and 12 minutes), when bak18 starts within a minute or two of HOLD bak18
-    p.add_argument("--timeout-minutes", type=float, default=58)
-    p.add_argument("--gone-timeout-minutes", type=float, default=11)
-    p.set_defaults(func=cmd_bak18)
     p = sub.add_parser("vm35")
     kube_args(p)
     ssh_opts(p)

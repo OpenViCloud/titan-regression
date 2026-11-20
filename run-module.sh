@@ -165,7 +165,7 @@ if [ -n "$cp_roll_seconds" ] && ! [[ "$cp_roll_seconds" =~ ^[0-9]+$ && "$cp_roll
   echo "REGRESSION_CP_ROLL_SECONDS must be whole seconds, 0 to 1800: $cp_roll_seconds" >&2
   exit 2
 fi
-# Phase 4 (phase4/, phase4-backup/): REGRESSION_PHASE4_KEYS names a directory with v.pub and u.pub, the public halves of
+# Phase 4 (phase4/): REGRESSION_PHASE4_KEYS names a directory with v.pub and u.pub, the public halves of
 # the run's key pairs V and U (`python3 phase4.py keys <dir>` makes them); each goes to the job as PHASE4_KEY_V and
 # PHASE4_KEY_U. Only a one-line public key is passed: the private halves stay on the agent's machine.
 key_env=()
