@@ -143,7 +143,7 @@ test.describe.serial('backup-command-wait', () => {
       expect(ended.status).toBe('Available')
       expect(ended.requestFailureReason ?? null).toBeNull()
       if (stuckReads === 0) {
-        log(`BAK-20 NOT COVERED for the stuck part: the snapshot left Creating ${Math.round((endedAt - postedAt) / 1000)} s after the POST, before the ${STUCK_AFTER_MS / 60_000}-minute threshold (the backup ended first)`)
+        log(`BAK-20 NOT COVERED for the stuck part: the snapshot left Creating ${Math.round((endedAt - postedAt) / 1000)} s after the POST, before the stuck list is read, ${(STUCK_AFTER_MS + 60_000) / 60_000} minutes after the POST (the backup ended first)`)
         test.info().annotations.push({ type: 'note', description: 'stuck part not measured: the backup ended before the stuck threshold' })
       }
       await waitVm('BAK-20 vm back from Snapshotting', vmId, (v) => runs(v))
