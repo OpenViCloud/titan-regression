@@ -300,10 +300,11 @@ At `HOLD bak20` of `backup/command-wait` (job `regression-command-wait-<label>`)
 <kubeconfig> --job regression-command-wait-<label> --log <evidence log>` reads, in the pod of
 `-l cnpg.io/cluster=titan-db,cnpg.io/instanceRole=primary` (any namespace),
 `psql -U postgres -d titan -At -F '|' -c "SELECT kind, key, status, attempts FROM core.provider_commands WHERE resource_id = '<vmId>' ORDER BY created_at, key"`
-(every `--every` seconds, default 3; logged when the rows change). Today's `vm.backup` row (`backupKey` of the hold)
+(every `--every` seconds, default 3; logged when the rows change). The first read failing ⇒ `skip-bak20`, `L_BAK20=NOT_COVERED`
+(exit 4). Today's `vm.backup` row (`backupKey` of the hold)
 already `Done` or `Failed` ⇒ `skip-bak20`, `L_BAK20=NOT_COVERED` (exit 4); no row yet ⇒ `kubectl create job
 rg-bak20-<epoch> --from=cronjob/control-plane-job-backup-schedule` in the control plane's namespace (a row the hourly
-pass queued already needs none). Once the row is `Leased` it answers `go-bak20` (not `Leased` within
+pass queued already needs none; the Job not created ⇒ skip, NOT_COVERED). Once the row is `Leased` it answers `go-bak20` (not `Leased` within
 `--leased-minutes`, default 30, or ended first ⇒ skip, NOT_COVERED), the spec posts the VM snapshot, and the reads go on
 until the backup and the snapshot's row have ended, or 600 s after the backup ended (`--watch-minutes`, default 45); then it deletes the Job it created.
 Last line `L_BAK20=PASS` (exit 0: every read with the backup `Leased` had the snapshot's row `Pending` with `attempts` 0,
