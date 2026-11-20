@@ -21,6 +21,8 @@ _spec.loader.exec_module(phase4)
 # FAKE_STATE/pod, after which `logs <pod>` prints FAKE_LOG_AFTER_TOUCH_<files touched> or FAKE_LOG_AFTER_TOUCH when set. ssh: a command holding `incus query '<path>'`
 # that is a key of FAKE_QUERIES prints its JSON value (FAKE_STOP_AFTER/FAKE_STOP_FILE touch a file after that many such reads).
 # FAKE_GUEST {substring: [[output, exit], …]}: a host command holding the substring gets its next pair (the last repeats).
+# kubectl `exec … psql` prints the next [output, exit] pair of FAKE_PSQL (the last repeats); `create job`/`delete job` exit
+# FAKE_JOB_EXIT; `get cronjob` adds the names of FAKE_CRONJOBS; `get pods -l <the titan-db primary>` is titan-db-1.
 # kubectl `exec … openssl` prints FAKE_OPENSSL (unset ⇒ exit 127, no openssl); `exec -i … grep` counts the stdin lines
 # holding FAKE_POD_PASSWORD, the pod's password file, which no argument carries.
 FAKE_KUBECTL = textwrap.dedent('''\
@@ -37,7 +39,9 @@ FAKE_KUBECTL = textwrap.dedent('''\
     def items(*names):
         print(json.dumps({"items": [{"metadata": {"name": n, "namespace": "ns-" + n}} for n in names]}))
     if args[:2] == ["get", "cronjob"]:
-        items("titan-regression")
+        items("titan-regression", *json.loads(os.environ.get("FAKE_CRONJOBS", "[]")))
+    elif args[:2] == ["get", "pods"] and "cnpg.io/cluster=titan-db,cnpg.io/instanceRole=primary" in args:
+        items("titan-db-1")
     elif args[:2] == ["get", "pods"]:
         counter = state / "pod-reads"
         n = int(counter.read_text()) if counter.exists() else 0
@@ -64,6 +68,16 @@ FAKE_KUBECTL = textwrap.dedent('''\
         count = sum(os.environ["FAKE_POD_PASSWORD"] in line for line in sys.stdin.read().splitlines())
         print(count)
         sys.exit(0 if count else 1)
+    elif args[:1] == ["exec"] and "psql" in args:
+        counter = state / "psql-reads"
+        n = int(counter.read_text()) if counter.exists() else 0
+        counter.write_text(str(n + 1))
+        reads = json.loads(os.environ["FAKE_PSQL"])
+        output, code = reads[min(n, len(reads) - 1)]
+        print(output)
+        sys.exit(code)
+    elif args[:2] in (["create", "job"], ["delete", "job"]):
+        sys.exit(int(os.environ.get("FAKE_JOB_EXIT", "0")))
     elif args[:1] == ["cp"]:
         pathlib.Path(args[2]).write_text(os.environ.get("FAKE_CP_" + pathlib.Path(args[1]).name, ""))
     elif args[:1] == ["exec"] and "touch" in args:
@@ -488,6 +502,105 @@ class Cli10Test(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("L_CLI10=FAIL exit=255 alive=False", out)
         self.assertTrue((state / "pod" / "go-cli10").exists())
+
+
+class Bak20Test(unittest.TestCase):
+    VM_ID = "0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"
+    KEY = f"vm-backup-{VM_ID}-20261120"
+    FACTS = {"vmId": VM_ID, "vmName": "rg-bak20-1", "backupKey": KEY}
+    SNAP = "vm-snapshot-create-s1-r1"
+
+    def rows(self, backup=None, attempts=0, snap=None, snap_attempts=0):
+        lines = [f"vm.create|vm-create-{self.VM_ID}-r0|Done|1"]
+        if backup:
+            lines.append(f"vm.backup|{self.KEY}|{backup}|{attempts}")
+        if snap:
+            lines.append(f"vm-snapshot.create|{self.SNAP}|{snap}|{snap_attempts}")
+        return ["\n".join(lines), 0]
+
+    def run_bak20(self, reads, facts=None, **env):
+        return run("bak20", "--kubeconfig", "kc", "--job", "regression-command-wait-p1", "--log", "{tmp}/bak20.log",
+                   "--every", "0", "--leased-minutes", "0.05",
+                   **{"FAKE_LOG_0": hold_line("bak20", facts or self.FACTS),
+                      "FAKE_LOG_AFTER_TOUCH": "2026-11-20T10:06:00.000Z GO bak20",
+                      "FAKE_CRONJOBS": json.dumps(["control-plane-job-backup-schedule"]),
+                      "FAKE_PSQL": json.dumps(reads), **env})
+
+    def test_the_job_makes_the_backup_leased_then_go_and_the_snapshot_waits_pending_until_both_are_done(self):
+        reads = [self.rows(), self.rows("Pending"), self.rows("Leased", 1), self.rows("Leased", 1),
+                 self.rows("Leased", 1, "Pending"), self.rows("Leased", 1, "Pending"), self.rows("Done", 1, "Pending"),
+                 self.rows("Done", 1, "Leased", 1), self.rows("Done", 1, "Done", 1)]
+        code, out, calls, state = self.run_bak20(reads)
+        self.assertEqual(code, 0, out)
+        self.assertIn("L_BAK20=PASS readings=2", out)
+        self.assertTrue((state / "pod" / "go-bak20").exists())
+        self.assertRegex(calls, r"create job rg-bak20-\d+ --from=cronjob/control-plane-job-backup-schedule -n ns-control-plane-job-backup-schedule")
+        self.assertIn("exec -n ns-titan-db-1 titan-db-1 -c postgres -- psql -U postgres -d titan -At -F | -c SELECT", calls)
+        self.assertIn(f"WHERE resource_id = '{self.VM_ID}'", calls)
+        self.assertRegex(calls, r"delete job rg-bak20-\d+ -n ns-control-plane-job-backup-schedule")
+        log = (state.parent / "bak20.log").read_text()
+        self.assertTrue(log.rstrip().endswith("L_BAK20=PASS readings=2 with the snapshot's row Pending attempts=0 while the backup was Leased"))
+        # a read is logged only when it changed: of the four reads with the backup Leased, two
+        self.assertEqual(log.count(f"vm.backup|{self.KEY}|Leased|1\n"), 2)
+
+    def test_a_backup_already_queued_by_the_hourly_pass_needs_no_job(self):
+        reads = [self.rows("Leased", 1), self.rows("Leased", 1, "Pending"), self.rows("Done", 1, "Done", 1)]
+        code, out, calls, _ = self.run_bak20(reads)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("create job", calls)
+        self.assertNotIn("delete job", calls)
+
+    def test_a_snapshot_row_leased_while_the_backup_is_fails(self):
+        reads = [self.rows("Leased", 1), self.rows("Leased", 1, "Leased", 1), self.rows("Done", 1, "Done", 1)]
+        code, out, _, _ = self.run_bak20(reads)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"L_BAK20=FAIL {self.SNAP} Leased attempts=1 while the backup was Leased", out)
+
+    def test_a_pending_snapshot_row_with_attempts_fails(self):
+        reads = [self.rows("Leased", 1), self.rows("Leased", 1, "Pending", 2), self.rows("Done", 1, "Done", 3)]
+        code, out, _, _ = self.run_bak20(reads)
+        self.assertEqual(code, 1, out)
+        self.assertIn("Pending attempts=2", out)
+
+    def test_todays_backup_already_done_is_not_covered_and_skips(self):
+        code, out, calls, state = self.run_bak20([self.rows("Done", 1)])
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK20=NOT_COVERED today's backup of the VM is already Done", out)
+        self.assertTrue((state / "pod" / "skip-bak20").exists())
+        self.assertNotIn("create job", calls)
+
+    def test_a_backup_never_leased_in_time_is_not_covered_and_skips_and_the_job_is_deleted(self):
+        code, out, calls, state = self.run_bak20([self.rows(), self.rows("Pending")])
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK20=NOT_COVERED the backup was not Leased in 0.05 minutes (Pending)", out)
+        self.assertTrue((state / "pod" / "skip-bak20").exists())
+        self.assertIn("delete job rg-bak20-", calls)
+
+    def test_a_backup_that_ended_before_the_snapshot_row_was_read_is_not_covered_after_go(self):
+        reads = [self.rows("Leased", 1), self.rows("Done", 1), self.rows("Done", 1, "Done", 1)]
+        code, out, _, state = self.run_bak20(reads)
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK20=NOT_COVERED no read had the snapshot's row while the backup was Leased", out)
+        self.assertTrue((state / "pod" / "go-bak20").exists())
+
+    def test_a_job_that_cannot_be_created_is_not_covered(self):
+        code, out, _, state = self.run_bak20([self.rows()], FAKE_JOB_EXIT="1")
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK20=NOT_COVERED could not create a Job", out)
+        self.assertTrue((state / "pod" / "skip-bak20").exists())
+
+    def test_facts_out_of_shape_run_no_sql(self):
+        code, out, calls, _ = self.run_bak20([self.rows()], facts={"vmId": "x'; drop table t; --", "backupKey": "k"})
+        self.assertEqual(code, 2, out)
+        self.assertNotIn("psql", calls)
+
+    def test_the_verdict_reads_the_last_rows_for_the_ends(self):
+        key = self.KEY
+        leased = [("vm.backup", key, "Leased", 1), ("vm-snapshot.create", "s", "Pending", 0)]
+        self.assertEqual(phase4.bak20_verdict([leased, [("vm.backup", key, "Failed", 5)]], key)[0], "FAIL")
+        self.assertIn("ended Failed", phase4.bak20_verdict([leased, [("vm.backup", key, "Done", 1), ("vm-snapshot.create", "s", "Failed", 5)]], key)[1])
+        self.assertIn("did not land", phase4.bak20_verdict([[("vm.backup", key, "Done", 1)]], key)[1])
+        self.assertEqual(phase4.command_rows("a|b|Pending|0\nnoise\n(0 rows)"), [("a", "b", "Pending", 0)])
 
 
 class KeysTest(unittest.TestCase):

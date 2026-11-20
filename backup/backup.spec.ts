@@ -4,7 +4,8 @@ import { bodyOf, call, expectStatus, get, log, RESULTS, startLog } from './api'
 
 // Cases BAK-01..03, BAK-05..08, BAK-11 and BAK-13 of plan.md: the admin backup target and status API and the admin
 // portal's Backups page. BAK-15..17 and BAK-19 are kubectl reads by the agent, BAK-12/14 and BAK-21 read the Incus host
-// (Phase 4 of release:regression-prd), BAK-04 is N/A, BAK-09 is NOT COVERED, BAK-10 is an L-x case of a release that restores (plan.md). Runs after `admin`, creates no
+// (Phase 4 of release:regression-prd), BAK-20 is the job backup/command-wait (an agent step), BAK-04 is N/A, BAK-09 is
+// NOT COVERED, BAK-10 is an L-x case of a release that restores (plan.md). Runs after `admin`, creates no
 // rg-* resource and changes nothing: the target is the pod's configuration (titan-ops features/backup/design.md#backup-target).
 
 const STALE_HOURS = 26
@@ -127,16 +128,23 @@ test.describe.serial('backup', () => {
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Admin/Backup/ListDiskBackupsQueryHandler.cs (HandleAsync: one
   // item per VM whose instance Incus holds (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs HasAnInstance: an externalId,
   // not NotFound, not Deleted; a Creating or Failed VM has no externalId yet, so the status filter below is the same set) and per
-  // volume Incus holds as Available (also while it attaches, detaches or deletes; the test checks the Available ones), `name` is the resource's display name, the record is matched by its id),
-  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Backup/BackupHealthPolicy.cs (ForDisk). An environment with no VM or volume alive measures only the Postgres item: the disk
-  // part is then NOT COVERED (plan.md), logged here for the report.
-  test('BAK-11 one item per VM Incus holds and per volume of beta-user Available, with a tenant and a string health', async () => {
+  // volume Incus holds as Available (also while it attaches, detaches or deletes; the test checks the Available ones), `name` is the resource's display name, the record is matched by its id;
+  // then one item per configured cluster, whether or not it has a config yet: kind `cluster`, the cluster's name, no tenant) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Abstractions/IAdminClusterService.cs (AdminClusterDto: clusterId, name;
+  // the same configured clusters, in config order) · titan-ops features/backup/design.md#cluster-backup ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Backup/BackupHealthPolicy.cs (ForDisk: no record ⇒ Missing NoBackup, for a cluster too).
+  // An environment with no VM or volume alive measures only the Postgres and cluster items: the VM and volume part is then
+  // NOT COVERED (plan.md), logged here for the report.
+  test('BAK-11 one item per VM Incus holds, per volume of beta-user Available and per cluster, with a tenant (none for a cluster) and a string health', async () => {
     const vms = (await get('admin', '/v1/admin/vms') as any[]).filter((v) => !['Creating', 'NotFound', 'Failed', 'Deleted'].includes(v.status))
     const volumes = (await get('tenant', '/v1/tenant/volumes') as any[]).filter((v) => v.status === 'Available')
+    const clusters = await get('admin', '/v1/admin/clusters') as any[]
     const tenant = await get('tenant', '/v1/tenant')
-    log(`BAK-11 vms=${vms.length} volumes(beta-user)=${volumes.length} diskItems=${diskItems.length}`)
+    log(`BAK-11 vms=${vms.length} volumes(beta-user)=${volumes.length} clusters=${clusters.map((c) => c.name).join(',')} diskItems=${diskItems.length}`)
     const vmItems = diskItems.filter((i) => i.kind === 'vm')
     const volumeItems = diskItems.filter((i) => i.kind === 'volume')
+    const clusterItems = diskItems.filter((i) => i.kind === 'cluster')
+    expect(diskItems.filter((i) => !['vm', 'volume', 'cluster'].includes(i.kind)), 'no item of another kind after Postgres').toEqual([])
     for (const vm of vms) {
       const mine = vmItems.filter((i) => i.name === vm.name && i.tenantId === vm.tenantId)
       expect(mine.length, `vm ${vm.name} (${vm.id})`).toBe(1)
@@ -147,6 +155,16 @@ test.describe.serial('backup', () => {
     for (const volume of volumes) {
       const mine = volumeItems.filter((i) => i.name === volume.name && i.tenantId === tenant.id)
       expect(mine.length, `volume ${volume.name} (${volume.id})`).toBe(1)
+    }
+    expect(clusters.length, 'GET /v1/admin/clusters lists the configured clusters').toBeGreaterThan(0)
+    for (const cluster of clusters) {
+      const mine = clusterItems.filter((i) => i.name === cluster.name)
+      log(`BAK-11 cluster ${cluster.clusterId} (${cluster.name}): ${mine.map((i) => `health=${i.health} reason=${i.reason} takenAt=${i.takenAt}`).join(' | ')}`)
+      expect(mine.length, `cluster ${cluster.name} (${cluster.clusterId})`).toBe(1)
+      expect(mine[0].tenantId ?? null, `cluster ${cluster.name}: no tenant`).toBeNull()
+    }
+    for (const item of clusterItems) {
+      expect(clusters.some((c) => c.name === item.name), `item for unknown cluster ${item.name}`).toBe(true)
     }
     for (const item of diskItems) {
       expect(['Ok', 'Stale', 'Missing', 'Unknown']).toContain(item.health)
@@ -159,8 +177,11 @@ test.describe.serial('backup', () => {
         expect(item.takenAt, item.name).toBeNull()
       }
     }
+    if (!clusterItems.some((i) => i.health === 'Missing')) {
+      log('BAK-11 every cluster has a config backup: the Missing cluster item is not measured this run')
+    }
     if (vms.length === 0 && volumes.length === 0) {
-      log('BAK-11 NOT COVERED for the disk part: no VM or volume Exists on this environment during the module')
+      log('BAK-11 NOT COVERED for the VM and volume part: no VM or volume Exists on this environment during the module')
     }
   })
 
@@ -203,27 +224,44 @@ test.describe.serial('backup', () => {
     await setLanguage(page, 'en')
   })
 
-  // OpenViCloud/titan-admin-console:portal/src/admin/pages/AdminBackupsPage.tsx (BackupTable: tenant name, kind label,
-  // reason text; the Postgres row has a dash in the tenant column). Needs a VM or volume item from BAK-11.
-  test('BAK-13 disk rows show the tenant name, the kind label and the reason, in English then Vietnamese', async () => {
-    test.skip(diskItems.length === 0, 'NOT COVERED: no VM or volume backup item on this environment during the module')
+  // OpenViCloud/titan-admin-console:portal/src/admin/pages/AdminBackupsPage.tsx (BackupTable: one row per item, the name in the
+  // first cell; the tenant column the tenant's name from GET /v1/tenants (useAdminTenants), a dash for an item without a
+  // tenant — Postgres and every cluster; the kind label t.adminBackups.kinds; the reason text t.adminBackups.reasons);
+  // labels in OpenViCloud/titan-admin-console:portal/src/i18n/en.ts and OpenViCloud/titan-admin-console:portal/src/i18n/vi.ts
+  // (adminBackups.kinds: vm VM/VM, volume Volume/Ổ đĩa, cluster Cluster config/Cấu hình cụm; reasons.NoBackup). Needs a
+  // VM, volume or cluster item from BAK-11.
+  test('BAK-13 disk and cluster rows show the tenant name or a dash, the kind label and the reason, in English then Vietnamese', async () => {
+    test.skip(diskItems.length === 0, 'NOT COVERED: no VM, volume or cluster backup item on this environment during the module')
     const page = await pageOf('admin')
-    const tenant = await get('tenant', '/v1/tenant')
-    const labels = { en: { vm: 'VM', volume: 'Volume', noBackup: 'No backup found.' }, vi: { vm: 'VM', volume: 'Ổ đĩa', noBackup: 'Không thấy bản sao lưu nào.' } }
+    const tenantNames = new Map((await get('admin', '/v1/tenants') as any[]).map((t) => [t.id as string, t.name as string]))
+    const labels = {
+      en: { vm: 'VM', volume: 'Volume', cluster: 'Cluster config', noBackup: 'No backup found.' },
+      vi: { vm: 'VM', volume: 'Ổ đĩa', cluster: 'Cấu hình cụm', noBackup: 'Không thấy bản sao lưu nào.' },
+    }
+    const exactly = (text: string) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
     for (const lang of ['en', 'vi'] as const) {
       await setLanguage(page, lang)
       const rows = page.getByRole('row')
-      await expect(rows.filter({ hasText: 'titan-db' }).locator('[data-column="tenant"]')).toHaveText('—')
+      const rowOf = (name: string) => rows.filter({ has: page.locator('td:first-child', { hasText: exactly(name) }) })
+      await expect(rowOf('titan-db').locator('[data-column="tenant"]')).toHaveText('—')
       for (const item of diskItems) {
-        const row = rows.filter({ has: page.locator('td', { hasText: new RegExp(`^${item.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }) })
-        await expect(row).toHaveCount(1)
-        if (item.tenantId === tenant.id) {
-          await expect(row.locator('[data-column="tenant"]')).toHaveText(tenant.name)
+        const kind = item.kind as 'vm' | 'volume' | 'cluster'
+        const row = rowOf(item.name)
+        await expect(row, `${kind} ${item.name}: one row`).toHaveCount(1)
+        if (kind === 'cluster') {
+          await expect(row.locator('[data-column="tenant"]')).toHaveText('—')
+        } else {
+          expect(tenantNames.has(item.tenantId), `${kind} ${item.name}: tenant ${item.tenantId} in GET /v1/tenants`).toBe(true)
+          await expect(row.locator('[data-column="tenant"]')).toHaveText(tenantNames.get(item.tenantId) as string)
         }
-        await expect(row).toContainText(labels[lang][item.kind as 'vm' | 'volume'])
+        await expect(row.locator('td').nth(2)).toHaveText(labels[lang][kind])
         if (item.health === 'Missing') {
           await expect(row).toContainText(labels[lang].noBackup)
         }
+      }
+      const clusterRow = diskItems.find((i) => i.kind === 'cluster')
+      if (clusterRow !== undefined) {
+        await rowOf(clusterRow.name).scrollIntoViewIfNeeded()
       }
       await page.screenshot({ path: `${RESULTS}/BAK-13-${lang}.png` })
     }
