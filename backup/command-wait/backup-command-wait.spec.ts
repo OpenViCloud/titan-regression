@@ -18,9 +18,8 @@ import { RUN, createVm, deleteVmAndWait, envOf, getVm, runNetwork, runs, waitVm 
 // OpenViCloud/titan-control-plane:Titan.Application/Options/RequestStuckOptions.cs (ThresholdMinutes = 15)
 const STUCK_AFTER_MS = 15 * 60_000
 // The runner's job ends after 90 minutes (OpenViCloud/titan-local-cluster:base/regression-runner/cronjob.yaml
-// activeDeadlineSeconds 5400), the results copied before that: the test's waits add up to 77 minutes at most (the
-// create 6, the hold 35, the snapshot 30, back from Snapshotting 6) and the VM's delete runs in afterAll, so only a worst
-// case of both runs past the deadline; on dev and prd the whole job took 4 to 5 minutes.
+// activeDeadlineSeconds 5400), the results copied before that: the test is capped at 75 minutes
+// (test.describe.configure below) and afterAll, which deletes the VM, at 20, so only a worst case of both runs past it.
 // Today's backup of every VM of a tenant queues in that tenant's backup lane, one at a time
 // (titan-ops features/provider/design.md#tenant-lane): the VM's may wait behind the others before it is Leased.
 const HOLD_BACKUP_MS = 35 * 60_000

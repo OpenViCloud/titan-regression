@@ -49,7 +49,7 @@ bak20 answers HOLD bak20 of backup/command-wait (BAK-20, titan-ops features/prov
 held VM's rows of core.provider_commands (psql SELECT in the titan-db primary pod, read only), creates a Job from CronJob
 control-plane-job-backup-schedule when today's vm.backup row of the VM is not there yet, answers go-bak20 once that row is
 Leased, then reads the rows every <every> seconds (logged when they change) until the backup and the snapshot's
-vm-snapshot.create row have ended, and deletes the Job it created. Last line L_BAK20=PASS (exit 0: the snapshot's row
+vm-snapshot.create row have ended or 600 s after the backup ended, and deletes the Job it created. Last line L_BAK20=PASS (exit 0: the snapshot's row
 read Pending with attempts 0 every time the backup was Leased, then both Done) | FAIL <what> (exit 1) | NOT_COVERED <why>
 (exit 4; skip-bak20 when it comes before the answer: today's backup of the VM already ended, the Job could not be
 created, the backup was not seen Leased in time; after go: no read had the snapshot's row while the backup was Leased).
@@ -881,7 +881,7 @@ def main(argv=None):
     p.add_argument("--log", required=True)
     p.add_argument("--every", type=float, default=3, help="seconds between two reads of the VM's command rows")
     p.add_argument("--leased-minutes", type=float, default=30, help="until today's backup of the VM is Leased")
-    p.add_argument("--watch-minutes", type=float, default=45, help="after go, until the backup and the snapshot end")
+    p.add_argument("--watch-minutes", type=float, default=45, help="after go, until the backup and the snapshot end (or 600 s after the backup ended)")
     p.add_argument("--timeout-minutes", type=float, default=80, help="until HOLD bak20")
     p.set_defaults(func=cmd_bak20)
     p = sub.add_parser("sample")
