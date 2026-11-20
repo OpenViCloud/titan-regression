@@ -49,10 +49,10 @@ bak20 answers HOLD bak20 of backup/command-wait (BAK-20, titan-ops features/prov
 held VM's rows of core.provider_commands (psql SELECT in the titan-db primary pod, read only), creates a Job from CronJob
 control-plane-job-backup-schedule when today's vm.backup row of the VM is not there yet, answers go-bak20 once that row is
 Leased, then reads the rows every <every> seconds (logged when they change) until the backup and the snapshot's
-vm-snapshot.create row have ended or 600 s after the backup ended, and deletes the Job it created. Last line L_BAK20=PASS (exit 0: the snapshot's row
-read Pending with attempts 0 every time the backup was Leased, then both Done) | FAIL <what> (exit 1) | NOT_COVERED <why>
-(exit 4; skip-bak20 when it comes before the answer: today's backup of the VM already ended, the Job could not be
-created, the backup was not seen Leased in time; after go: no read had the snapshot's row while the backup was Leased).
+vm-snapshot.create row have ended or 600 s after the backup ended, and deletes the Job it created. Last line
+L_BAK20=PASS (exit 0: the snapshot's row read Pending with attempts 0 every time the backup was Leased, then both Done) | FAIL <what> (exit 1) | NOT_COVERED <why>
+(exit 4; skip-bak20 when it comes before the answer: core.provider_commands could not be read, today's backup of the
+VM already ended, the Job could not be created, the backup was not seen Leased in time; after go: no read had the snapshot's row while the backup was Leased).
 
 Exit 2: usage, the pending HOLD is not the step asked for, or no ControlMaster on the socket. wait: exit 3 = the runner finished with no HOLD pending.
 """
