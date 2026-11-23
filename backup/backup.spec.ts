@@ -98,7 +98,7 @@ test.describe.serial('backup', () => {
     expect(result.error ?? null).toBeNull()
   })
 
-  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Backup/Contracts/BackupsQueryResult.cs,
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Admin/Backup/Contracts/AdminBackupsResult.cs (readAt, items, restoreDrills),
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Backup/BackupHealthPolicy.cs (ForPostgres: Stale after 26 hours of the newest base; the WAL age is information only).
   test('BAK-06 the newest Postgres backup is Ok, recent, sized and read within 30 minutes', async () => {
     const backups = await get('admin', '/v1/admin/backups')
