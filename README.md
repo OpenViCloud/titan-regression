@@ -168,7 +168,7 @@ python3 run-lanes.py --check
 Rows the runner runs go in this order within a lane (`lanes.json` says which module is in which lane), one job each: a later module may use what an earlier one left in the run (the run's network); the
 module that changes the tenant's state and the one that deletes the run's network come after every module that uses them,
 `cleanup` after every module that leaves `rg-*` resources, and `terraform-provider` after `cleanup`, because its tests
-create a network and beta-user may hold one.
+create a network and beta-user's network cap may leave no room for it.
 
 | # | Module | Measures | Dev | Release | Spec |
 |---|---|---|---|---|---|

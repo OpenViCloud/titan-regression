@@ -12,7 +12,7 @@ import { newSecret } from './token'
 // tests by environment only, and deleted in afterAll. The binary is `go test -c` of the provider commit the release
 // measures, built for the node's architecture; the agent copies it through the runner's BINARY_WAIT path
 // (/work/bin/openvicloud, the name run-module.sh writes). terraform-plugin-testing finds no terraform in PATH and
-// installs one with hc-install. Runs after cleanup: the tests create networks and beta-user may hold one. Resources a
+// installs one with hc-install. Runs after cleanup: the tests create networks and beta-user's cap may leave no room. Resources a
 // red run leaves are named tfacc-*: a red run is followed at once by one more cleanup job, which sweeps them.
 // TFP-04 and TFP-08 are by hand.
 const BINARY = '/work/bin/openvicloud'
