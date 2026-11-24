@@ -585,7 +585,7 @@ Trang đăng nhập Keycloak, theme `openvicloud`. Mỗi case một context mớ
 
 ## site — trang không đăng nhập (Phase 4, trên máy agent — không runner)
 
-SITE-01, SITE-02 đo bằng trình duyệt trên máy agent (Playwright MCP hoặc browser pane), mỗi case một context mới (chưa có `ovc-lang`), không đăng nhập. Nhánh quốc gia chỉ có sau Cloudflare: runner của env release (prd) ở Singapore không đo được. Trước mỗi case đó đọc `GET <origin>/cdn-cgi/trace` **trong chính trình duyệt đó**: `loc` khác `VN` ⇒ case ghi **N/A — máy đo không ở Việt Nam**, kèm dòng `loc=`. SITE-03…06 và SITE-16 đo bằng lệnh trên máy agent, SITE-07, SITE-13…15, SITE-18 và SITE-24 bằng trình duyệt; cả hai không phụ thuộc quốc gia.
+SITE-01, SITE-02 đo bằng trình duyệt trên máy agent (Playwright MCP hoặc browser pane), mỗi case một context mới (chưa có `ovc-lang`), không đăng nhập. Nhánh quốc gia chỉ có sau Cloudflare: runner của env release (prd) ở Singapore không đo được. Trước mỗi case đó đọc `GET <origin>/cdn-cgi/trace` **trong chính trình duyệt đó**: `loc` khác `VN` ⇒ case ghi **N/A — máy đo không ở Việt Nam**, kèm dòng `loc=`. SITE-03…06 và SITE-16 đo bằng lệnh trên máy agent, SITE-07, SITE-13…15, SITE-18, SITE-24 và SITE-25 bằng trình duyệt; cả hai không phụ thuộc quốc gia.
 
 | ID | Khi | Kỳ vọng | Nguồn |
 |---|---|---|---|
