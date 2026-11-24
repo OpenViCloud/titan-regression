@@ -8,7 +8,7 @@ export function nameOf(kind: string): string {
   return `rg-${kind}-${RUN}`
 }
 
-// The shared run network: a test tenant may hold one network (MaxNetworks = 1), so every module of a lane uses the same one.
+// The shared run network: a test tenant's network cap may leave no room for more, so every module of a lane uses the same one.
 export const RUN_NETWORK_PREFIX = 'rg-net-'
 export const RUN_CIDR = '10.76.0.0/24'
 

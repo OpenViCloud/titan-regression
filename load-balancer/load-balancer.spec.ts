@@ -6,7 +6,7 @@ import { cleanUp } from './clean-up'
 import { RUN, activityOf, countOf, createVm, deleteVmAndWait, envOf, existenceShape, runNetwork, waitNetwork, networkUsable, waitVm } from './fixtures'
 
 // Cases LB-01..LB-07, LB-09..LB-11, LB-13..LB-15 and LB-17 of plan.md (LB-08, traffic through the VIP, and LB-12 read the Incus
-// host). The run network has no public IPv6 and beta-user holds one network, so the positive cases raise maxNetworks by
+// host). The run network has no public IPv6 and beta-user's network cap may leave no room, so the positive cases raise maxNetworks by
 // one for a second network with IPv6, and give it back in afterAll — in a cluster that names no IPv6 block they are
 // skipped. LB-09, LB-10, LB-11, LB-13, LB-17, LB-14 and LB-15 run between LB-05 and LB-06 on load balancers of their own, never
 // LB-03's (LB-06 counts activity by its name), each Deleted before LB-06/LB-07.

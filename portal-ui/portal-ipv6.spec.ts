@@ -5,7 +5,7 @@ import { cleanUp } from './clean-up'
 import { createVm, deleteVmAndWait, envOf, existenceShape, nameOf, waitNetwork, networkUsable, runs, waitVm } from './fixtures'
 
 // Cases UI-16..17 of plan.md: a network with public IPv6 through the form, a VM on it, and a load
-// balancer through its form. beta-user holds MaxNetworks = 1 (the shared run network, with no IPv6), so this
+// balancer through its form. beta-user's network cap may have no room beyond the shared run network (no IPv6), so this
 // module raises maxNetworks by one for its own second network and gives it back in afterAll — the exact pattern
 // of load-balancer/load-balancer.spec.ts. Skips (not fails) when the cluster has no IPv6 block.
 
