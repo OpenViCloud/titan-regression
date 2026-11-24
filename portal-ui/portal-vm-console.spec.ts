@@ -1,18 +1,19 @@
-import { test, expect, type Page, type Route } from '@playwright/test'
+import { test, expect, type Locator, type Page, type Route } from '@playwright/test'
 import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { PORTAL, closeSessions, pageOf, useBrowser } from './auth'
 import { API, RESULTS, bodyOf, call, expectStatus, get, log, newKey, sleep, startLog } from './api'
 import { cleanUp } from './clean-up'
 import { RUN, envOf, nameOf, runNetwork, runs, waitVm } from './fixtures'
 
-// Cases UI-35..UI-40 of plan.md: the console password, stop timeout and cloud-init user data fields of the Create VM form,
-// the Console tab of the VM page, its Stop timeout panel and its Add SSH key dialog. One VM, made through the form by
+// Cases UI-35..UI-40 and UI-42 of plan.md: the console password, stop timeout and cloud-init user data fields of the Create VM
+// form and its three sections at 375px and 1440px, the Console tab of the VM page, its Stop timeout panel and its Add SSH key dialog. One VM, made through the form by
 // UI-35, is the subject of UI-36, UI-38, UI-39 (its user data read back) and UI-40; UI-37 sends no create. UI-36 opens console sessions of the tenant: they count toward its five SSH and console
 // sessions, so this file does not run beside a job that counts them (CLAUDE.md, shared data between lanes).
 
 // The words of the form in each language (OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts,
 // OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts: vms.create, vmCreate.title, namePlaceholder, cluster, network, template,
-// size, consolePassword, stopTimeout, userData, submit, consolePasswordLength, stopTimeoutRange, userDataTooLarge).
+// size, consolePassword, stopTimeout, userData, submit, consolePasswordLength, stopTimeoutRange, userDataTooLarge, access, accessHint,
+// advanced). Stop timeout and user data sit under Advanced, closed until opened (titan-ops features/vm/design.md#vm-create-form).
 type FormWords = {
   lang: 'en' | 'vi'
   open: string
@@ -29,6 +30,9 @@ type FormWords = {
   passwordLength: string
   stopTimeoutRange: string
   userDataTooLarge32770: string
+  access: string
+  accessHint: string
+  advanced: string
 }
 
 const FORM: Record<'en' | 'vi', FormWords> = {
@@ -48,6 +52,9 @@ const FORM: Record<'en' | 'vi', FormWords> = {
     passwordLength: 'The console password must be 12 to 72 characters.',
     stopTimeoutRange: 'The stop timeout must be a whole number of seconds from 30 to 1800.',
     userDataTooLarge32770: 'Cloud-init user data is 32770 bytes; the limit is 32768.',
+    access: 'Access (optional)',
+    accessHint: 'Without an SSH key, log in on the Console tab with a console password, or add a key later on the VM page.',
+    advanced: 'Advanced',
   },
   vi: {
     lang: 'vi',
@@ -65,6 +72,9 @@ const FORM: Record<'en' | 'vi', FormWords> = {
     passwordLength: 'Mật khẩu console phải từ 12 đến 72 ký tự.',
     stopTimeoutRange: 'Thời gian dừng phải là số giây nguyên, từ 30 đến 1800.',
     userDataTooLarge32770: 'Cloud-init user data dài 32770 byte, vượt giới hạn 32768.',
+    access: 'Truy cập (không bắt buộc)',
+    accessHint: 'Không có SSH key thì đăng nhập ở tab Console bằng mật khẩu console, hoặc thêm key sau ở trang VM.',
+    advanced: 'Nâng cao',
   },
 }
 
@@ -101,6 +111,20 @@ async function openFilledForm(page: Page, words: FormWords, name: string, choice
   await dialog.getByRole('combobox', { name: words.template, exact: true }).selectOption(choices.templateId)
   await dialog.getByRole('combobox', { name: words.size, exact: true }).selectOption(choices.tier)
   return dialog
+}
+
+// The Advanced button: its name starts with words.advanced and goes on with the summary of what it holds.
+function advancedOf(dialog: Locator, words: FormWords): Locator {
+  return dialog.getByRole('button', { name: new RegExp(`^${words.advanced}`) })
+}
+
+// Opens Advanced, closed when the form opens; its fields are not on the page until then.
+async function openAdvanced(dialog: Locator, words: FormWords): Promise<void> {
+  const advanced = advancedOf(dialog, words)
+  await expect(advanced).toHaveAttribute('aria-expanded', 'false')
+  await expect(dialog.getByLabel(words.stopTimeout, { exact: true })).toHaveCount(0)
+  await advanced.click()
+  await expect(advanced).toHaveAttribute('aria-expanded', 'true')
 }
 
 // Every POST /v1/tenant/vms of the page while held: counted, then aborted, so a form that wrongly sends one makes no VM.
@@ -234,7 +258,7 @@ async function everyThirtySeconds(send: () => Promise<void>, seen: () => boolean
 // UI-37: the stop timeout field of the form. No VM: every create the form sends is aborted and counted.
 // ---------------------------------------------------------------------------------------------------------------
 
-test.describe.serial('portal-ui vm form: stop timeout', () => {
+test.describe.serial('portal-ui vm form: stop timeout and sections', () => {
   test.describe.configure({ timeout: 10 * 60_000 })
 
   const nameSt = nameOf('vmuist')
@@ -262,13 +286,14 @@ test.describe.serial('portal-ui vm form: stop timeout', () => {
   // vmCreate.stopTimeoutRange, before the four choices) · OpenViCloud/titan-cloud-console:portal/src/lib/vmStopTimeout.ts
   // (STOP_TIMEOUT_DEFAULT 120, parseStopTimeout: /^\d+$/ and 30..1800) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts,
   // OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts (vmCreate.stopTimeout, vmCreate.stopTimeoutRange)
-  test('UI-37 the Stop timeout field starts at 120; 29 and abc show the 30 to 1800 message and send no create, in English then Vietnamese', async () => {
+  test('UI-37 the Stop timeout field, under Advanced, starts at 120; 29 and abc show the 30 to 1800 message and send no create, in English then Vietnamese', async () => {
     const choices = await choicesOf()
     const page = await pageOf('tenant')
     const held = await holdCreates(page)
     try {
       for (const words of [FORM.en, FORM.vi]) {
         const dialog = await openFilledForm(page, words, nameSt, choices)
+        await openAdvanced(dialog, words)
         const field = dialog.getByLabel(words.stopTimeout, { exact: true })
         await expect(field).toHaveValue('120')
         for (const typed of ['29', 'abc']) {
@@ -285,6 +310,62 @@ test.describe.serial('portal-ui vm form: stop timeout', () => {
         await expect(dialog).toHaveCount(0)
       }
     } finally {
+      await held.release()
+    }
+  })
+
+  // titan-ops features/vm/design.md#vm-create-form (five choices, then Access (optional) open with its hint, then Advanced
+  // closed; the dialog scrolls inside itself when taller than the screen) · titan-ops features/cloud-console/design.md#portal-shell
+  // (nothing scrolls sideways at 375px) · OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx (advancedOpen,
+  // DialogContent max-h and overflow-y-auto) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts,
+  // OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts (vmCreate.access, accessHint, advanced). Nothing is sent: no create.
+  test('UI-42 the Create VM form at 375px and 1440px: five choices, then Access (optional) with its hint, then Advanced closed; the whole form reachable, nothing scrolls sideways; Vietnamese at 375px', async () => {
+    const page = await pageOf('tenant')
+    const held = await holdCreates(page)
+    try {
+      for (const { words, width, height } of [
+        { words: FORM.en, width: 375, height: 812 },
+        { words: FORM.en, width: 1440, height: 900 },
+        { words: FORM.vi, width: 375, height: 812 },
+      ]) {
+        const at = `${width}-${words.lang}`
+        await page.setViewportSize({ width, height })
+        await useLanguage(page, '/vms', words.lang)
+        await page.getByRole('button', { name: words.open, exact: true }).click()
+        const dialog = page.getByRole('dialog')
+        await expect(dialog.getByRole('heading', { name: words.title })).toBeVisible()
+
+        const access = dialog.getByRole('group', { name: words.access })
+        await expect(access).toBeVisible()
+        await expect(access.getByText(words.accessHint, { exact: true })).toBeVisible()
+        await expect(access.getByLabel(words.consolePassword, { exact: true })).toBeVisible()
+        const size = await dialog.getByRole('combobox', { name: words.size, exact: true }).boundingBox()
+        const group = await access.boundingBox()
+        expect(size !== null && group !== null && size.y < group.y, `${at}: Size above Access`).toBe(true)
+        await expect(advancedOf(dialog, words)).toHaveAttribute('aria-expanded', 'false')
+        await expect(dialog.getByLabel(words.stopTimeout, { exact: true })).toHaveCount(0)
+        await expect(dialog.getByLabel(words.userData, { exact: true })).toHaveCount(0)
+
+        // The dialog stays inside the screen; what does not fit scrolls inside it.
+        const box = await dialog.boundingBox()
+        expect(box !== null && box.y >= 0 && box.y + box.height <= height + 1, `${at}: dialog ${JSON.stringify(box)} inside ${height}px`).toBe(true)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth), `${at}: no sideways scroll`).toBe(width)
+        await page.screenshot({ path: `${RESULTS}/UI-42-${at}-closed.png` })
+
+        await openAdvanced(dialog, words)
+        await expect(dialog.getByLabel(words.stopTimeout, { exact: true })).toHaveValue('120')
+        const submit = dialog.getByRole('button', { name: words.submit, exact: true })
+        await submit.scrollIntoViewIfNeeded()
+        await expect(submit).toBeInViewport()
+        expect(await page.evaluate(() => document.documentElement.scrollWidth), `${at} open: no sideways scroll`).toBe(width)
+        await page.screenshot({ path: `${RESULTS}/UI-42-${at}-advanced.png` })
+        log(`UI-42 ${at}: Access (optional) after Size, Advanced closed then open, dialog inside the screen, scrollWidth ${width}`)
+        await page.keyboard.press('Escape')
+        await expect(dialog).toHaveCount(0)
+      }
+      expect(held.posted, 'UI-42 sends no create').toEqual([])
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 })
       await held.release()
     }
   })
@@ -344,7 +425,8 @@ test.describe.serial('portal-ui vm: console password, stop timeout panel and Con
     try {
       const dialog = await openFilledForm(page, FORM.en, namePw, choices)
       const password = dialog.locator('#console-password')
-      await expect(dialog.getByLabel(FORM.en.consolePassword, { exact: true })).toHaveAttribute('type', 'password')
+      // The console password sits under Access (optional), open from the start.
+      await expect(dialog.getByRole('group', { name: FORM.en.access }).getByLabel(FORM.en.consolePassword, { exact: true })).toHaveAttribute('type', 'password')
       await password.fill(passwordOf(11))
       await dialog.getByRole('button', { name: FORM.en.submit, exact: true }).click()
       await expect(dialog.getByText(FORM.en.passwordLength, { exact: true })).toBeVisible()
@@ -360,6 +442,7 @@ test.describe.serial('portal-ui vm: console password, stop timeout panel and Con
     const dialog = page.getByRole('dialog')
     consolePassword = passwordOf(16)
     await dialog.locator('#console-password').fill(consolePassword)
+    await openAdvanced(dialog, FORM.en)
     await dialog.getByLabel(FORM.en.stopTimeout, { exact: true }).fill('300')
     userDataPasted = `#cloud-config\n# rg-${RUN} ✓ tiếng Việt\n`
     await dialog.getByLabel(FORM.en.userData, { exact: true }).fill(userDataPasted)
@@ -419,6 +502,7 @@ test.describe.serial('portal-ui vm: console password, stop timeout panel and Con
     try {
       for (const words of [FORM.en, FORM.vi]) {
         const dialog = await openFilledForm(page, words, nameUd, choices)
+        await openAdvanced(dialog, words)
         const field = dialog.getByLabel(words.userData, { exact: true })
         if (words.lang === 'en') {
           await expect(field).toHaveAttribute('placeholder', '#cloud-config')
