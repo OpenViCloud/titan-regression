@@ -5,8 +5,8 @@ import { cleanUp } from './clean-up'
 import { envOf, nameOf, networkUsable, waitNetwork } from './fixtures'
 
 // Cases UI-30..31 of plan.md: rename a network through its dialog, then delete it through the confirm dialog.
-// The network is this spec's own (no VM, no load balancer): beta-user holds MaxNetworks = 1 (the shared run
-// network), so the spec raises maxNetworks by one before creating it and gives the quota back in afterAll — the
+// The network is this spec's own (no VM, no load balancer): beta-user's network cap may have no room beyond the shared run
+// network, so the spec raises maxNetworks by one before creating it and gives the quota back in afterAll — the
 // pattern of portal-ipv6.spec.ts. afterAll also deletes the network if the cases stopped before their own delete.
 const NETUI_CIDR = '10.86.0.0/24' // apart from every other CIDR the specs use
 
