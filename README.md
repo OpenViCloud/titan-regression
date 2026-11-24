@@ -197,7 +197,9 @@ create a network and beta-user's network cap may leave no room for it.
 | 23 | `worker` | the worker image the release environment runs comes from `OpenViCloud/titan-incus-worker`, pulls anonymously; the worker's command kinds match the control plane's, and its commands without a requestId fail for good (`go test` at the worker sha); one process reads the clusters (pod log); the Deployments by role — `gh`/`curl`/`kubectl` reads on the agent's machine | no | yes | no |
 | 24 | `control-plane-image` | the control plane image the release environment runs comes from `OpenViCloud/titan-control-plane`, pulls anonymously, digest matches every pod; two to four pods with their autoscaler and disruption budget; the pod priorities of the cluster; the nine background job CronJobs and the IPv6 route seed hook — `gh`/`curl`/`kubectl` reads on the agent's machine | no | yes | no |
 
-Steps outside the runner: before `billing` the agent runs `billing/seed-invoices.sql` (psql on the environment's
+### Steps outside the runner
+
+Before `billing` the agent runs `billing/seed-invoices.sql` (psql on the environment's
 database; on the release environment an approved `L-x`), after `concurrency` it runs `billing/check-wallets.sql` (read only, BIL-14);
 modules `cli` and `terraform-provider` need the agent to copy a binary into the pod when the spec logs `BINARY_WAIT`
 (`cli`: the CLI built for the node's architecture; `terraform-provider`: `GOOS=linux GOARCH=<node> CGO_ENABLED=0 go test -c`
