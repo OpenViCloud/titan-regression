@@ -96,7 +96,7 @@ Around the job, some modules need more:
   `GOOS=linux GOARCH=<arch> CGO_ENABLED=0 go build -o <out> ./cmd/openvicloud`, and pass `<out>` as `[binary]`. When
   the pod logs `BINARY_WAIT`, the script creates `/work/bin`, copies the file to `/work/bin/openvicloud`, compares the
   sha256 on both ends and touches `/work/bin/openvicloud.ready`.
-- `terraform-provider`: runs after `cleanup` (`beta-user` may hold only one network). The binary is
+- `terraform-provider`: runs after `cleanup` (`beta-user`'s network cap may leave no room beyond the run network). The binary is
   `GOOS=linux GOARCH=<arch> CGO_ENABLED=0 go test -c -o <out> .` in a clone of the provider repo at the pinned commit,
   copied like `cli`. The spec makes an API token from `beta-user`'s JWT, passes it to `-test.run TestAcc` as
   `OPENVICLOUD_TOKEN` and deletes it in `afterAll`: the secret never leaves the pod. A red run, repeated or not, is
@@ -114,7 +114,7 @@ version of the runner changes the image tag in `cronjob.yaml` and `cronjob-lane-
 
 ## Run the lanes
 
-`beta-user` may hold one network and one quota, so one tenant runs one module at a time. The run is split in two lanes, each
+A test tenant's network cap may leave no room beyond the run network, and it has one quota, so one tenant runs one module at a time. The run is split in two lanes, each
 with a tenant of its own (`beta-user`, `beta-user-2`) and a CronJob of its own (`titan-regression`, `titan-regression-b`).
 `lanes.json` says which module runs in which lane and where a lane waits for the other (`barrier`, `signal`/`wait`,
 `external` for what the agent does outside the runner). It refuses a plan in which two modules that share a wallet or a

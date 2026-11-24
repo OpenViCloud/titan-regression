@@ -127,7 +127,7 @@ test.describe.serial('network', () => {
     const row = await quotaRow()
     original = { maxVms: row.maxVms, maxNetworks: row.maxNetworks, maxPublicIpv6: row.maxPublicIpv6 }
     log(`quota before: ${JSON.stringify(original)}`)
-    // A run network left by an earlier run would take beta-user's only network slot: remove it first.
+    // A run network left by an earlier run would take a slot of beta-user's network cap: remove it first.
     for (const old of await listNetworks()) {
       if (old.name.startsWith(RUN_NETWORK_PREFIX) && old.status !== 'Deleting' && old.status !== 'Deleted') {
         log(`setup: deleting the run network of an earlier run ${old.name}`)
@@ -444,7 +444,7 @@ test.describe.serial('network', () => {
     const block = await clusterIpv6Block()
     log(`NET-11 ipv6Block=${block}`)
     test.skip(!block, 'the cluster has no IPv6 block')
-    // Room for a and b now, and for NET-13's refused d (c takes a's place): beta-user may hold one network.
+    // Room for a and b now, and for NET-13's refused d (c takes a's place): beta-user's cap may leave no room beyond the run network.
     const counting = (await countingNetworks()).length
     await setQuota({ maxVms: original!.maxVms, maxNetworks: Math.max(original!.maxNetworks, counting) + 3 })
     const a = await createIpv6Network('a')
