@@ -87,8 +87,8 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
 
   let vmId = ''
   let volumeId = ''
-  // UI-02's user data field as submitted and its POST /v1/tenant/vms body, read by UI-39.
-  let userDataField: string | null = null
+  // Whether UI-02's form kept Advanced (and its user data field) closed, and its POST /v1/tenant/vms body, read by UI-39.
+  let advancedClosed: boolean | null = null
   let createBody: Record<string, unknown> | null = null
   const vmName = nameOf('vmflow')
   const volumeName = nameOf('volflow')
@@ -185,7 +185,9 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     await dialog.getByRole('combobox', { name: 'Network' }).selectOption(network.id)
     await dialog.getByRole('combobox', { name: 'Template' }).selectOption(templateId)
     await dialog.getByRole('combobox', { name: 'Size' }).selectOption(smallTier)
-    userDataField = await dialog.locator('#vm-user-data').inputValue()
+    // Created with Advanced never opened: its user data field is not on the page (titan-ops features/vm/design.md#vm-create-form).
+    const advanced = dialog.getByRole('button', { name: /^Advanced/ })
+    advancedClosed = (await advanced.getAttribute('aria-expanded')) === 'false' && (await dialog.locator('#vm-user-data').count()) === 0
     const sent = page.waitForRequest((req) => req.method() === 'POST' && new URL(req.url()).pathname === '/v1/tenant/vms')
     await dialog.getByRole('button', { name: 'Create VM' }).click()
     createBody = (await sent).postDataJSON()
@@ -216,13 +218,13 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
   })
 
   // Right after UI-02, so UI-04 and UI-03 still follow it. titan-ops features/vm/user-stories.md#us-vm-userdata ·
-  // OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx (handleSubmit: request.userData only when the field
-  // is not empty)
-  test('UI-39 UI-02 left the user data field empty and its POST /v1/tenant/vms body has no userData field', async () => {
+  // titan-ops features/vm/design.md#vm-create-form · OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx
+  // (handleSubmit: request.userData only when the field is not empty; Advanced closed by default)
+  test('UI-39 UI-02 created with Advanced closed (no user data field on the page) and its POST /v1/tenant/vms body has no userData field', async () => {
     test.skip(createBody === null, 'UI-02 sent no create')
-    expect(userDataField, 'the user data field as UI-02 submitted it').toBe('')
+    expect(advancedClosed, 'UI-02 created with Advanced closed').toBe(true)
     expect(Object.keys(createBody!), `UI-02 body ${JSON.stringify(createBody)}`).not.toContain('userData')
-    log(`UI-39 UI-02's create: field empty, body fields ${Object.keys(createBody!).join(',')}, no userData`)
+    log(`UI-39 UI-02's create: Advanced closed, body fields ${Object.keys(createBody!).join(',')}, no userData`)
   })
 
   // titan-ops features/volume/design.md#volume-portal · OpenViCloud/titan-cloud-console:portal/src/pages/VmDetailPage.tsx (Snapshots tab)

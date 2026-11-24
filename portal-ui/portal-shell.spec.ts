@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { ADMIN, PORTAL, closeSessions, pageOf, useBrowser } from './auth'
 import { RESULTS, log, startLog } from './api'
 
-// Cases UI-09..UI-11 and UI-15 of plan.md: theme, brand, language and the shell of both portals.
+// Cases UI-09..UI-11, UI-15 and UI-43 of plan.md: theme, brand, language and the shell of both portals.
 // Colours are the token values of OpenViCloud/titan-cloud-console:portal/src/index.css (light in @theme, dark under [data-theme=dark]).
 const LIGHT_BACKGROUND = 'rgb(243, 244, 247)'
 const DARK_BACKGROUND = 'rgb(13, 14, 18)'
@@ -155,5 +155,51 @@ test.describe.serial('portal-ui shell', () => {
     expect(await admin.evaluate(() => document.documentElement.lang)).toBe('vi')
     await admin.screenshot({ path: `${RESULTS}/UI-15-admin-vi.png` })
     log('UI-15 vi picked and kept after reload; English back; admin vi kept after reload')
+  })
+
+  // titan-ops features/cloud-console/design.md#portal-language (a top-bar button names the other language in itself; the account
+  // menu keeps both) · titan-ops features/cloud-console/design.md#portal-shell (nothing scrolls sideways at 375px) ·
+  // OpenViCloud/titan-cloud-console:portal/src/components/shell/AppShell.tsx (languageOptions filtered to the other language),
+  // the same file in OpenViCloud/titan-admin-console
+  test('UI-43 the top bar has a button naming the other language: at 375px it fits, switches the portal to Vietnamese and back, and is remembered; the admin portal has it too', async () => {
+    const page = await pageOf('tenant')
+    await page.setViewportSize({ width: 375, height: 812 })
+    try {
+      await page.goto(PORTAL + '/', { waitUntil: 'networkidle' })
+      await page.evaluate(() => localStorage.setItem('ovc-lang', 'en'))
+      await page.reload({ waitUntil: 'networkidle' })
+      const banner = page.getByRole('banner')
+      const toVietnamese = banner.getByRole('button', { name: 'Tiếng Việt', exact: true })
+      await expect(toVietnamese).toBeInViewport({ ratio: 1 })
+      await expect(toVietnamese).toHaveAttribute('lang', 'vi')
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(375)
+      await page.screenshot({ path: `${RESULTS}/UI-43-customer-375-en.png` })
+
+      await toVietnamese.click()
+      await expect(page.getByRole('navigation', { name: 'Điều hướng chính' })).toBeAttached()
+      expect(await page.evaluate(() => document.documentElement.lang)).toBe('vi')
+      const toEnglish = banner.getByRole('button', { name: 'English', exact: true })
+      await expect(toEnglish).toBeInViewport({ ratio: 1 })
+      await expect(banner.getByRole('button', { name: 'Tiếng Việt', exact: true })).toHaveCount(0)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(375)
+      await page.reload({ waitUntil: 'networkidle' })
+      expect(await page.evaluate(() => localStorage.getItem('ovc-lang'))).toBe('vi')
+      await page.screenshot({ path: `${RESULTS}/UI-43-customer-375-vi.png` })
+      await banner.getByRole('button', { name: 'English', exact: true }).click()
+      expect(await page.evaluate(() => document.documentElement.lang)).toBe('en')
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 })
+    }
+
+    const admin = await pageOf('admin')
+    await admin.goto(ADMIN + '/', { waitUntil: 'networkidle' })
+    await admin.evaluate(() => localStorage.setItem('ovc-lang', 'en'))
+    await admin.reload({ waitUntil: 'networkidle' })
+    await admin.getByRole('banner').getByRole('button', { name: 'Tiếng Việt', exact: true }).click()
+    await expect(admin.getByRole('navigation', { name: 'Điều hướng chính' })).toBeVisible()
+    await admin.screenshot({ path: `${RESULTS}/UI-43-admin-vi.png` })
+    await admin.getByRole('banner').getByRole('button', { name: 'English', exact: true }).click()
+    await expect(admin.getByRole('navigation', { name: 'Main' })).toBeVisible()
+    log('UI-43 customer at 375px: Tiếng Việt fits, switches to vi and back, kept after reload; admin switches too')
   })
 })
