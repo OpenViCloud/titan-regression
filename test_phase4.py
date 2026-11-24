@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import types
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -21,8 +22,11 @@ _spec.loader.exec_module(phase4)
 # FAKE_STATE/pod, after which `logs <pod>` prints FAKE_LOG_AFTER_TOUCH_<files touched> or FAKE_LOG_AFTER_TOUCH when set. ssh: a command holding `incus query '<path>'`
 # that is a key of FAKE_QUERIES prints its JSON value (FAKE_STOP_AFTER/FAKE_STOP_FILE touch a file after that many such reads).
 # FAKE_GUEST {substring: [[output, exit], …]}: a host command holding the substring gets its next pair (the last repeats).
-# kubectl `exec … psql` prints the next [output, exit] pair of FAKE_PSQL (the last repeats); `create job`/`delete job` exit
-# FAKE_JOB_EXIT; `get cronjob` adds the names of FAKE_CRONJOBS; `get pods -l <the titan-db primary>` is titan-db-1.
+# kubectl `exec … psql` prints the next [output, exit] pair of FAKE_PSQL (the last repeats); when FAKE_PSQL is an object,
+# the pairs of its first key the SQL holds, each key with its own count. `create job`/`delete job` exit
+# FAKE_JOB_EXIT; `get job <name>` prints the status of FAKE_JOB_STATUS whose key the name holds (none: one pod succeeded),
+# `logs job/<name>` a curl error; `get cronjob` adds the names of FAKE_CRONJOBS, `get cronjob <name>` prints the next
+# `.status.active` of FAKE_CRONJOB_ACTIVE (unset: none); `get pods -l <the titan-db primary>` is titan-db-1.
 # kubectl `exec … openssl` prints FAKE_OPENSSL (unset ⇒ exit 127, no openssl); `exec -i … grep` counts the stdin lines
 # holding FAKE_POD_PASSWORD, the pod's password file, which no argument carries.
 FAKE_KUBECTL = textwrap.dedent('''\
@@ -38,7 +42,13 @@ FAKE_KUBECTL = textwrap.dedent('''\
         args = args[2:]
     def items(*names):
         print(json.dumps({"items": [{"metadata": {"name": n, "namespace": "ns-" + n}} for n in names]}))
-    if args[:2] == ["get", "cronjob"]:
+    if args[:2] == ["get", "cronjob"] and len(args) > 2 and not args[2].startswith("-"):
+        counter = state / "cronjob-reads"
+        n = int(counter.read_text()) if counter.exists() else 0
+        counter.write_text(str(n + 1))
+        active = json.loads(os.environ.get("FAKE_CRONJOB_ACTIVE", "[[]]"))
+        print(json.dumps({"status": {"active": active[min(n, len(active) - 1)]}}))
+    elif args[:2] == ["get", "cronjob"]:
         items("titan-regression", *json.loads(os.environ.get("FAKE_CRONJOBS", "[]")))
     elif args[:2] == ["get", "pods"] and "cnpg.io/cluster=titan-db,cnpg.io/instanceRole=primary" in args:
         items("titan-db-1")
@@ -47,6 +57,8 @@ FAKE_KUBECTL = textwrap.dedent('''\
         n = int(counter.read_text()) if counter.exists() else 0
         counter.write_text(str(n + 1))
         items(*(["regression-phase4-prd-abc"] if n >= int(os.environ.get("FAKE_POD_AFTER", "0")) else []))
+    elif args[:1] == ["logs"] and args[1].startswith("job/"):
+        print("curl: (22) The requested URL returned error: 500")
     elif args[:1] == ["logs"]:
         counter = state / "log-reads"
         n = int(counter.read_text()) if counter.exists() else 0
@@ -73,11 +85,20 @@ FAKE_KUBECTL = textwrap.dedent('''\
         n = int(counter.read_text()) if counter.exists() else 0
         counter.write_text(str(n + 1))
         reads = json.loads(os.environ["FAKE_PSQL"])
+        if isinstance(reads, dict):
+            key = next(k for k in reads if k in args[-1])
+            counter = state / ("psql-reads-" + str(sorted(reads).index(key)))
+            n = int(counter.read_text()) if counter.exists() else 0
+            counter.write_text(str(n + 1))
+            reads = reads[key]
         output, code = reads[min(n, len(reads) - 1)]
         print(output)
         sys.exit(code)
     elif args[:2] in (["create", "job"], ["delete", "job"]):
         sys.exit(int(os.environ.get("FAKE_JOB_EXIT", "0")))
+    elif args[:2] == ["get", "job"]:
+        statuses = json.loads(os.environ.get("FAKE_JOB_STATUS", "{}"))
+        print(json.dumps({"status": next((v for k, v in statuses.items() if k in args[2]), {"succeeded": 1})}))
     elif args[:1] == ["cp"]:
         pathlib.Path(args[2]).write_text(os.environ.get("FAKE_CP_" + pathlib.Path(args[1]).name, ""))
     elif args[:1] == ["exec"] and "touch" in args:
@@ -601,6 +622,417 @@ class Bak20Test(unittest.TestCase):
         self.assertIn("ended Failed", phase4.bak20_verdict([leased, [("vm.backup", key, "Done", 1), ("vm-snapshot.create", "s", "Failed", 5)]], key)[1])
         self.assertIn("did not land", phase4.bak20_verdict([[("vm.backup", key, "Done", 1)]], key)[1])
         self.assertEqual(phase4.command_rows("a|b|Pending|0\nnoise\n(0 rows)"), [("a", "b", "Pending", 0)])
+
+
+class Bak22Test(unittest.TestCase):
+    VM_ID = "0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"
+    DAY = "20261124"
+    KEY = f"vm-backup-{VM_ID}-{DAY}"
+    FIRST = f"cluster-backup-local-{DAY}"
+    AGAIN = f"cluster-backup-local-{DAY}10"
+    FACTS = {"vmId": VM_ID, "vmName": "rg-bak22-1", "clusterId": "local", "backupKey": KEY,
+             "vmCreatedAt": "2026-11-24T10:03:00.000Z"}
+    # rows of core.provider_commands as the SELECT prints them: kind, key, status, attempts, created_at, last_error
+    CONFIG = ("cluster.backup", FIRST, "Done", "1", f"{DAY}090010.000000", "")
+    OTHER = ("volume.backup", f"volume-backup-11111111-2222-3333-4444-555555555555-{DAY}", "Done", "1", f"{DAY}090001.000000", "")
+
+    def backup(self, status, attempts="1", error=""):
+        return ("vm.backup", self.KEY, status, attempts, f"{self.DAY}100500.000000", error)
+
+    def again(self, status, attempts="1", error="", key=None, created="100900.000000"):
+        return ("cluster.backup", key or self.AGAIN, status, attempts, self.DAY + created, error)
+
+    def read(self, clock, *rows, day=None):
+        """One read at <clock> (HHmmss of the day): the two rows every case has, then rows."""
+        rows = (self.OTHER, self.CONFIG, *rows)
+        return ["\n".join("|".join(((day or self.DAY) + clock, *row)) for row in rows), 0]
+
+    def copies(self, clock, read_at, *taken, outcome="Read"):
+        """One read of core.backups at <clock>: the incus observation last read at <read_at>, one config row per <taken>."""
+        lines = [f"{self.DAY}{clock}|{outcome}|{read_at}|{t[:8]}T{t[8:]}Z|{t}" for t in taken] or [f"{self.DAY}{clock}|{outcome}|{read_at}||"]
+        return ["\n".join(lines), 0]
+
+    # the reads of a run that passes: the gate, Job a's row, Leased, Done, settled, Job b's config, Leased, Done
+    def passing(self):
+        return [self.read("100400"), self.read("100501", self.backup("Pending", "0")), self.read("100510", self.backup("Leased")),
+                self.read("100800", self.backup("Done")), self.read("100805", self.backup("Done")),
+                self.read("100901", self.backup("Done"), self.again("Pending", "0")),
+                self.read("100905", self.backup("Done"), self.again("Leased")),
+                self.read("100930", self.backup("Done"), self.again("Done"))]
+
+    def run_bak22(self, reads, copies=None, facts=None, hold_minutes="1e9", **env):
+        copies = copies or [self.copies("101001", f"{self.DAY}101000", "20261123090020", f"{self.DAY}100910")]
+        return run("bak22", "--kubeconfig", "kc", "--job", "regression-config-again-p1", "--log", "{tmp}/bak22.log",
+                   "--every", "0", "--gate-minutes", "0.02", "--backup-minutes", "0.02", "--settle-minutes", "0.02",
+                   "--config-minutes", "0.02", "--read-minutes", "0.02", "--job-minutes", "0.02", "--hold-minutes", hold_minutes,
+                   **{"FAKE_LOG_0": hold_line("bak22", facts or self.FACTS),
+                      "FAKE_LOG_AFTER_TOUCH": "2026-11-24T10:09:31.000Z GO bak22",
+                      "FAKE_CRONJOBS": json.dumps(["control-plane-job-backup-schedule"]),
+                      "FAKE_PSQL": json.dumps({"core.provider_commands": reads, "core.backup_observations": copies}), **env})
+
+    def creates(self, calls):
+        return [l for l in calls.splitlines() if " create job " in l]
+
+    def test_two_jobs_around_the_vms_backup_then_go_and_one_config_row_of_the_day(self):
+        code, out, calls, state = self.run_bak22(self.passing())
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"L_BAK22=PASS {self.KEY} Done (row created {self.DAY}100500.000000), then {self.AGAIN} Done", out)
+        self.assertIn(f"L_BAK23=PASS days=2 today={self.DAY}T100910Z", out)
+        self.assertTrue((state / "pod" / "go-bak22").exists())
+        self.assertFalse((state / "pod" / "skip-bak22").exists())
+        lines = calls.splitlines()
+        first = next(i for i, l in enumerate(lines) if re.search(r"create job rg-bak22a-\d+ --from=cronjob/control-plane-job-backup-schedule -n ns-control-plane-job-backup-schedule", l))
+        second = next(i for i, l in enumerate(lines) if re.search(r"create job rg-bak22b-\d+ --from=cronjob/control-plane-job-backup-schedule", l))
+        # one read before the first Job; the row, Leased, Done and the settled read between the two
+        self.assertEqual(sum("core.provider_commands" in l for l in lines[:first]), 1)
+        self.assertEqual(sum("core.provider_commands" in l for l in lines[first:second]), 4)
+        self.assertEqual(sum("core.backup_observations" in l for l in lines[:second]), 0)
+        # the CronJob is read idle before each Job
+        self.assertEqual(sum("get cronjob control-plane-job-backup-schedule -n ns-control-plane-job-backup-schedule -o json" in l for l in lines[:first]), 1)
+        self.assertEqual(sum("get cronjob control-plane-job-backup-schedule -n" in l for l in lines[first:second]), 1)
+        self.assertRegex(calls, r"delete job rg-bak22a-\d+ -n ns-control-plane-job-backup-schedule")
+        self.assertRegex(calls, r"delete job rg-bak22b-\d+ -n ns-control-plane-job-backup-schedule")
+        self.assertIn("exec -n ns-titan-db-1 titan-db-1 -c postgres -- psql -U postgres -d titan -At -F | -c SELECT", calls)
+        self.assertIn(f"c.cluster_id = 'local' AND c.kind IN ('vm.backup', 'volume.backup', 'cluster.backup', 'restore.drill') AND c.key ~ '-{self.DAY}([0-9][0-9])?$'", calls)
+        self.assertIn("b.kind = 'cluster' AND b.resource_name = 'local'", calls)
+        log = (state.parent / "bak22.log").read_text()
+        self.assertEqual(log.rstrip().splitlines()[-1], f"L_BAK23=PASS days=2 today={self.DAY}T100910Z")
+        self.assertTrue(log.rstrip().splitlines()[-2].startswith("L_BAK22=PASS "))
+        # a read is logged when its rows changed, whatever the clock: the Done read and the settled read are one entry
+        self.assertEqual(log.count(f"vm.backup|{self.KEY}|Done|1|{self.DAY}100500.000000|\nexit=0"), 1)
+        # the clocks the steps were decided on are in the log
+        for line in (f"# the read before the first Job\ndatabase clock {self.DAY}100400",
+                     f"# the read before the second Job\ndatabase clock {self.DAY}100805",
+                     f"# the read that saw {self.AGAIN} Done\ndatabase clock {self.DAY}100930",
+                     f"# the first read of the bucket after it\ndatabase clock {self.DAY}101001"):
+            self.assertIn(line, log)
+
+    def test_no_config_done_today_is_not_covered_and_creates_no_job(self):
+        pending = ["\n".join([f"{self.DAY}100400|cluster.backup|{self.FIRST}|Leased|1|{self.DAY}100001.000000|"]), 0]
+        for reads in ([[f"{self.DAY}100400||||||", 0]], [pending]):
+            code, out, calls, state = self.run_bak22(reads)
+            self.assertEqual(code, 4, out)
+            self.assertIn(f"L_BAK22=NOT_COVERED no cluster config of {self.DAY} is Done yet", out)
+            self.assertIn("L_BAK23=NOT_COVERED BAK-22 did not pass before it", out)
+            self.assertEqual(self.creates(calls), [])
+            self.assertTrue((state / "pod" / "skip-bak22").exists())
+
+    def test_a_config_asked_after_the_vm_was_created_is_not_covered(self):
+        code, out, calls, _ = self.run_bak22([self.read("100400", self.again("Done", created="100300.000000"))])
+        self.assertEqual(code, 4, out)
+        self.assertIn(f"L_BAK22=NOT_COVERED a config of the day was asked after the VM was created ({self.AGAIN}=Done)", out)
+        self.assertEqual(self.creates(calls), [])
+        # one microsecond earlier than the VM is older than it
+        code, out, _, _ = self.run_bak22([self.read("100400", self.again("Done", created="100259.999999"))])
+        self.assertNotIn("was asked after the VM", out)
+
+    def test_a_backup_the_cronjobs_own_pass_queued_first_is_not_covered(self):
+        code, out, calls, _ = self.run_bak22([self.read("100400", self.backup("Pending", "0"))])
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK22=NOT_COVERED the CronJob's own pass queued the VM's backup before the agent's Job", out)
+        self.assertEqual(self.creates(calls), [])
+
+    def test_a_job_only_from_minute_3_with_a_pass_before_the_next_hour_and_the_cronjob_idle(self):
+        jm = 0.02
+        self.assertFalse(phase4.clear_of_the_hourly_pass("20261124100259", jm))
+        self.assertTrue(phase4.clear_of_the_hourly_pass("20261124100300", jm))
+        self.assertTrue(phase4.clear_of_the_hourly_pass("20261124105858", jm))
+        self.assertFalse(phase4.clear_of_the_hourly_pass("20261124105859", jm))
+        self.assertTrue(phase4.clear_of_the_hourly_pass("20261124105500", 4))
+        self.assertFalse(phase4.clear_of_the_hourly_pass("20261124105501", 4))
+        # minute 1, then minute 3 with a Job of the CronJob still running, then idle: the rows of the third read decide
+        reads = [self.read("100100"), self.read("100300"), self.read("100310", self.backup("Pending", "0"))]
+        code, out, calls, _ = self.run_bak22(reads, FAKE_CRONJOB_ACTIVE=json.dumps([[{"name": "control-plane-job-backup-schedule-1"}], []]))
+        self.assertEqual(code, 4, out)
+        self.assertIn("the CronJob's own pass queued the VM's backup", out)
+        self.assertEqual(calls.count("core.provider_commands"), 3)
+        self.assertEqual(calls.count("get cronjob control-plane-job-backup-schedule -n"), 2)
+        self.assertEqual(self.creates(calls), [])
+        code, out, calls, _ = self.run_bak22([self.read("105930")])
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK22=NOT_COVERED no moment in 0.02 minutes from minute 3 of an hour", out)
+        self.assertEqual(self.creates(calls), [])
+
+    def test_another_utc_day_than_the_holds_is_not_covered(self):
+        code, out, calls, _ = self.run_bak22([self.read("000400", day="20261125")])
+        self.assertEqual(code, 4, out)
+        self.assertIn(f"L_BAK22=NOT_COVERED the run crossed 00:00Z: the hold's day is {self.DAY}, the database's 20261125", out)
+        self.assertEqual(self.creates(calls), [])
+
+    def test_a_first_read_that_fails_is_not_covered_and_a_later_failed_read_is_read_again(self):
+        code, out, calls, state = self.run_bak22([["psql: error: connection refused", 2]])
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK22=NOT_COVERED could not read core.provider_commands", out)
+        self.assertTrue((state / "pod" / "skip-bak22").exists())
+        self.assertEqual(self.creates(calls), [])
+        reads = [self.read("100100"), ["psql: error: connection refused", 2], self.read("100400", self.backup("Pending", "0"))]
+        code, out, calls, state = self.run_bak22(reads)
+        self.assertIn("the CronJob's own pass queued the VM's backup", out)
+        # the failure is logged once, not on every read
+        reads = [["psql: error: connection refused", 2]] * 3 + [self.read("100400", self.backup("Pending", "0"))]
+        code, out, calls, state = self.run_bak22([self.read("100100")] + reads)
+        self.assertEqual((state.parent / "bak22.log").read_text().count("connection refused"), 1)
+
+    def test_a_job_that_cannot_be_created_or_does_not_complete_is_not_covered(self):
+        code, out, calls, state = self.run_bak22([self.read("100400")], FAKE_JOB_EXIT="1")
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK22=NOT_COVERED could not create a Job from CronJob control-plane-job-backup-schedule", out)
+        self.assertNotIn("delete job", calls)
+        code, out, calls, state = self.run_bak22([self.read("100400")], FAKE_JOB_STATUS=json.dumps({"rg-bak22a": {"active": 1}}))
+        self.assertEqual(code, 4, out)
+        self.assertRegex(out, r"L_BAK22=NOT_COVERED Job rg-bak22a-\d+ did not complete in 0\.02 minutes")
+        self.assertIn("delete job rg-bak22a-", calls)
+        self.assertEqual(len(self.creates(calls)), 1)
+        self.assertTrue((state / "pod" / "skip-bak22").exists())
+
+    def test_a_job_whose_pass_answered_an_error_fails_at_once(self):
+        failed = {"rg-bak22a": {"failed": 3, "conditions": [{"type": "Failed", "status": "True"}]}}
+        code, out, calls, state = self.run_bak22([self.read("100400")], FAKE_JOB_STATUS=json.dumps(failed))
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"L_BAK22=FAIL Job rg-bak22a-\d+ failed \(3 pods\): its curl got an error from the pass of the schedule, or did not reach the control plane")
+        self.assertEqual(calls.count(" get job rg-bak22a-"), 1)
+        self.assertIn("logs job/rg-bak22a-", calls)
+        self.assertIn("returned error: 500", (state.parent / "bak22.log").read_text())
+        self.assertTrue((state / "pod" / "skip-bak22").exists())
+
+    def test_a_first_job_that_queued_no_backup_of_the_vm_fails(self):
+        code, out, calls, state = self.run_bak22([self.read("100400")])
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"L_BAK22=FAIL the pass of the first Job queued no row {self.KEY}", out)
+        self.assertTrue((state / "pod" / "skip-bak22").exists())
+        self.assertEqual(len(self.creates(calls)), 1)
+
+    def test_a_pass_read_in_the_next_hour_or_day_is_not_covered_not_failed(self):
+        code, out, _, _ = self.run_bak22([self.read("105800"), self.read("110005")])
+        self.assertEqual(code, 4, out)
+        self.assertIn(f"the first Job's pass may have run in the next hour ({self.DAY}11, the read before it {self.DAY}10)", out)
+        code, out, _, _ = self.run_bak22([self.read("235800"), self.read("000005", day="20261125")])
+        self.assertEqual(code, 4, out)
+        self.assertIn("the first Job's pass may have run in the next hour (2026112500", out)
+        head = self.passing()[:5]
+        code, out, _, _ = self.run_bak22(head + [self.read("110001", self.backup("Done"))])
+        self.assertEqual(code, 4, out)
+        self.assertIn(f"the second Job's pass may have run in the next hour ({self.DAY}11, the read before it {self.DAY}10)", out)
+
+    def test_a_backup_of_the_vm_that_failed_or_did_not_end_is_not_covered(self):
+        failed = self.backup("Failed", "5", "export: no space left")
+        code, out, calls, _ = self.run_bak22([self.read("100400"), self.read("100501", failed)])
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK22=NOT_COVERED the VM's backup ended Failed attempts=5 last_error='export: no space left'", out)
+        self.assertEqual(len(self.creates(calls)), 1)
+        ahead = ("volume.backup", f"volume-backup-99999999-2222-3333-4444-555555555555-{self.DAY}", "Leased", "1", f"{self.DAY}060000.000000", "")
+        code, out, _, _ = self.run_bak22([self.read("100400"), self.read("100501", ahead, self.backup("Pending", "0"))])
+        self.assertEqual(code, 4, out)
+        self.assertIn(f"the VM's backup did not end in 0.02 minutes (Pending); other disk backups of the cluster waiting: {ahead[1]}=Leased", out)
+
+    def test_a_backup_or_config_still_waiting_before_the_second_job_is_not_covered(self):
+        reopened = ("volume.backup", f"volume-backup-99999999-2222-3333-4444-555555555555-{self.DAY}", "Pending", "0", f"{self.DAY}090002.000000", "")
+        code, out, calls, _ = self.run_bak22([self.read("100400"), self.read("100800", self.backup("Done"), reopened)])
+        self.assertEqual(code, 4, out)
+        self.assertIn(f"a backup or a config of the day still waits ({reopened[1]}=Pending)", out)
+        self.assertEqual(len(self.creates(calls)), 1)
+        leased = self.again("Leased", key=f"cluster-backup-local-{self.DAY}09", created="095000.000000")
+        code, out, calls, _ = self.run_bak22([self.read("100400", leased), self.read("100800", leased, self.backup("Done"))])
+        self.assertEqual(code, 4, out)
+        self.assertIn(f"still waits (cluster-backup-local-{self.DAY}09=Leased)", out)
+        self.assertEqual(len(self.creates(calls)), 1)
+
+    def test_the_second_job_waits_for_a_moment_clear_of_the_cronjobs_pass(self):
+        done = self.backup("Done")
+        reads = [self.read("100400"), self.read("100501", done), self.read("105859", done), self.read("110100", done)]
+        code, out, calls, _ = self.run_bak22(reads)
+        self.assertEqual(code, 4, out)
+        self.assertIn("or no moment clear of the CronJob's own pass came", out)
+        self.assertEqual(len(self.creates(calls)), 1)
+
+    def test_a_config_or_disk_row_queued_since_the_vms_backup_row_before_the_second_job_is_not_covered(self):
+        code, out, calls, _ = self.run_bak22([self.read("100400"), self.read("100800", self.backup("Done"), self.again("Done"))])
+        self.assertEqual(code, 4, out)
+        self.assertIn(f"a pass other than the agent's queued a config after the VM's backup row, before the second Job ({self.AGAIN}=Done)", out)
+        self.assertEqual(len(self.creates(calls)), 1)
+        disk = ("vm.backup", f"vm-backup-77777777-2222-3333-4444-555555555555-{self.DAY}", "Done", "1", f"{self.DAY}100700.000000", "")
+        code, out, calls, _ = self.run_bak22([self.read("100400"), self.read("100800", self.backup("Done"), disk)])
+        self.assertEqual(code, 4, out)
+        self.assertIn(f"another disk was created in between: its backup row is newer than the VM's ({disk[1]}=Done)", out)
+        self.assertEqual(len(self.creates(calls)), 1)
+
+    def test_the_hours_config_key_already_there_is_not_covered(self):
+        earlier = self.again("Done", created="100100.000000")
+        reads = [self.read("100400", earlier), self.read("100800", earlier, self.backup("Done"))]
+        code, out, calls, _ = self.run_bak22(reads, facts={**self.FACTS, "vmCreatedAt": "2026-11-24T10:03:30.000Z"})
+        self.assertEqual(code, 4, out)
+        self.assertIn(f"this UTC hour's config key {self.AGAIN} is there already", out)
+        self.assertEqual(len(self.creates(calls)), 1)
+
+    def test_a_second_job_that_queued_another_disks_backup_is_not_covered_and_one_that_queued_nothing_fails(self):
+        done = self.read("100800", self.backup("Done"))
+        new_disk = ("vm.backup", f"vm-backup-77777777-2222-3333-4444-555555555555-{self.DAY}", "Pending", "0", f"{self.DAY}100901.000000", "")
+        code, out, calls, state = self.run_bak22([self.read("100400"), done, done, done, self.read("100901", self.backup("Done"), new_disk)])
+        self.assertEqual(code, 4, out)
+        self.assertIn(f"another disk was created in between: the second Job queued its backup, not a config ({new_disk[1]}=Pending)", out)
+        self.assertEqual(len(self.creates(calls)), 2)
+        self.assertEqual(calls.count("delete job"), 2)
+        code, out, calls, state = self.run_bak22([self.read("100400"), done])
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"L_BAK22=FAIL the pass of the second Job queued no config {self.AGAIN} (configs of the day: {self.FIRST}=Done)", out)
+        self.assertTrue((state / "pod" / "skip-bak22").exists())
+        self.assertFalse((state / "pod" / "go-bak22").exists())
+
+    def test_a_config_under_another_hours_key_fails(self):
+        other = self.again("Done", key=f"cluster-backup-local-{self.DAY}17")
+        reads = self.passing()[:5] + [self.read("100930", self.backup("Done"), other)]
+        code, out, _, _ = self.run_bak22(reads)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"L_BAK22=FAIL the pass of the second Job queued cluster-backup-local-{self.DAY}17, not {self.AGAIN}", out)
+
+    def test_a_config_that_failed_fails_and_one_that_did_not_end_is_not_covered(self):
+        head = self.passing()[:6]
+        failed = self.read("100930", self.backup("Done"), self.again("Failed", "5", "cannot reach the cluster"))
+        code, out, _, state = self.run_bak22(head + [failed])
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"L_BAK22=FAIL {self.AGAIN} ended Failed attempts=5 last_error='cannot reach the cluster'", out)
+        self.assertTrue((state / "pod" / "skip-bak22").exists())
+        code, out, _, _ = self.run_bak22(head)
+        self.assertEqual(code, 4, out)
+        self.assertIn(f"L_BAK22=NOT_COVERED {self.AGAIN} did not end in 0.02 minutes (Pending)", out)
+
+    def test_a_restore_drill_the_second_job_queued_is_named(self):
+        drill = ("restore.drill", f"restore-drill-local-{self.DAY}", "Pending", "0", f"{self.DAY}100900.000000", "")
+        reads = self.passing()[:5] + [self.read("100930", self.backup("Done"), self.again("Done"), drill)]
+        code, out, _, _ = self.run_bak22(reads)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"; the second Job also queued restore-drill-local-{self.DAY}=Pending", out)
+
+    def test_no_job_once_the_spec_has_stopped_waiting(self):
+        # the HOLD line is of 2026-11-19: a spec that waits 40 minutes stopped long ago
+        code, out, calls, state = self.run_bak22([self.read("100400")], hold_minutes="40")
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK22=NOT_COVERED the spec stops waiting at 10:40:00Z: too little time left for the two passes", out)
+        self.assertEqual(self.creates(calls), [])
+        self.assertTrue((state / "pod" / "skip-bak22").exists())
+
+    def test_bak23_judges_the_first_read_of_the_bucket_later_than_the_config(self):
+        # the config was read Done at 10:09:30: a read of the bucket in that second does not count, the next one does
+        early = self.copies("100935", f"{self.DAY}100930", "20261123090020", f"{self.DAY}090020")
+        unreadable = self.copies("101001", f"{self.DAY}101000", "20261123090020", f"{self.DAY}090020", outcome="Unreadable")
+        late = self.copies("101501", f"{self.DAY}101500", "20261123090020", f"{self.DAY}100910")
+        code, out, calls, _ = self.run_bak22(self.passing(), [early, late])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls.count("core.backup_observations"), 2)
+        code, out, _, state = self.run_bak22(self.passing(), [early, unreadable, late])
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK22=PASS ", out)
+        self.assertIn(f"L_BAK23=NOT_COVERED the read of the bucket at {self.DAY}101000 could not list it (outcome=Unreadable)", out)
+        self.assertTrue((state / "pod" / "go-bak22").exists())
+        code, out, _, _ = self.run_bak22(self.passing(), [early])
+        self.assertIn(f"L_BAK23=NOT_COVERED no read of the bucket after {self.DAY}100930 in 0.02 minutes (outcome=Read last_read_at={self.DAY}100930)", out)
+        code, out, _, _ = self.run_bak22(self.passing(), [["", 0]])
+        self.assertIn("L_BAK23=NOT_COVERED no read of the bucket", out)
+        nextday = ["20261125000101|Read|20261125000100|20261124T100910Z|20261124100910", 0]
+        code, out, _, _ = self.run_bak22(self.passing(), [nextday])
+        self.assertIn("L_BAK23=NOT_COVERED the run crossed 00:00Z before the bucket was read (20261125)", out)
+
+    def test_bak23_fails_on_two_rows_of_the_day_and_the_exit_is_1(self):
+        two = self.copies("101001", f"{self.DAY}101000", f"{self.DAY}090020", f"{self.DAY}100910")
+        code, out, _, _ = self.run_bak22(self.passing(), [two])
+        self.assertEqual(code, 1, out)
+        self.assertIn("L_BAK22=PASS ", out)
+        self.assertIn(f"L_BAK23=FAIL 2 config rows of {self.DAY}, not one: {self.DAY}T090020Z {self.DAY}T100910Z", out)
+
+    def test_bak23_verdict(self):
+        day, after = self.DAY, f"{self.DAY}100500.000000"
+        today = (f"{day}100910", f"{day}T100910Z")
+        week = [(f"202611{d}090020", f"202611{d}T090020Z") for d in range(18, 24)]
+        self.assertEqual(phase4.bak23_verdict(week + [today], day, after), ("PASS", f"days=7 today={day}T100910Z"))
+        self.assertIn("none", phase4.bak23_verdict(week, day, after)[1])
+        self.assertEqual(phase4.bak23_verdict([("20261117090020", "a")] + week + [today], day, after)[1], "config rows of 8 UTC days, more than 7")
+        self.assertEqual(phase4.bak23_verdict(week + [("20261123100000", "b"), today], day, after)[1], "more than one config row on 20261123")
+        # the day's earlier config kept instead of the one asked after the VM's backup
+        old = (f"{day}090020", f"{day}T090020Z")
+        self.assertIn("is not later than the VM's backup row", phase4.bak23_verdict(week + [old], day, after)[1])
+        self.assertIn("is not the newest", phase4.bak23_verdict([today, ("20261125000001", "c")], day, after)[1])
+
+    def test_the_rows_are_parsed_by_shape(self):
+        text = f"{self.DAY}100400|vm.backup|{self.KEY}|Failed|5|{self.DAY}100500.000000|export\x0c no space\nnoise\n(1 row)\n"
+        clock, rows = phase4.backup_rows(text)
+        self.assertEqual(clock, f"{self.DAY}100400")
+        self.assertEqual([(r.kind, r.key, r.status, r.attempts, r.created, r.error) for r in rows],
+                         [("vm.backup", self.KEY, "Failed", 5, f"{self.DAY}100500.000000", "export\x0c no space")])
+        self.assertEqual(phase4.backup_rows(f"{self.DAY}100400||||||"), (f"{self.DAY}100400", []))
+        self.assertEqual(phase4.backup_rows("psql: error"), (None, []))
+        self.assertIsNone(phase4.config_copies(""))
+        self.assertEqual(phase4.config_copies(f"{self.DAY}101001|Read|{self.DAY}101000||"), (f"{self.DAY}101001", "Read", f"{self.DAY}101000", []))
+        self.assertIn("regexp_replace(left(coalesce(c.last_error, ''), 200), '[[:cntrl:]|]', ' ', 'g')", phase4.backup_rows_of("local", self.DAY))
+        self.assertEqual(phase4.hold_started(hold_line("bak22", self.FACTS), "bak22"),
+                         phase4.datetime.datetime(2026, 11, 19, 10, 0, tzinfo=phase4.datetime.timezone.utc))
+        self.assertIsNone(phase4.hold_started(hold_line("bak20", self.FACTS), "bak22"))
+
+    def test_facts_out_of_shape_run_no_sql_and_answer_skip(self):
+        for bad in ({"clusterId": "x'; drop table t; --"}, {"vmId": "x"}, {"backupKey": "k"}, {"vmCreatedAt": "2026-11-24 10:03"}):
+            code, out, calls, state = self.run_bak22([self.read("100400")], facts={**self.FACTS, **bad})
+            self.assertEqual(code, 2, out)
+            self.assertNotIn("psql", calls)
+            self.assertEqual(self.creates(calls), [])
+            self.assertTrue((state / "pod" / "skip-bak22").exists())
+
+    def test_an_error_of_the_command_answers_skip_and_deletes_its_jobs(self):
+        # no CronJob control-plane-job-backup-schedule on the cluster: namespace_of stops the command
+        code, out, calls, state = self.run_bak22([self.read("100400")], FAKE_CRONJOBS="[]")
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK22=NOT_COVERED the command stopped: not exactly one cronjob control-plane-job-backup-schedule", out)
+        self.assertTrue((state / "pod" / "skip-bak22").exists())
+        # a Job whose `.status` is not an object breaks the command after the first Job: that Job is still deleted
+        code, out, calls, state = self.run_bak22([self.read("100400")], FAKE_JOB_STATUS='{"rg-bak22a": "not an object"}')
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK22=NOT_COVERED the command stopped: 'str' object has no attribute 'get'", out)
+        self.assertRegex(calls, r"delete job rg-bak22a-\d+ -n ns-control-plane-job-backup-schedule")
+        self.assertTrue((state / "pod" / "skip-bak22").exists())
+
+    def test_an_error_after_the_go_keeps_bak22s_pass_and_one_before_it_answers_skip(self):
+        import contextlib
+        import io
+
+        class Kube:
+            def __init__(self, *_):
+                self.ns = "ns"
+
+            def run(self, *args, **_):
+                return subprocess.CompletedProcess(args, 0, "", "")
+
+        answers = []
+
+        def fake_answer(_, step, word, __):
+            answers.append(f"{word}-{step}")
+            return 0
+
+        def fails(after_go):
+            def bak22(args, kube, facts, run):
+                run.log = phase4.Log(args.log, "test")
+                run.cp_ns = "ns"
+                run.jobs.append("rg-bak22b-1")
+                if after_go:
+                    run.answered, run.passed = True, "rows Done"
+                raise RuntimeError("boom")
+            return bak22
+
+        saved = phase4.Kube, phase4.wait_for, phase4.answer, phase4.bak22
+        try:
+            phase4.Kube, phase4.wait_for, phase4.answer = Kube, (lambda *_: dict(self.FACTS)), fake_answer
+            for after_go, lines in ((True, ["L_BAK22=PASS rows Done", "L_BAK23=NOT_COVERED the command stopped: boom"]),
+                                    (False, ["L_BAK22=NOT_COVERED the command stopped: boom", "L_BAK23=NOT_COVERED BAK-22 did not pass before it"])):
+                answers.clear()
+                phase4.bak22 = fails(after_go)
+                log = pathlib.Path(tempfile.mkdtemp()) / "bak22.log"
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                    code = phase4.cmd_bak22(types.SimpleNamespace(kubeconfig="kc", job="j", timeout_minutes=1, log=str(log)))
+                self.assertEqual(code, 4)
+                self.assertEqual(out.getvalue().splitlines()[-2:], lines)
+                self.assertEqual(log.read_text().splitlines()[-2:], lines)
+                self.assertIn("$ kubectl delete job rg-bak22b-1 -n ns", log.read_text())
+                self.assertEqual(answers, [] if after_go else ["skip-bak22"])
+        finally:
+            phase4.Kube, phase4.wait_for, phase4.answer, phase4.bak22 = saved
 
 
 class KeysTest(unittest.TestCase):

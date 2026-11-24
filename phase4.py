@@ -19,6 +19,8 @@ evidence as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>`.
                               [--env release|dev] [--project <t-…>] [--no-go]
     python3 phase4.py cli10 --kubeconfig <kc> --job <job> --cli <openvicloud> --api <url> --log <file> [--seconds 330]
     python3 phase4.py bak20 --kubeconfig <kc> --job <job> --log <file> [--every 3] [--leased-minutes 30] [--watch-minutes 45]
+    python3 phase4.py bak22 --kubeconfig <kc> --job <job> --log <file> [--every 5] [--gate-minutes 8] [--backup-minutes 15]
+                              [--settle-minutes 6] [--config-minutes 4] [--read-minutes 12] [--job-minutes 2] [--hold-minutes 40]
     python3 phase4.py disconnect --control <socket> --target <user@host>
 
 <job> is the name run-module.sh gives the job (regression-<module>-<label>). The host command runs through the
@@ -53,6 +55,24 @@ vm-snapshot.create row have ended or 600 s after the backup ended, and deletes t
 L_BAK20=PASS (exit 0: the snapshot's row read Pending with attempts 0 every time the backup was Leased, then both Done) | FAIL <what> (exit 1) | NOT_COVERED <why>
 (exit 4; skip-bak20 when it comes before the answer: core.provider_commands could not be read, today's backup of the
 VM already ended, the Job could not be created, the backup was not seen Leased in time; after go: no read had the snapshot's row while the backup was Leased).
+
+bak22 answers HOLD bak22 of backup/config-again (BAK-22 and BAK-23, titan-ops features/backup/design.md#cluster-backup):
+it reads the held cluster's backup rows of the UTC day in core.provider_commands (vm.backup, volume.backup,
+cluster.backup, restore.drill; psql SELECT in the titan-db primary pod, read only, the database's clock on every line),
+creates a first Job from CronJob control-plane-job-backup-schedule (the pass that queues the held VM's backup), waits
+for that backup to be Done and for every disk backup and config of the day to have ended, creates a second Job (the
+pass that queues the config of that UTC hour) and answers go-bak22 once that config is Done; then it reads the
+cluster's rows of core.backups at the first read of the bucket after that (core.backup_observations) and deletes the
+Jobs it created. It creates a Job only from minute 3 of an hour, while the CronJob has no Job running, and with
+--job-minutes and one more before the next hour (the CronJob's own pass is due at minute 0, may start 120 s late and
+retries its pod): it reads on until then (--gate-minutes before the first Job, --settle-minutes before the second).
+It creates no Job when the waits after it could outlast the spec's (--hold-minutes after the HOLD line), and a go the
+spec does not take is NOT_COVERED. Last lines L_BAK22= then L_BAK23=, each PASS | FAIL <what> | NOT_COVERED <why>;
+exit 1 when one is FAIL, else 4 when one is NOT_COVERED, else 0. Before the go every verdict answers skip-bak22 (the
+spec then deletes its VM), and L_BAK23 is NOT_COVERED. A Job that failed (its curl got an error from the pass, or
+did not reach the control plane) is a FAIL. An error of the command itself after the hold was read deletes the Jobs
+and ends NOT_COVERED (exit 4): before the go it answers skip-bak22 and both lines are NOT_COVERED, after it L_BAK22
+keeps its PASS; facts out of shape answer skip-bak22 and exit 2.
 
 Exit 2: usage, the pending HOLD is not the step asked for, or no ControlMaster on the socket. wait: exit 3 = the runner finished with no HOLD pending.
 """
@@ -811,6 +831,426 @@ def cmd_bak20(args):
     return finish(*bak20_verdict(readings, key))
 
 
+CLUSTER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}$")
+# what `new Date(...).toISOString()` of the spec gives
+ISO_MS = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$")
+DISK_BACKUPS = ("vm.backup", "volume.backup")
+CONFIG_BACKUP = "cluster.backup"
+WAITING = ("Pending", "Leased")
+# OpenViCloud/titan-control-plane:Titan.Application/Services/Platform/Backup/BackupLayout.cs (ConfigDaysKept)
+CONFIG_DAYS_KEPT = 7
+# OpenViCloud/titan-local-cluster:base/control-plane/scheduled-jobs.yaml (control-plane-job-backup-schedule): the
+# CronJob's own pass is due at minute 0 and may still be created up to startingDeadlineSeconds (120 s) later, and its pod
+# is retried (backoffLimit 2) while the Job runs. A Job of the agent beside it could not be told from it in the rows, so
+# the agent creates one only from minute 3, while the CronJob has no Job running, and with time for the pass before
+# the next hour.
+FIRST_JOB_MINUTE = 3
+
+
+def backup_rows_of(cluster_id, day):
+    """The SELECT of the cluster's backup, config and drill rows of the UTC day; both values are checked before SQL.
+
+    One line at least, each led by the database's clock: with no row the join leaves the other fields empty."""
+    return ("SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYYMMDDHH24MISS'), c.kind, c.key, c.status, c.attempts, "
+            "to_char(c.created_at AT TIME ZONE 'UTC', 'YYYYMMDDHH24MISS.US'), "
+            "regexp_replace(left(coalesce(c.last_error, ''), 200), '[[:cntrl:]|]', ' ', 'g') "
+            "FROM (SELECT 1) AS one LEFT JOIN core.provider_commands c "
+            f"ON c.cluster_id = '{cluster_id}' "
+            "AND c.kind IN ('vm.backup', 'volume.backup', 'cluster.backup', 'restore.drill') "
+            f"AND c.key ~ '-{day}([0-9][0-9])?$' ORDER BY c.created_at, c.key")
+
+
+def backup_rows(text):
+    """(the database's clock as yyyyMMddHHmmss, [row]) of backup_rows_of's output; (None, []) when no line has the shape."""
+    clock, rows = None, []
+    for line in text.split("\n"):
+        parts = line.split("|")
+        if len(parts) != 7 or not re.fullmatch(r"\d{14}", parts[0]):
+            continue
+        clock = parts[0]
+        if parts[2]:
+            rows.append(types.SimpleNamespace(kind=parts[1], key=parts[2], status=parts[3],
+                                              attempts=int(parts[4] or 0), created=parts[5], error=parts[6]))
+    return clock, rows
+
+
+def config_copies_of(cluster_id):
+    """The SELECT of the cluster's config rows of core.backups, each led by the clock and the last read of incus/."""
+    return ("SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYYMMDDHH24MISS'), o.outcome, "
+            "to_char(o.last_read_at AT TIME ZONE 'UTC', 'YYYYMMDDHH24MISS'), coalesce(b.backup_key, ''), "
+            "coalesce(to_char(b.taken_at AT TIME ZONE 'UTC', 'YYYYMMDDHH24MISS'), '') "
+            "FROM core.backup_observations o LEFT JOIN core.backups b "
+            f"ON b.kind = 'cluster' AND b.resource_name = '{cluster_id}' "
+            "WHERE o.kind = 'incus' AND o.resource_name = 'disks' ORDER BY b.taken_at")
+
+
+def config_copies(text):
+    """(clock, outcome, last read, [(taken, backup key)]) of config_copies_of's output; None before the first read of incus/."""
+    clock = outcome = read_at = None
+    copies = []
+    for line in text.split("\n"):
+        parts = line.split("|")
+        if len(parts) != 5 or not re.fullmatch(r"\d{14}", parts[0]) or not re.fullmatch(r"\d{14}", parts[2]):
+            continue
+        clock, outcome, read_at = parts[0], parts[1], parts[2]
+        if parts[3]:
+            copies.append((parts[4], parts[3]))
+    return (clock, outcome, read_at, copies) if clock else None
+
+
+def clear_of_the_hourly_pass(clock, job_minutes):
+    """True from minute 3 of the hour while a Job and its pass still end before the next hour (clock: yyyyMMddHHmmss)."""
+    seconds = int(clock[10:12]) * 60 + int(clock[12:14])
+    return FIRST_JOB_MINUTE * 60 <= seconds <= 3600 - (job_minutes + 1) * 60
+
+
+def hold_started(text, step):
+    """The time of the last `HOLD <step>` line of the spec's log, else None."""
+    started = None
+    for line in text.splitlines():
+        m = HOLD.match(line)
+        if m and m.group(1) == step:
+            try:
+                started = datetime.datetime.strptime(line.split(" ", 1)[0], "%Y-%m-%dT%H:%M:%S.%fZ").replace(
+                    tzinfo=datetime.timezone.utc)
+            except ValueError:
+                started = None
+    return started
+
+
+def bak23_verdict(copies, day, after):
+    """(word, why) of BAK-23 from the cluster's config rows after a read of the bucket: [(taken yyyyMMddHHmmss, key)].
+
+    after: the creation time of the held VM's backup row; the config the second Job asked was taken later."""
+    by_day = {}
+    for taken, key in copies:
+        by_day.setdefault(taken[:8], []).append((taken, key))
+    today = by_day.get(day, [])
+    if len(today) != 1:
+        return "FAIL", f"{len(today)} config rows of {day}, not one: {' '.join(key for _, key in sorted(today)) or 'none'}"
+    crowded = sorted(d for d, found in by_day.items() if len(found) > 1)
+    if crowded:
+        return "FAIL", f"more than one config row on {' '.join(crowded)}"
+    if len(by_day) > CONFIG_DAYS_KEPT:
+        return "FAIL", f"config rows of {len(by_day)} UTC days, more than {CONFIG_DAYS_KEPT}"
+    taken, key = today[0]
+    if (taken, key) != max(copies):
+        return "FAIL", f"today's row {key} is not the newest: {max(copies)[1]}"
+    if taken <= after[:14]:
+        return "FAIL", f"today's row {key} is not later than the VM's backup row ({after}): the config asked after it is not the one kept"
+    return "PASS", f"days={len(by_day)} today={key}"
+
+
+def cmd_bak22(args):
+    """BAK-22 and BAK-23 at HOLD bak22 of backup/config-again: two passes of the backup schedule around the held VM's backup."""
+    kube = Kube(args.kubeconfig, args.job)
+    facts = wait_for(kube, "bak22", args.timeout_minutes)
+    if facts is None:
+        return 2
+    run = types.SimpleNamespace(jobs=[], answered=False, verdict=None, log=None, cp_ns=None, passed=None)
+    try:
+        return bak22(args, kube, facts, run)
+    except (Exception, SystemExit) as error:
+        if run.verdict is not None:
+            raise
+        why = f"the command stopped: {error}"
+        print(why, file=sys.stderr)
+        if run.passed:
+            return bak22_finish(args, kube, run, "PASS", run.passed, "NOT_COVERED", why)
+        return bak22_finish(args, kube, run, "NOT_COVERED", why)
+    finally:
+        if not run.answered:
+            # the spec would otherwise hold its VM for the rest of its wait
+            answer(kube, "bak22", "skip", run.log or Log(None, ""))
+            run.answered = True
+        for name in run.jobs:
+            out = kube.run("delete", "job", name, "-n", run.cp_ns, "--ignore-not-found")
+            if run.log:
+                run.log.entry(f"kubectl delete job {name} -n {run.cp_ns}", out.stdout + out.stderr, out.returncode)
+        run.jobs = []
+
+
+def bak22_finish(args, kube, run, word22, why22, word23="NOT_COVERED", why23="BAK-22 did not pass before it"):
+    """Answers skip-bak22 unless go was given, deletes the Jobs, writes and prints L_BAK22= and L_BAK23=; the exit code."""
+    if not run.answered:
+        answer(kube, "bak22", "skip", run.log or Log(None, ""))
+        run.answered = True
+    for name in run.jobs:
+        out = kube.run("delete", "job", name, "-n", run.cp_ns, "--ignore-not-found")
+        if run.log:
+            run.log.entry(f"kubectl delete job {name} -n {run.cp_ns}", out.stdout + out.stderr, out.returncode)
+    run.jobs = []
+    run.verdict = [f"L_BAK22={word22} {why22}", f"L_BAK23={word23} {why23}"]
+    if args.log:
+        with open(args.log, "a", encoding="utf-8") as fh:
+            fh.write("\n".join(run.verdict) + "\n")
+    print("\n".join(run.verdict))
+    words = (word22, word23)
+    return 1 if "FAIL" in words else 4 if "NOT_COVERED" in words else 0
+
+
+def bak22(args, kube, facts, run):
+    vm_id, cluster_id, key, vm_created = (str(facts.get(k, "")) for k in ("vmId", "clusterId", "backupKey", "vmCreatedAt"))
+    if (not UUID.match(vm_id) or not CLUSTER_ID.match(cluster_id) or not ISO_MS.match(vm_created)
+            or not re.match(rf"^vm-backup-{re.escape(vm_id)}-\d{{8}}$", key)):
+        print(f"HOLD bak22 facts out of shape: vmId={vm_id!r} clusterId={cluster_id!r} backupKey={key!r} vmCreatedAt={vm_created!r}")
+        answer(kube, "bak22", "skip", Log(None, ""))
+        run.answered = True
+        return 2
+    day = key[-8:]
+    # as created_at is read: yyyyMMddHHmmss.ffffff
+    vm_made = re.sub(r"[-T:Z]", "", vm_created) + "000"
+    # the spec stops waiting HOLD_AGENT_MS after its HOLD line, stamped by the runner pod's clock; now() is this machine's
+    held_at = hold_started(kube.logs(), "bak22") or now()
+    gives_up_at = held_at + datetime.timedelta(minutes=args.hold_minutes)
+    log = run.log = Log(args.log, f"phase4.py bak22 · job {args.job}")
+    run.cp_ns = kube.namespace_of("cronjob", BACKUP_CRONJOB)
+    primaries = kube.json("get", "pods", "-A", "-l", PG_PRIMARY)["items"]
+    if len(primaries) != 1:
+        print(f"not exactly one pod {PG_PRIMARY} on this cluster")
+        return bak22_finish(args, kube, run, "NOT_COVERED", f"not exactly one pod {PG_PRIMARY} on this cluster")
+    pg_ns, pg_pod = primaries[0]["metadata"]["namespace"], primaries[0]["metadata"]["name"]
+    rows_sql, copies_sql = backup_rows_of(cluster_id, day), config_copies_of(cluster_id)
+    seen = {}
+
+    def finish(*verdict):
+        return bak22_finish(args, kube, run, *verdict)
+
+    def skip(why):
+        return finish("NOT_COVERED", why)
+
+    def psql(sql):
+        out = kube.run("exec", "-n", pg_ns, pg_pod, "-c", "postgres", "--", "psql", "-U", "postgres", "-d", "titan",
+                       "-At", "-F", "|", "-c", sql)
+        text = out.stdout + out.stderr
+        # the first field is the clock: a read is logged when anything after it changed, a failure too
+        body = f"exit={out.returncode}\n" + "\n".join(line.partition("|")[2] for line in text.split("\n"))
+        if body != seen.get(sql):
+            shown = f"kubectl exec -n {pg_ns} {pg_pod} -c postgres -- psql -U postgres -d titan -At -F '|' -c \"{sql}\""
+            log.entry(shown, text, out.returncode)
+            sys.stdout.write(text if text.endswith("\n") or not text else text + "\n")
+            seen[sql] = body
+        return out.stdout if out.returncode == 0 else None
+
+    def decided(what, clock):
+        """The clock of a read a step was decided on: in the log even when the rows did not change."""
+        log.entry(f"# {what}", f"database clock {clock}", 0)
+
+    def read_until(done, minutes, stop_on_failure=False):
+        """(clock, rows, True) of the first read done accepts, else the last read and False; rows None when it failed.
+
+        With stop_on_failure the call's first read failing ends it at once; any other failed read is read again."""
+        deadline = time.monotonic() + minutes * 60
+        first = True
+        while True:
+            text = psql(rows_sql)
+            clock, rows = backup_rows(text) if text is not None else (None, [])
+            if clock and done(clock, rows):
+                return clock, rows, True
+            if time.monotonic() >= deadline or (stop_on_failure and first and not clock):
+                return clock, (rows if clock else None), False
+            first = False
+            time.sleep(args.every)
+
+    def cronjob_idle():
+        out = kube.run("get", "cronjob", BACKUP_CRONJOB, "-n", run.cp_ns, "-o", "json")
+        try:
+            active = json.loads(out.stdout).get("status", {}).get("active") if out.returncode == 0 else ["unknown"]
+        except ValueError:
+            active = ["unknown"]
+        if active:
+            log.entry(f"kubectl get cronjob {BACKUP_CRONJOB} -n {run.cp_ns} -o json  # .status.active",
+                      json.dumps(active), out.returncode)
+        return not active
+
+    def gate(clock, rows):
+        return clear_of_the_hourly_pass(clock, args.job_minutes) and cronjob_idle()
+
+    def time_left(minutes):
+        return now() + datetime.timedelta(minutes=minutes) < gives_up_at
+
+    def run_pass(suffix):
+        """(None, None) once a Job from the CronJob has run one pass of the schedule, else (why, the verdict word)."""
+        name = f"rg-bak22{suffix}-{int(time.time())}"
+        out = kube.run("create", "job", name, f"--from=cronjob/{BACKUP_CRONJOB}", "-n", run.cp_ns)
+        log.entry(f"kubectl create job {name} --from=cronjob/{BACKUP_CRONJOB} -n {run.cp_ns}", out.stdout + out.stderr,
+                  out.returncode)
+        if out.returncode != 0:
+            return f"could not create a Job from CronJob {BACKUP_CRONJOB}", "NOT_COVERED"
+        run.jobs.append(name)
+        deadline = time.monotonic() + args.job_minutes * 60
+        while True:
+            out = kube.run("get", "job", name, "-n", run.cp_ns, "-o", "json")
+            try:
+                status = json.loads(out.stdout).get("status", {}) if out.returncode == 0 else {}
+            except ValueError:
+                status = {}
+            failed = any(c.get("type") == "Failed" and c.get("status") == "True" for c in status.get("conditions", []))
+            if status.get("succeeded") or failed or time.monotonic() >= deadline:
+                log.entry(f"kubectl get job {name} -n {run.cp_ns} -o json  # .status", json.dumps(status), out.returncode)
+                if status.get("succeeded"):
+                    return None, None
+                if failed:
+                    logs = kube.run("logs", f"job/{name}", "-n", run.cp_ns, "--tail", "5")
+                    log.entry(f"kubectl logs job/{name} -n {run.cp_ns} --tail 5", logs.stdout + logs.stderr, logs.returncode)
+                    return (f"Job {name} failed ({status.get('failed', 0)} pods): its curl got an error from the pass of the schedule, "
+                            "or did not reach the control plane"), "FAIL"
+                return f"Job {name} did not complete in {args.job_minutes:g} minutes", "NOT_COVERED"
+            time.sleep(args.every)
+
+    def of_kind(rows, *kinds):
+        return [r for r in rows if r.kind in kinds]
+
+    def named(rows):
+        return " ".join(f"{r.key}={r.status}" for r in rows) or "none"
+
+    def waiting_disks(rows):
+        return [r for r in of_kind(rows, *DISK_BACKUPS) if r.status in WAITING and r.key != key]
+
+    # --- before the first Job: the day has a config that is Done, made before the VM, and nothing knows the VM yet
+    clock, rows, clear = read_until(gate, args.gate_minutes, stop_on_failure=True)
+    if rows is None:
+        return skip("could not read core.provider_commands")
+    if not clear:
+        return skip(f"no moment in {args.gate_minutes:g} minutes from minute {FIRST_JOB_MINUTE} of an hour, with time for a pass "
+                    f"before the next one, while CronJob {BACKUP_CRONJOB} had no Job running")
+    decided("the read before the first Job", clock)
+    if clock[:8] != day:
+        return skip(f"the run crossed 00:00Z: the hold's day is {day}, the database's {clock[:8]}")
+    configs = of_kind(rows, CONFIG_BACKUP)
+    late = [c for c in configs if c.created >= vm_made]
+    if late:
+        return skip(f"a config of the day was asked after the VM was created ({named(late)}): the newest config is not older than the VM")
+    if not any(c.status == "Done" for c in configs):
+        return skip(f"no cluster config of {day} is Done yet (configs: {named(configs)}): disk backup is not set up here, or the day's first config has not ended")
+    if any(r.key == key for r in rows):
+        return skip(f"the CronJob's own pass queued the VM's backup before the agent's Job ({named([r for r in rows if r.key == key])})")
+    if not time_left(4 * args.job_minutes + args.backup_minutes + args.settle_minutes + args.config_minutes):
+        return skip(f"the spec stops waiting at {gives_up_at:%H:%M:%SZ}: too little time left for the two passes")
+    before_a = clock
+
+    # --- the first Job queues the VM's backup; no config, the VM's disk has no row that ended
+    why, word = run_pass("a")
+    if why:
+        return finish(word, why)
+    clock, rows, there = read_until(lambda _, found: any(r.key == key for r in found), args.job_minutes)
+    if rows is None:
+        return skip("could not read core.provider_commands after the first Job")
+    decided("the read after the first Job", clock)
+    if clock[:10] != before_a[:10]:
+        return skip(f"the first Job's pass may have run in the next hour ({clock[:10]}, the read before it {before_a[:10]})")
+    if not there:
+        return finish("FAIL", f"the pass of the first Job queued no row {key}")
+    clock, rows, ended = read_until(lambda _, found: any(r.key == key and r.status in ENDED for r in found), args.backup_minutes)
+    backup = next((r for r in rows or [] if r.key == key), None)
+    if not ended or backup is None:
+        ahead = waiting_disks(rows or [])
+        return skip(f"the VM's backup did not end in {args.backup_minutes:g} minutes ({backup.status if backup else 'not read'})"
+                    + (f"; other disk backups of the cluster waiting: {named(ahead)}" if ahead else ""))
+    if backup.status != "Done":
+        return skip(f"the VM's backup ended {backup.status} attempts={backup.attempts} last_error={backup.error!r}")
+
+    # --- the read right before the second Job: every disk backup and config of the day ended
+    def settled(c, found):
+        return (not any(r.status in WAITING for r in of_kind(found, *DISK_BACKUPS, CONFIG_BACKUP))) and gate(c, found)
+
+    clock, rows, quiet = read_until(settled, args.settle_minutes)
+    if rows is None:
+        return skip("could not read core.provider_commands before the second Job")
+    if not quiet:
+        waiting = [r for r in of_kind(rows, *DISK_BACKUPS, CONFIG_BACKUP) if r.status in WAITING]
+        return skip(f"after {args.settle_minutes:g} minutes a backup or a config of the day still waits ({named(waiting)}), "
+                    f"or no moment clear of the CronJob's own pass came")
+    decided("the read before the second Job", clock)
+    if clock[:8] != day:
+        return skip(f"the run crossed 00:00Z: the hold's day is {day}, the database's {clock[:8]}")
+    backup = next((r for r in rows if r.key == key), None)
+    if backup is None or backup.status != "Done":
+        return skip(f"the VM's backup is no longer Done before the second Job ({named([backup] if backup else [])})")
+    since = [c for c in of_kind(rows, CONFIG_BACKUP) if c.created > backup.created]
+    if since:
+        return skip(f"a pass other than the agent's queued a config after the VM's backup row, before the second Job ({named(since)})")
+    others = [r for r in of_kind(rows, *DISK_BACKUPS) if r.key != key and r.created > backup.created]
+    if others:
+        return skip(f"another disk was created in between: its backup row is newer than the VM's ({named(others)})")
+    hour_key = f"cluster-backup-{cluster_id}-{clock[:10]}"
+    if any(r.key == hour_key for r in rows):
+        return skip(f"this UTC hour's config key {hour_key} is there already: the pass would queue none; run in another hour")
+    if not time_left(2 * args.job_minutes + args.config_minutes):
+        return skip(f"the spec stops waiting at {gives_up_at:%H:%M:%SZ}: too little time left for the second pass")
+    known = {r.key for r in rows}
+
+    # --- the second Job queues another config of the cluster, under this hour's key
+    why, word = run_pass("b")
+    if why:
+        return finish(word, why)
+    again = re.compile(rf"^cluster-backup-{re.escape(cluster_id)}-{day}\d\d$")
+
+    def asked(found):
+        return [r for r in of_kind(found, CONFIG_BACKUP) if r.key not in known and again.match(r.key)]
+
+    clock, rows, there = read_until(lambda _, found: bool(asked(found)), args.job_minutes)
+    if rows is None:
+        return skip("could not read core.provider_commands after the second Job")
+    decided("the read after the second Job", clock)
+    if clock[:10] != hour_key[-10:]:
+        return skip(f"the second Job's pass may have run in the next hour ({clock[:10]}, the read before it {hour_key[-10:]})")
+    if not there:
+        disks = [r for r in of_kind(rows, *DISK_BACKUPS) if r.key not in known]
+        if disks:
+            return skip(f"another disk was created in between: the second Job queued its backup, not a config ({named(disks)})")
+        return finish("FAIL", f"the pass of the second Job queued no config {hour_key} "
+                              f"(configs of the day: {named(of_kind(rows, CONFIG_BACKUP))})")
+    config_key = asked(rows)[0].key
+    if config_key != hour_key:
+        return finish("FAIL", f"the pass of the second Job queued {config_key}, not {hour_key} (the UTC hour of its pass)")
+    clock, rows, ended = read_until(lambda _, found: any(r.key == config_key and r.status in ENDED for r in found), args.config_minutes)
+    config = next((r for r in rows or [] if r.key == config_key), None)
+    if not ended or config is None:
+        ahead = waiting_disks(rows or [])
+        return skip(f"{config_key} did not end in {args.config_minutes:g} minutes ({config.status if config else 'not read'})"
+                    + (f"; disk backups of the cluster ahead of it: {named(ahead)}" if ahead else ""))
+    if config.status != "Done":
+        return finish("FAIL", f"{config_key} ended {config.status} attempts={config.attempts} last_error={config.error!r}")
+    done_at = clock
+    decided(f"the read that saw {config_key} Done", done_at)
+    if done_at[:8] != day:
+        return skip(f"the run crossed 00:00Z: {config_key} was read Done on {done_at[:8]}")
+    drills = [r for r in of_kind(rows, "restore.drill") if r.key not in known]
+    why22 = (f"{key} Done (row created {backup.created}), then {config_key} Done (row created {config.created}), read at {done_at}"
+             + (f"; the second Job also queued {named(drills)}" if drills else ""))
+    said = answer(kube, "bak22", "go", log)
+    run.answered = True
+    if said != 0:
+        return skip(f"the spec did not take go-bak22 (it stops waiting at {gives_up_at:%H:%M:%SZ}): {why22}")
+    run.passed = why22
+
+    # --- BAK-23: the cluster's config rows at the first read of the bucket later than that
+    deadline = time.monotonic() + args.read_minutes * 60
+    while True:
+        text = psql(copies_sql)
+        read = config_copies(text) if text is not None else None
+        if read and read[2] > done_at:
+            break
+        if time.monotonic() >= deadline:
+            last = f"outcome={read[1]} last_read_at={read[2]}" if read else "no row of incus/ in core.backup_observations, or no read"
+            return finish("PASS", why22, "NOT_COVERED", f"no read of the bucket after {done_at} in {args.read_minutes:g} minutes ({last})")
+        time.sleep(args.every)
+    decided("the first read of the bucket after it", read[0])
+    if read[1] != "Read":
+        return finish("PASS", why22, "NOT_COVERED", f"the read of the bucket at {read[2]} could not list it (outcome={read[1]})")
+    if read[2][:8] != day:
+        return finish("PASS", why22, "NOT_COVERED", f"the run crossed 00:00Z before the bucket was read ({read[2][:8]})")
+    return finish("PASS", why22, *bak23_verdict(read[3], day, backup.created))
+
+
+def seconds(text):
+    value = float(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"{text}: not a number of seconds")
+    return value
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -884,6 +1324,21 @@ def main(argv=None):
     p.add_argument("--watch-minutes", type=float, default=45, help="after go, until the backup and the snapshot end (or 600 s after the backup ended)")
     p.add_argument("--timeout-minutes", type=float, default=80, help="until HOLD bak20")
     p.set_defaults(func=cmd_bak20)
+    p = sub.add_parser("bak22")
+    kube_args(p)
+    p.add_argument("--log", required=True)
+    p.add_argument("--every", type=seconds, default=5, help="seconds between two reads")
+    p.add_argument("--gate-minutes", type=float, default=8,
+                   help="before the first Job, until it is minute 3 or later, the CronJob has no Job running and a pass fits before the next hour")
+    p.add_argument("--backup-minutes", type=float, default=15, help="after the first Job, until the VM's backup ended")
+    p.add_argument("--settle-minutes", type=float, default=6, help="before the second Job, until no backup or config of the day is Pending or Leased, at a moment like the first Job's")
+    p.add_argument("--config-minutes", type=float, default=4, help="after the second Job, until the config it queued ended")
+    p.add_argument("--read-minutes", type=float, default=12, help="after go, until the bucket was read (CronJob */5)")
+    p.add_argument("--job-minutes", type=float, default=2,
+                   help="until a Job the agent created has run its pass, then until the rows show what the pass queued")
+    p.add_argument("--hold-minutes", type=float, default=40, help="how long the spec waits after HOLD bak22 (HOLD_AGENT_MS)")
+    p.add_argument("--timeout-minutes", type=float, default=80, help="until HOLD bak22")
+    p.set_defaults(func=cmd_bak22)
     p = sub.add_parser("sample")
     ssh_opts(p)
     p.add_argument("--project", required=True)
