@@ -74,7 +74,8 @@ test.describe.serial('portal-ui pages', () => {
 
   // titan-ops features/cloud-console/design.md#quota-card · OpenViCloud/titan-cloud-console:portal/src/lib/quota.ts (vmOccupiesQuota,
   // networkOccupiesQuota, volumeOccupiesQuota: every status but Deleting, Deleted, NotFound and Failed, so Attaching and
-  // Detaching count) · OpenViCloud/titan-cloud-console:portal/src/components/QuotaCard.tsx (QuotaRow: `${used} / ${cap}`)
+  // Detaching count; a VM or volume with restoredFromBackup never counts, titan-ops features/backup/design.md#restore-as-new-resource)
+  // · OpenViCloud/titan-cloud-console:portal/src/components/QuotaCard.tsx (QuotaRow: `${used} / ${cap}`)
   test('UI-14 the quota card shows the caps the API returns and counts VMs, networks and volumes by status', async () => {
     const tenant = await get('tenant', '/v1/tenant')
     const outside = new Set(['Deleting', 'Deleted', 'NotFound', 'Failed'])
