@@ -76,7 +76,7 @@ did not reach the control plane) is a FAIL. An error of the command itself after
 and ends NOT_COVERED (exit 4): before the go it answers skip-bak22 and both lines are NOT_COVERED, after it L_BAK22
 keeps its PASS; facts out of shape answer skip-bak22 and exit 2.
 
-bak28 and bak36 answer the two holds of backup/restore (BAK-28…BAK-38, titan-ops features/backup/design.md#restore-as-new-resource):
+bak28 and bak36 answer the two holds of backup/restore (BAK-28…BAK-36, BAK-38 and BAK-39, titan-ops features/backup/design.md#restore-as-new-resource):
 both read the rows of today's vm-backup-<id>-<day> and volume-backup-<id>-<day> keys of the held VMs and volumes in
 core.provider_commands (psql SELECT in the titan-db primary pod, read only), create a Job from CronJob
 control-plane-job-backup-schedule when a key has no row yet (a row the hourly pass queued needs none), read every

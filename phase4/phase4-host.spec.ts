@@ -11,7 +11,9 @@ import { incusName, phase4Key, projectOf } from './incus-names'
 
 // Phase 4 of the release run (`release:regression-prd`; README.md §Phase 4): resources that the
 // agent's commands on the Incus host and from the Internet act on. At each HOLD (lib/host-hold.ts) the spec logs what it
-// holds and waits for go-<step> or skip-<step>; then it reads the API for the expectation of plan.md. Everything it
+// holds and waits for go-<step> or skip-<step>; then it reads the API for the expectation of plan.md, and a test whose
+// first step writes on the host (WRITES of phase4_steps.py) and is answered skip is reported skipped, never passed on
+// what the host did not do. Everything it
 // creates is deleted in afterAll, every step even when one fails (cleanUp); the caps it raises are given back.
 // V is stored as the tenant's SSH key, U goes in vm A's cloud-init; the agent keeps the private halves and a third key X
 // that Titan never sees (python3 phase4.py keys).
@@ -550,13 +552,17 @@ test.describe.serial('phase4 host', () => {
 
   // plan.md VM-24: after `incus restart`, authorized_keys keeps one line per key
   test('VM-24 restart on the host', async () => {
-    await hold('vm24-restart', { vm: incusName('vm', vmA) })
+    if (!await hold('vm24-restart', { vm: incusName('vm', vmA) })) {
+      test.skip(true, 'host step not run')
+    }
     await waitVm('vm A running after restart', vmA, runs)
   })
 
   // plan.md OBS-01: drift is observed, not corrected (titan-ops features/vm/design.md#vm-status)
   test('OBS-01 incus stop: Stopped after a reconciler cycle, nothing waiting, Titan does not start it', async () => {
-    await hold('obs01', { vm: incusName('vm', vmC) })
+    if (!await hold('obs01', { vm: incusName('vm', vmC) })) {
+      test.skip(true, 'host step not run')
+    }
     const vm = await waitVm('OBS-01 observed stopped', vmC, (v) => v.status === 'Stopped')
     expect(vm.requestFailureReason).toBeNull()
     await sleep(150_000)
@@ -566,13 +572,17 @@ test.describe.serial('phase4 host', () => {
   })
 
   test('OBS-02 incus start: Running', async () => {
-    await hold('obs02', { vm: incusName('vm', vmC) })
+    if (!await hold('obs02', { vm: incusName('vm', vmC) })) {
+      test.skip(true, 'host step not run')
+    }
     await waitVm('OBS-02 observed running', vmC, runs)
   })
 
   // plan.md OBS-07: Frozen, and Start unfreezes (titan-ops features/vm/design.md#requests-follow-incus)
   test('OBS-07 incus pause: Frozen; Start brings it back', async () => {
-    await hold('obs07', { vm: incusName('vm', vmC) })
+    if (!await hold('obs07', { vm: incusName('vm', vmC) })) {
+      test.skip(true, 'host step not run')
+    }
     await waitVm('OBS-07 observed frozen', vmC, (v) => v.status === 'Frozen')
     expectStatus(await call('tenant', 'POST', `/v1/tenant/vms/${vmC}/start`), 202)
     await waitVm('OBS-07 unfrozen', vmC, runs)
@@ -580,7 +590,9 @@ test.describe.serial('phase4 host', () => {
 
   // plan.md OBS-03 (titan-ops architecture/desired-and-current.md#not-exists-convergence)
   test('OBS-03 incus delete --force: NotFound, never Deleted; a Titan delete then reaches Deleted', async () => {
-    await hold('obs03', { vm: incusName('vm', vmC) })
+    if (!await hold('obs03', { vm: incusName('vm', vmC) })) {
+      test.skip(true, 'host step not run')
+    }
     const vm = await waitVm('OBS-03 observed absent', vmC, (v) => v.status === 'NotFound')
     expect(vm.status).not.toBe('Deleted')
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/vms/${vmC}`), 202)
@@ -589,7 +601,9 @@ test.describe.serial('phase4 host', () => {
 
   // plan.md OBS-04 (titan-ops features/volume/design.md#attachment-from-used-by)
   test('OBS-04 a Titan volume on an instance outside Titan: elsewhere = true; attach, detach, delete refused', async () => {
-    await hold('obs04', { volume: incusName('vol', volumeId), outside: `rg-obs-${RUN}` })
+    if (!await hold('obs04', { volume: incusName('vol', volumeId), outside: `rg-obs-${RUN}` })) {
+      test.skip(true, 'host step not run')
+    }
     await waitVolume('OBS-04 elsewhere', volumeId, (v) => v.currentAttachedElsewhere === true)
     expectError(await call('tenant', 'POST', `/v1/tenant/volumes/${volumeId}/attach`, { vmId: vmA }), 422, 'VOLUME_INVALID_STATE')
     expectError(await call('tenant', 'POST', `/v1/tenant/volumes/${volumeId}/detach`), 422, 'VOLUME_INVALID_STATE')
@@ -601,14 +615,18 @@ test.describe.serial('phase4 host', () => {
 
   // plan.md OBS-06 (titan-ops features/network/design.md#network-reconciler)
   test('OBS-06 the empty network deleted outside Titan: NotFound', async () => {
-    await hold('obs06', { network: `net-${netEmpty}` })
+    if (!await hold('obs06', { network: `net-${netEmpty}` })) {
+      test.skip(true, 'host step not run')
+    }
     await waitNetwork('OBS-06 observed absent', netEmpty, (n) => n.status === 'NotFound')
   })
 
   // plan.md OBS-05 (titan-ops features/catalog/design.md#template-state-is-existence)
   test('OBS-05 alias gone: NotFound in the cluster, hidden from the catalog, create is 422 TEMPLATE_UNAVAILABLE; sync brings it back', async () => {
     const { clusterId, smallTier, templateId } = await envOf()
-    await hold('obs05', { alias: `tpl-${templateId}` })
+    if (!await hold('obs05', { alias: `tpl-${templateId}` })) {
+      test.skip(true, 'host step not run')
+    }
     await pollUntil('OBS-05 hidden', () => get('tenant', `/v1/templates?clusterId=${clusterId}`),
       (rows: any[]) => !rows.some((t) => t.id === templateId), (rows: any[]) => rows.map((t) => t.id).join(','))
     const adminRowOf = async () => ((await get('admin', '/v1/admin/templates') as any[]).find((t) => t.id === templateId)
@@ -631,7 +649,9 @@ test.describe.serial('phase4 host', () => {
 
   // plan.md OBS-08 (titan-ops architecture/resource-lifecycle.md#kinds, #callback-routes)
   test('OBS-08 a delete Incus refuses: the request ends failed, the VM stays; a new DELETE then reaches Deleted', async () => {
-    await hold('obs08-protect', { vm: incusName('vm', vmD) })
+    if (!await hold('obs08-protect', { vm: incusName('vm', vmD) })) {
+      test.skip(true, 'host step not run')
+    }
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/vms/${vmD}`), 202)
     const failed = await pollUntil('OBS-08 request ended', () => getVm(vmD), (v) => v.status !== 'Deleting' && v.requestFailureReason !== null, vmShape, 15 * 60_000)
     expect(failed.status).not.toBe('Deleted')
