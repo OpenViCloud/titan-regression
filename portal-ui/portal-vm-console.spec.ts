@@ -5,9 +5,9 @@ import { API, RESULTS, bodyOf, call, expectStatus, get, log, newKey, sleep, star
 import { cleanUp } from './clean-up'
 import { RUN, envOf, nameOf, runNetwork, runs, waitVm } from './fixtures'
 
-// Cases UI-35..UI-40 and UI-42 of plan.md: the console password, stop timeout and cloud-init user data fields of the Create VM
-// form and its three sections at 375px and 1440px, the Console tab of the VM page, its Stop timeout panel and its Add SSH key dialog. One VM, made through the form by
-// UI-35, is the subject of UI-36, UI-38, UI-39 (its user data read back) and UI-40; UI-37 sends no create. UI-36 opens console sessions of the tenant: they count toward its five SSH and console
+// Cases UI-35..UI-40, UI-42 and UI-44 of plan.md: the console password, stop timeout and cloud-init user data fields of the Create VM
+// form and its three sections at 375px and 1440px, the network the form chooses by itself, the Console tab of the VM page, its Stop timeout panel and its Add SSH key dialog. One VM, made through the form by
+// UI-35, is the subject of UI-36, UI-38, UI-39 (its user data read back) and UI-40; UI-37 sends no create; UI-44 makes and deletes one of its own. UI-36 opens console sessions of the tenant: they count toward its five SSH and console
 // sessions, so this file does not run beside a job that counts them (CLAUDE.md, shared data between lanes).
 
 // The words of the form in each language (OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts,
@@ -372,6 +372,119 @@ test.describe.serial('portal-ui vm form: stop timeout and sections', () => {
 })
 
 // ---------------------------------------------------------------------------------------------------------------
+// UI-44: the Network field of the form picks a cluster's only usable network by itself, and picks none where there are
+// two. One VM (rg-vm-<run>), sent by the form without the Network field touched, deleted in afterAll.
+// ---------------------------------------------------------------------------------------------------------------
+
+test.describe.serial('portal-ui vm form: network chosen for the cluster', () => {
+  test.describe.configure({ timeout: 15 * 60_000 })
+
+  let vmId = ''
+  const nameNet = nameOf('vm')
+
+  test.beforeAll(async ({ browser }) => {
+    startLog('portal-ui-vm-network')
+    useBrowser(browser)
+  })
+
+  test.afterAll(async () => {
+    test.setTimeout(10 * 60_000)
+    await cleanUp([
+      ['vm', async () => {
+        if (vmId !== '') {
+          await deleteVmAndWait(vmId)
+        }
+      }],
+      ['stray vm', () => deleteStrays([nameNet], vmId === '' ? [] : [vmId])],
+      ['language', async () => {
+        const page = await pageOf('tenant')
+        await page.evaluate(() => localStorage.removeItem('ovc-lang'))
+      }],
+      ['sessions', closeSessions],
+    ])
+  })
+
+  // titan-ops features/network/design.md#default-network (a tenant's one network is its cluster's only usable one) ·
+  // titan-ops features/vm/design.md#vm-create-form (the chosen cluster has exactly one usable network ⇒ it is chosen) ·
+  // OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx (chosenNetworkId: networkId, or the cluster's one
+  // network of clusterNetworks when none is picked; handleSubmit sends networkId: chosenNetworkId) ·
+  // OpenViCloud/titan-cloud-console:portal/src/lib/networkState.ts (isUsableNetwork: status Created) ·
+  // OpenViCloud/titan-cloud-console:portal/src/lib/idempotency.ts (createIdempotencyKeeper: a new Idempotency-Key per submission) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Networking/Network/Contracts/NetworkQueryResult.cs (ClusterId, Status) ·
+  // OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts (vms.create, vmCreate.title, namePlaceholder, cluster, network, template, size, submit)
+  test('UI-44 the Network field takes the cluster\'s only usable network by itself and the form creates the VM on it; a cluster with two usable networks leaves the field empty', async () => {
+    const words = FORM.en
+    const run = await runNetwork()
+    const networks = await get('tenant', '/v1/tenant/networks') as Array<{ id: string, name: string, clusterId: string, status: string }>
+    const usableOn = (clusterId: string) => networks.filter((n) => n.clusterId === clusterId && n.status === 'Created')
+    const runRow = networks.find((n) => n.id === run.id)
+    expect(runRow, `the run network ${run.id} is in GET /v1/tenant/networks`).toBeDefined()
+    const runCluster = runRow!.clusterId
+    const onRunCluster = usableOn(runCluster)
+    log(`UI-44 cluster ${runCluster} usable networks: ${onRunCluster.map((n) => `${n.name} ${n.id}`).join(', ')}`)
+    test.skip(onRunCluster.length !== 1,
+      `NOT COVERED: cluster ${runCluster} has ${onRunCluster.length} usable networks, not only the run network ${run.name}`)
+    const templates = await get('tenant', `/v1/templates?clusterId=${runCluster}`) as Array<{ id: string }>
+    test.skip(templates.length === 0, `NOT COVERED: cluster ${runCluster} of the run network lists no template`)
+    const { smallTier } = await envOf()
+
+    const page = await pageOf('tenant')
+    await useLanguage(page, '/vms', words.lang)
+    await page.getByRole('button', { name: words.open, exact: true }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByRole('heading', { name: words.title })).toBeVisible()
+    await dialog.getByPlaceholder(words.namePlaceholder).fill(nameNet)
+    await dialog.getByRole('combobox', { name: words.cluster, exact: true }).selectOption(runCluster)
+    // The Network field is never touched: the cluster's one usable network shows as chosen.
+    await expect(dialog.getByRole('combobox', { name: words.network, exact: true })).toHaveValue(run.id)
+    await dialog.getByRole('combobox', { name: words.template, exact: true }).selectOption(templates[0].id)
+    await dialog.getByRole('combobox', { name: words.size, exact: true }).selectOption(smallTier)
+    await page.screenshot({ path: `${RESULTS}/UI-44-network-chosen.png` })
+
+    const sent = page.waitForResponse((res) => res.request().method() === 'POST' && new URL(res.url()).pathname === '/v1/tenant/vms')
+    await dialog.getByRole('button', { name: words.submit, exact: true }).click()
+    const response = await sent
+    expect(response.status(), 'POST /v1/tenant/vms').toBe(202)
+    vmId = (await response.json()).vmId as string
+    const request = response.request()
+    const key = await request.headerValue('idempotency-key')
+    expect(key, 'the form sends an Idempotency-Key').toBeTruthy()
+    const body = request.postDataJSON()
+    expect(body.networkId, 'the body carries the network chosen by itself').toBe(run.id)
+    expect(body.clusterId).toBe(runCluster)
+    expect(body.name).toBe(nameNet)
+    await expect(dialog).toHaveCount(0)
+    const vm = await get('tenant', `/v1/tenant/vms/${vmId}`)
+    expect(vm.name).toBe(nameNet)
+    expect(vm.networkId, `${nameNet} is on the run network`).toBe(run.id)
+    await page.goto(PORTAL + '/vms', { waitUntil: 'networkidle' })
+    await expect(page.getByRole('listitem').filter({ hasText: nameNet })).toBeVisible()
+    await page.screenshot({ path: `${RESULTS}/UI-44-vm-created.png` })
+    log(`UI-44 ${nameNet} ${vmId}: POST 202 with networkId ${run.id} the form chose by itself (Idempotency-Key ${key}), GET networkId ${vm.networkId}`)
+
+    // A cluster with two usable networks, if this environment has one: nothing is chosen until the customer picks.
+    const clusters = await get('anonymous', '/v1/clusters') as Array<{ id: string }>
+    const twoNetworks = clusters.find((c) => usableOn(c.id).length >= 2)
+    if (twoNetworks === undefined) {
+      log(`UI-44 NOT COVERED for the two-network part: no cluster has two usable networks of this tenant (${clusters.map((c) => `${c.id}: ${usableOn(c.id).length}`).join(', ')})`)
+      return
+    }
+    const picks = usableOn(twoNetworks.id)
+    await page.getByRole('button', { name: words.open, exact: true }).click()
+    await expect(dialog.getByRole('heading', { name: words.title })).toBeVisible()
+    await dialog.getByRole('combobox', { name: words.cluster, exact: true }).selectOption(twoNetworks.id)
+    const field = dialog.getByRole('combobox', { name: words.network, exact: true })
+    await expect(field).toHaveValue('')
+    await page.screenshot({ path: `${RESULTS}/UI-44-two-networks.png` })
+    await field.selectOption(picks[1].id)
+    await expect(field).toHaveValue(picks[1].id)
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    log(`UI-44 cluster ${twoNetworks.id} with ${picks.length} usable networks: the Network field empty until one is picked`)
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------
 // UI-35, UI-39, UI-38, UI-36, UI-40: one VM made through the form with a console password, a stop timeout of 300 and
 // cloud-init user data. UI-39 and UI-38 before UI-36: a console that never shows a prompt must not skip them. UI-40
 // after UI-36: by then cloud-init has run its last stage on the VM.
@@ -469,7 +582,7 @@ test.describe.serial('portal-ui vm: console password, stop timeout panel and Con
     const heldVi = await holdCreates(page)
     try {
       const dialogVi = await openFilledForm(page, FORM.vi, namePw, choices)
-      await expect(dialogVi.getByLabel(FORM.vi.consolePassword, { exact: true })).toHaveAttribute('type', 'password')
+      await expect(dialogVi.getByRole('group', { name: FORM.vi.access }).getByLabel(FORM.vi.consolePassword, { exact: true })).toHaveAttribute('type', 'password')
       await dialogVi.locator('#console-password').fill(passwordOf(11))
       await dialogVi.getByRole('button', { name: FORM.vi.submit, exact: true }).click()
       await expect(dialogVi.getByText(FORM.vi.passwordLength, { exact: true })).toBeVisible()

@@ -75,14 +75,29 @@ test.describe.serial('portal-ui pages', () => {
   // titan-ops features/cloud-console/design.md#quota-card · OpenViCloud/titan-cloud-console:portal/src/lib/quota.ts (vmOccupiesQuota,
   // networkOccupiesQuota, volumeOccupiesQuota: every status but Deleting, Deleted, NotFound and Failed, so Attaching and
   // Detaching count; a VM or volume with restoredFromBackup never counts, titan-ops features/backup/design.md#restore-as-new-resource)
-  // · OpenViCloud/titan-cloud-console:portal/src/components/QuotaCard.tsx (QuotaRow: `${used} / ${cap}`)
-  test('UI-14 the quota card shows the caps the API returns and counts VMs, networks and volumes by status', async () => {
+  // · OpenViCloud/titan-cloud-console:portal/src/components/QuotaCard.tsx (QuotaRow: `${used} / ${cap}`) ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Vm/Vm.cs (OccupiesQuota: !RestoredFromBackup and the four statuses) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Compute/Vm/Contracts/VmQueryResult.cs,
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Compute/Volume/Contracts/VolumeQueryResult.cs (RestoredFromBackup)
+  test('UI-14 the quota card shows the caps the API returns and counts VMs, networks and volumes by status, leaving restored-from-backup VMs and volumes out', async () => {
     const tenant = await get('tenant', '/v1/tenant')
     const outside = new Set(['Deleting', 'Deleted', 'NotFound', 'Failed'])
-    const counted = async (path: string) => (await get('tenant', path) as Array<{ status: string }>).filter((r) => !outside.has(r.status)).length
-    const vms = await counted('/v1/tenant/vms')
-    const networks = await counted('/v1/tenant/networks')
-    const volumes = await counted('/v1/tenant/volumes')
+    type Row = { status: string, restoredFromBackup?: boolean }
+    const rowsOf = async (path: string) => await get('tenant', path) as Row[]
+    const [vmRows, networkRows, volumeRows] = await Promise.all([rowsOf('/v1/tenant/vms'), rowsOf('/v1/tenant/networks'), rowsOf('/v1/tenant/volumes')])
+    // A VM and a volume carry restoredFromBackup; one restored from a backup never counts, in any status.
+    for (const [kind, rows] of [['vm', vmRows], ['volume', volumeRows]] as const) {
+      expect(rows.every((r) => typeof r.restoredFromBackup === 'boolean'), `every ${kind} row carries restoredFromBackup`).toBe(true)
+    }
+    const occupies = (r: Row) => r.restoredFromBackup !== true && !outside.has(r.status)
+    const vms = vmRows.filter(occupies).length
+    const networks = networkRows.filter((r) => !outside.has(r.status)).length
+    const volumes = volumeRows.filter(occupies).length
+    const restoredVms = vmRows.filter((r) => r.restoredFromBackup === true && !outside.has(r.status)).length
+    const restoredVolumes = volumeRows.filter((r) => r.restoredFromBackup === true && !outside.has(r.status)).length
+    if (restoredVms + restoredVolumes === 0) {
+      log('UI-14 no live restored-from-backup VM or volume on the tenant: the count leaving them out equals the count by status alone (BAK-35 shows the card with them)')
+    }
     const page = await pageOf('tenant')
     await page.goto(PORTAL + '/', { waitUntil: 'networkidle' })
     const card = page.getByRole('region', { name: 'Quota' })
@@ -91,7 +106,7 @@ test.describe.serial('portal-ui pages', () => {
     await expect(rowOf('Networks')).toContainText(`${networks} / ${tenant.maxNetworks}`)
     await expect(rowOf('Volumes')).toContainText(`${volumes} / ${tenant.maxVolumes}`)
     await card.screenshot({ path: `${RESULTS}/UI-14-quota.png` })
-    log(`UI-14 vms ${vms}/${tenant.maxVms} networks ${networks}/${tenant.maxNetworks} volumes ${volumes}/${tenant.maxVolumes} ipv6 cap ${tenant.maxPublicIpv6}`)
+    log(`UI-14 vms ${vms}/${tenant.maxVms} networks ${networks}/${tenant.maxNetworks} volumes ${volumes}/${tenant.maxVolumes} ipv6 cap ${tenant.maxPublicIpv6}; left out as restored: ${restoredVms} vm(s), ${restoredVolumes} volume(s)`)
   })
 
   // titan-ops features/vm/design.md#vm-page (tab Monitoring: 1h · 24h · 7d, 1h by default with aria-pressed; three cards CPU,

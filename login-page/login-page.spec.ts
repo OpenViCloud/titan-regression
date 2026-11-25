@@ -3,7 +3,7 @@ import { PORTAL } from './auth'
 import { RESULTS, log, startLog } from './api'
 import { startLocalProxyIfNeeded } from './local-proxy'
 
-// Cases LOGIN-01..10 and LOGIN-12 of plan.md: the Keycloak login theme `openvicloud`, read without signing in.
+// Cases LOGIN-01..10, LOGIN-12 and LOGIN-13 of plan.md: the Keycloak login theme `openvicloud`, read without signing in.
 // Theme: OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/.
 // Nothing is submitted: register is opened, never sent.
 // Every case leaves ${RESULTS}/<ID>-<what>.png; the form is empty when it is taken.
@@ -379,6 +379,57 @@ test.describe('login-page', () => {
       expect(href, `${lang}: GitHub link`).toContain('/realms/titan/broker/github/login')
       await expect(page.locator('#social-google')).toHaveCount(0)
       await page.screenshot({ path: `${RESULTS}/LOGIN-12-${lang}.png` })
+    }
+    await context.close()
+  })
+
+  // titan-ops features/public-site/design.md#brand-icon · titan-ops architecture/keycloak.md#keycloak-theme ·
+  // OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/template.ftl (.ovc-brand-mark: an <img> of
+  // ${url.resourcesPath}/img/icon.png?v=${properties.ovcAssetsVersion}, width and height 32, just before .ovc-brand-name;
+  // <link rel="icon"> the same URL) · OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/resources/css/openvicloud.css
+  // (.ovc-brand-mark 32 px) · OpenViCloud/titan-local-cluster:base/keycloak/realm-import/theme/openvicloud/login/resources/img/icon.png (64×64)
+  test('LOGIN-13 the mark beside OpenViCloud and the favicon are the theme icon, 32 px of a 64 px PNG, on login and register', async ({ browser }) => {
+    const { context, page } = await open(browser, 'light', 1280)
+    await loginUrl(page)
+    for (const name of ['login', 'register']) {
+      if (name === 'register') {
+        await openRegister(page)
+      }
+      const header = page.locator('#kc-header-wrapper.ovc-brand')
+      await expect(header.locator('.ovc-brand-name'), `${name}: brand name`).toHaveText(BRAND)
+      const mark = header.locator('img.ovc-brand-mark')
+      await expect(mark, `${name}: one brand mark`).toHaveCount(1)
+      await mark.evaluate((img: HTMLImageElement) => img.complete ? null : new Promise((resolve) => {
+        img.addEventListener('load', resolve, { once: true })
+        img.addEventListener('error', resolve, { once: true })
+      }))
+      const facts = await mark.evaluate(async (img: HTMLImageElement) => {
+        const icons = Array.from(document.querySelectorAll('link[rel="icon"]')).map((link) => (link as HTMLLinkElement).href)
+        const res = await fetch(img.src, { cache: 'no-store' })
+        return {
+          src: img.src,
+          nextIsName: img.nextElementSibling?.classList.contains('ovc-brand-name') ?? false,
+          naturalWidth: img.naturalWidth,
+          naturalHeight: img.naturalHeight,
+          icons,
+          status: res.status,
+          type: res.headers.get('content-type'),
+        }
+      })
+      const box = await mark.boundingBox()
+      const src = new URL(facts.src)
+      log(`LOGIN-13 ${name} src=${src.pathname}${src.search} next=${facts.nextIsName} natural=${facts.naturalWidth}x${facts.naturalHeight} box=${JSON.stringify(box)} fetch=${facts.status} ${facts.type} icons=${JSON.stringify(facts.icons.map((icon) => new URL(icon).pathname + new URL(icon).search))}`)
+      expect(src.pathname, `${name}: the theme's icon`).toMatch(/\/login\/openvicloud\/img\/icon\.png$/)
+      expect(src.search, `${name}: the asset version`).toMatch(/^\?v=[^&]+$/)
+      expect(facts.nextIsName, `${name}: the mark sits just before the name`).toBe(true)
+      expect(box, `${name}: mark rendered`).not.toBeNull()
+      expect(Math.round(box!.width)).toBe(32)
+      expect(Math.round(box!.height)).toBe(32)
+      expect(facts.naturalWidth).toBe(64)
+      expect(facts.status).toBe(200)
+      expect(facts.type ?? '').toMatch(/^image\/png\b/)
+      expect(facts.icons, `${name}: <link rel="icon"> is the same file`).toEqual([facts.src])
+      await page.screenshot({ path: `${RESULTS}/LOGIN-13-${name}.png` })
     }
     await context.close()
   })

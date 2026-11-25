@@ -21,6 +21,8 @@ evidence as `[HH:MM:SSZ]` / `$ <command>` / output / `exit=<n>`.
     python3 phase4.py bak20 --kubeconfig <kc> --job <job> --log <file> [--every 3] [--leased-minutes 30] [--watch-minutes 45]
     python3 phase4.py bak22 --kubeconfig <kc> --job <job> --log <file> [--every 5] [--gate-minutes 8] [--backup-minutes 15]
                               [--settle-minutes 6] [--config-minutes 4] [--read-minutes 12] [--job-minutes 2] [--hold-minutes 40]
+    python3 phase4.py bak28 --kubeconfig <kc> --job <job> --log <file> [--every 5] [--backup-minutes 25]
+    python3 phase4.py bak36 --kubeconfig <kc> --job <job> --log <file> [--every 5] [--backup-minutes 25] [--meter-minutes 15]
     python3 phase4.py disconnect --control <socket> --target <user@host>
 
 <job> is the name run-module.sh gives the job (regression-<module>-<label>). The host command runs through the
@@ -73,6 +75,20 @@ spec then deletes its VM), and L_BAK23 is NOT_COVERED. A Job that failed (its cu
 did not reach the control plane) is a FAIL. An error of the command itself after the hold was read deletes the Jobs
 and ends NOT_COVERED (exit 4): before the go it answers skip-bak22 and both lines are NOT_COVERED, after it L_BAK22
 keeps its PASS; facts out of shape answer skip-bak22 and exit 2.
+
+bak28 and bak36 answer the two holds of backup/restore (BAK-28…BAK-38, titan-ops features/backup/design.md#restore-as-new-resource):
+both read the rows of today's vm-backup-<id>-<day> and volume-backup-<id>-<day> keys of the held VMs and volumes in
+core.provider_commands (psql SELECT in the titan-db primary pod, read only), create a Job from CronJob
+control-plane-job-backup-schedule when a key has no row yet (a row the hourly pass queued needs none), read every
+<every> seconds (logged when the rows change) until every row ended or --backup-minutes, and delete the Job they created.
+bak28 (the archives the restores read) answers go-bak28 only when every row is Done; last line L_BAK28_BACKUPS=PASS |
+FAIL <what> (a row Failed) | NOT_COVERED <why> (skip-bak28). bak36 (BAK-36: the restored VM and volumes backed up the
+same day) also waits, up to --meter-minutes, for a Job of CronJob control-plane-job-meter that started after the held
+runningAt and succeeded, then reads core.usage_records of the source VM and the restored VM and volumes (BAK-31: no row
+of a restored one; a row of the source VM collected since runningAt shows a pass that billed); it answers go-bak36 on
+PASS or FAIL of BAK-36 and skip-bak36 on NOT_COVERED; last lines L_BAK31= then L_BAK36=, each PASS | FAIL <what> |
+NOT_COVERED <why>. Exit 1 when a line is FAIL, else 4 when one is NOT_COVERED, else 0; facts out of shape answer skip and
+exit 2.
 
 Exit 2: usage, the pending HOLD is not the step asked for, or no ControlMaster on the socket. wait: exit 3 = the runner finished with no HOLD pending.
 """
@@ -1244,6 +1260,215 @@ def bak22(args, kube, facts, run):
     return finish("PASS", why22, *bak23_verdict(read[3], day, backup.created))
 
 
+METER_CRONJOB = "control-plane-job-meter"
+
+
+def restore_keys(facts):
+    """The backup keys of the day of HOLD bak28/bak36's VMs and volumes, or None when the facts are out of shape.
+
+    OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/ProviderCommand/Enums/BackupCommandKeys.cs (Vm, Volume)."""
+    vms, volumes, day = facts.get("vmIds"), facts.get("volumeIds"), str(facts.get("day", ""))
+    if not isinstance(vms, list) or not isinstance(volumes, list) or not vms + volumes or not re.fullmatch(r"\d{8}", day):
+        return None
+    if not all(isinstance(i, str) and UUID.match(i) for i in vms + volumes):
+        return None
+    return [f"vm-backup-{i}-{day}" for i in vms] + [f"volume-backup-{i}-{day}" for i in volumes]
+
+
+def backups_of(keys):
+    """The SELECT of the rows of these backup keys; every key is built from checked ids before it reaches SQL."""
+    quoted = ", ".join(f"'{k}'" for k in keys)
+    return f"SELECT kind, key, status, attempts FROM core.provider_commands WHERE key IN ({quoted}) ORDER BY created_at, key"
+
+
+def usage_of(ids):
+    """The SELECT of the usage records of these resources (ids checked against UUID first), collected_at as yyyyMMddHHmmss."""
+    quoted = ", ".join(f"'{i}'" for i in ids)
+    return ("SELECT resource_id, resource_type, to_char(collected_at AT TIME ZONE 'UTC', 'YYYYMMDDHH24MISS') "
+            f"FROM core.usage_records WHERE resource_id IN ({quoted}) ORDER BY collected_at, resource_id")
+
+
+def usage_rows(text):
+    """[(resource id, resource type, collected yyyyMMddHHmmss)] of usage_of's output."""
+    rows = []
+    for line in text.splitlines():
+        parts = line.split("|")
+        if len(parts) == 3 and UUID.match(parts[0]) and re.fullmatch(r"\d{14}", parts[2]):
+            rows.append((parts[0], parts[1], parts[2]))
+    return rows
+
+
+def backups_verdict(rows, keys, minutes):
+    """(word, why) of the backup rows of keys at the last read."""
+    found = {k: backup_of(rows or [], k) for k in keys}
+    failed = [r for r in found.values() if r and r[2] == "Failed"]
+    if failed:
+        return "FAIL", " ".join(f"{r[1]} Failed attempts={r[3]}" for r in failed)
+    if all(r and r[2] == "Done" for r in found.values()):
+        return "PASS", f"{len(keys)} rows Done: {' '.join(keys)}"
+    waiting = " ".join(f"{k} {r[2] if r else 'absent'}" for k, r in found.items() if not r or r[2] != "Done")
+    return "NOT_COVERED", f"not ended in {minutes:g} minutes: {waiting}"
+
+
+def meter_pass_after(jobs, after):
+    """The name of a Job of CronJob control-plane-job-meter that started after `after` (aware datetime) and succeeded."""
+    for item in jobs.get("items", []):
+        owners = item.get("metadata", {}).get("ownerReferences", [])
+        if not any(o.get("kind") == "CronJob" and o.get("name") == METER_CRONJOB for o in owners):
+            continue
+        status = item.get("status", {})
+        try:
+            started = datetime.datetime.strptime(status.get("startTime", ""), "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=datetime.timezone.utc)
+        except ValueError:
+            continue
+        if started > after and (status.get("succeeded") or 0) >= 1:
+            return item["metadata"]["name"]
+    return None
+
+
+def bak31_verdict(rows, source, restored, after):
+    """(word, why) of BAK-31 from the usage rows of the source VM and the restored VM and volumes; after: yyyyMMddHHmmss."""
+    billed = [r for r in rows if r[0] in restored]
+    if billed:
+        return "FAIL", "usage rows of a restored resource: " + " ".join(f"{r[0]} {r[1]} {r[2]}" for r in billed)
+    control = [r for r in rows if r[0] == source and r[2] >= after]
+    if not control:
+        return "NOT_COVERED", f"no usage row of the source VM collected at or after {after}: no pass to compare with"
+    return "PASS", f"source VM rows since {after}: {len(control)}; rows of the restored VM and volumes: 0"
+
+
+def cmd_bak28(args):
+    return restore_hold(args, "bak28")
+
+
+def cmd_bak36(args):
+    return restore_hold(args, "bak36")
+
+
+def restore_hold(args, step):
+    """HOLD bak28 or bak36 of backup/restore: today's backups of the held VMs and volumes asked and waited for; at bak36
+    also BAK-31, the usage records of the restored ones after a meter pass."""
+    kube = Kube(args.kubeconfig, args.job)
+    facts = wait_for(kube, step, args.timeout_minutes)
+    if facts is None:
+        return 2
+    log = Log(args.log, f"phase4.py {step} · job {args.job}")
+    keys = restore_keys(facts)
+    meter = None
+    if keys is not None and step == "bak36":
+        source, ran = str(facts.get("sourceVmId", "")), str(facts.get("runningAt", ""))
+        if UUID.match(source) and ISO_MS.match(ran):
+            ran_at = datetime.datetime.strptime(ran, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=datetime.timezone.utc)
+            meter = types.SimpleNamespace(source=source, restored=facts["vmIds"] + facts["volumeIds"], at=ran_at,
+                                          after=re.sub(r"[-T:Z]", "", ran)[:14], verdict=None)
+        else:
+            keys = None
+    if keys is None:
+        print(f"HOLD {step} facts out of shape: {json.dumps(facts)}")
+        answer(kube, step, "skip", log)
+        return 2
+    cp_ns = kube.namespace_of("cronjob", BACKUP_CRONJOB)
+    meter_ns = kube.namespace_of("cronjob", METER_CRONJOB) if meter else None
+    primaries = kube.json("get", "pods", "-A", "-l", PG_PRIMARY)["items"]
+    if len(primaries) != 1:
+        print(f"not exactly one pod {PG_PRIMARY} on this cluster")
+        answer(kube, step, "skip", log)
+        return 2
+    pg_ns, pg_pod = primaries[0]["metadata"]["namespace"], primaries[0]["metadata"]["name"]
+    seen = {}
+
+    def psql(sql):
+        out = kube.run("exec", "-n", pg_ns, pg_pod, "-c", "postgres", "--", "psql", "-U", "postgres", "-d", "titan",
+                       "-At", "-F", "|", "-c", sql)
+        text = out.stdout + out.stderr
+        if text != seen.get(sql) or out.returncode != 0:
+            log.entry(f"kubectl exec -n {pg_ns} {pg_pod} -c postgres -- psql -U postgres -d titan -At -F '|' -c \"{sql}\"",
+                      text, out.returncode)
+            sys.stdout.write(text if text.endswith("\n") or not text else text + "\n")
+            seen[sql] = text
+        return out.stdout if out.returncode == 0 else None
+
+    def read():
+        text = psql(backups_of(keys))
+        return command_rows(text) if text is not None else None
+
+    def judge_meter():
+        out = kube.run("get", "jobs", "-n", meter_ns, "-o", "json")
+        try:
+            name = meter_pass_after(json.loads(out.stdout), meter.at) if out.returncode == 0 else None
+        except ValueError:
+            name = None
+        if name is None:
+            return
+        log.entry(f"# a Job of CronJob {METER_CRONJOB} started after {meter.at.strftime('%H:%M:%SZ')} and succeeded",
+                  name, 0)
+        text = psql(usage_of([meter.source] + meter.restored))
+        if text is None:
+            meter.verdict = ("NOT_COVERED", "could not read core.usage_records")
+        else:
+            meter.verdict = bak31_verdict(usage_rows(text), meter.source, meter.restored, meter.after)
+
+    job, answered = None, False
+
+    def delete_job():
+        nonlocal job
+        if job:
+            out = kube.run("delete", "job", job, "-n", cp_ns, "--ignore-not-found")
+            log.entry(f"kubectl delete job {job} -n {cp_ns}", out.stdout + out.stderr, out.returncode)
+            job = None
+
+    def finish(word, why):
+        nonlocal answered
+        lines = [f"L_BAK28_BACKUPS={word} {why}"] if step == "bak28" else []
+        words = [word]
+        if meter:
+            m_word, m_why = meter.verdict or ("NOT_COVERED", "BAK-36's wait ended first")
+            lines, words = [f"L_BAK31={m_word} {m_why}", f"L_BAK36={word} {why}"], [m_word, word]
+        # bak28's backups are the restores' archives: only PASS lets the spec go on; at bak36 the rows are the verdict
+        go = word == "PASS" if step == "bak28" else word != "NOT_COVERED"
+        answer(kube, step, "go" if go else "skip", log)
+        answered = True
+        delete_job()
+        with open(args.log, "a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        print("\n".join(lines))
+        return 1 if "FAIL" in words else 4 if "NOT_COVERED" in words else 0
+
+    try:
+        rows = read()
+        if rows is None:
+            return finish("NOT_COVERED", "could not read core.provider_commands")
+        if any(backup_of(rows, k) is None for k in keys):
+            job = f"rg-{step}-{int(time.time())}"
+            out = kube.run("create", "job", job, f"--from=cronjob/{BACKUP_CRONJOB}", "-n", cp_ns)
+            log.entry(f"kubectl create job {job} --from=cronjob/{BACKUP_CRONJOB} -n {cp_ns}", out.stdout + out.stderr,
+                      out.returncode)
+            if out.returncode != 0:
+                job = None
+                return finish("NOT_COVERED", f"could not create a Job from CronJob {BACKUP_CRONJOB}")
+        started = time.monotonic()
+        while True:
+            ended = all((backup_of(rows, k) or (None, None, None))[2] in ENDED for k in keys)
+            if meter and meter.verdict is None:
+                judge_meter()
+                if meter.verdict is None and time.monotonic() - started >= args.meter_minutes * 60:
+                    meter.verdict = ("NOT_COVERED", f"no Job of CronJob {METER_CRONJOB} started after "
+                                     f"{meter.at.strftime('%Y-%m-%dT%H:%M:%SZ')} and succeeded within {args.meter_minutes:g} minutes")
+            if ended and (meter is None or meter.verdict is not None):
+                break
+            if not ended and time.monotonic() - started >= args.backup_minutes * 60:
+                break
+            time.sleep(args.every)
+            rows = read() or rows
+        return finish(*backups_verdict(rows, keys, args.backup_minutes))
+    finally:
+        if not answered:
+            # the spec would otherwise hold its resources for the rest of its wait
+            answer(kube, step, "skip", log)
+        delete_job()
+
+
 def seconds(text):
     value = float(text)
     if value < 0:
@@ -1339,6 +1564,19 @@ def main(argv=None):
     p.add_argument("--hold-minutes", type=float, default=40, help="how long the spec waits after HOLD bak22 (HOLD_AGENT_MS)")
     p.add_argument("--timeout-minutes", type=float, default=80, help="until HOLD bak22")
     p.set_defaults(func=cmd_bak22)
+    for word, func in (("bak28", cmd_bak28), ("bak36", cmd_bak36)):
+        p = sub.add_parser(word)
+        kube_args(p)
+        p.add_argument("--log", required=True)
+        p.add_argument("--every", type=seconds, default=5, help="seconds between two reads")
+        # under the spec's hold (HOLD_BACKUPS_MS, 30 minutes): the Job's pass, then the tenant's backups one at a time
+        p.add_argument("--backup-minutes", type=float, default=25, help="until today's backup of every held disk ended")
+        if word == "bak36":
+            # CronJob control-plane-job-meter runs every 10 minutes: one pass and the pass itself
+            p.add_argument("--meter-minutes", type=float, default=15,
+                           help="until a Job of CronJob control-plane-job-meter started after runningAt succeeded")
+        p.add_argument("--timeout-minutes", type=float, default=80, help=f"until HOLD {word}")
+        p.set_defaults(func=func)
     p = sub.add_parser("sample")
     ssh_opts(p)
     p.add_argument("--project", required=True)

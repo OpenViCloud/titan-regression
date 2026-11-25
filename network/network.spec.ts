@@ -4,11 +4,11 @@ import { bodyOf, call, expectError, expectStatus, get, log, newKey, pollUntil, s
 import { cleanUp } from './clean-up'
 import { RUN, RUN_CIDR, RUN_NETWORK_PREFIX, activityOf, countOf, envOf, listNetworks, networkUsable, waitNetwork } from './fixtures'
 
-// Cases NET-01..07, NET-09..13, NET-22..24, NET-26 and NET-28 of plan.md (NET-08, NET-20, NET-21 and NET-25 read the Incus host;
+// Cases NET-01..07, NET-09..13, NET-22..24, NET-26, NET-28 and NET-29 of plan.md (NET-08, NET-20, NET-21 and NET-25 read the Incus host;
 // NET-14..19 are measured by tests of the control plane). This module creates the run network and leaves it for the
 // modules after it; network-lifecycle deletes it. NET-11..13, NET-24 and NET-28 need more networks than beta-user may hold:
 // they raise maxNetworks (NET-13 also lowers maxPublicIpv6), give it back right after the case and again in afterAll,
-// and delete every network they made.
+// and delete every network they made. NET-29 only reads admin-test's network `default`.
 
 // What counts toward MaxNetworks and MaxPublicIpv6: not Deleting, Deleted, NotFound or Failed
 // (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.cs OccupiesQuota, OccupiesPublicIpv6Quota).
@@ -36,6 +36,22 @@ function ipv6Bytes(text: string): number[] {
 function first56Bits(text: string): string {
   return ipv6Bytes(text).slice(0, 7).join('.')
 }
+
+// The three private IPv4 ranges, as [first address, prefix length].
+const PRIVATE_RANGES: Array<[number, number]> = [[10 * 2 ** 24, 8], [172 * 2 ** 24 + 16 * 2 ** 16, 12], [192 * 2 ** 24 + 168 * 2 ** 16, 16]]
+
+// True when the whole IPv4 CIDR (`10.163.12.1/24`) lies inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16.
+function insideAPrivateRange(cidr: string): boolean {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/.exec(cidr)
+  if (m === null) {
+    return false
+  }
+  const [a, b, c, d, prefix] = m.slice(1).map(Number)
+  const address = a * 2 ** 24 + b * 2 ** 16 + c * 2 ** 8 + d
+  return PRIVATE_RANGES.some(([first, bits]) =>
+    prefix >= bits && Math.floor(address / 2 ** (32 - bits)) === Math.floor(first / 2 ** (32 - bits)))
+}
+
 test.describe.serial('network', () => {
   test.describe.configure({ timeout: 10 * 60_000 })
 
@@ -500,5 +516,38 @@ test.describe.serial('network', () => {
         ['extra networks', deleteExtraNetworks],
       ])
     }
+  })
+
+  // titan-ops features/network/design.md#default-network ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Networking/Network/DefaultNetwork.cs (GiveIfNeverHadOneAsync: name
+  // "default", public IPv6, chosenCidr null so Incus picks the range) ·
+  // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.Creation.cs (NewNetworkIngressPolicy Deny, NewNetworkEgressPolicy Allow) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/EndNetworkRequestCommandHandler.cs (OpenSshAsync:
+  // two rules Ingress TCP 22-22, ::/0 then 0.0.0.0/0) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Networking/Network/Contracts/NetworkQueryResult.cs (Cidr, PublicIpv6Subnet) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Networking/FirewallRule/Contracts/FirewallRuleQueryResult.cs (FirewallRuleQueryResult).
+  // Read only, with admin-test's token. NOT COVERED when admin-test has no live network `default`: it got none from the
+  // backfill or a first approval after the change, or it deleted it (plan.md).
+  test('NET-29 admin-test has one network default: Created, a public /64, Deny in and Allow out, a private range, SSH open from anywhere', async () => {
+    const own = await get('admin', '/v1/tenant')
+    const networks = await get('admin', '/v1/tenant/networks') as any[]
+    const defaults = networks.filter((n) => n.name === 'default' && n.status !== 'Deleting' && n.status !== 'Deleted')
+    log(`NET-29 admin-test tenant=${own.id} networks=${networks.map((n) => `${n.name}:${n.status}`).join(',')}`)
+    test.skip(defaults.length === 0,
+      'NOT COVERED: admin-test has no live network named default (no default-network-backfill pass and no first approval since the change, or it was deleted)')
+    expect(networks.filter((n) => n.name === 'default'), 'exactly one network named default').toHaveLength(1)
+    const network = defaults[0]
+    log(`NET-29 default ${network.id} status=${network.status} cidr=${network.cidr} publicIpv6Subnet=${network.publicIpv6Subnet} ingress=${network.defaultIngressPolicy} egress=${network.defaultEgressPolicy}`)
+    expect(network.status).toBe('Created')
+    expect(network.publicIpv6Subnet).toMatch(/^[0-9a-f:]+::\/64$/i)
+    expect(network.defaultIngressPolicy).toBe('Deny')
+    expect(network.defaultEgressPolicy).toBe('Allow')
+    expect(insideAPrivateRange(network.cidr ?? ''), `cidr ${network.cidr} inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16`).toBe(true)
+
+    const rules = (await get('admin', `/v1/tenant/networks/${network.id}/firewall-rules`) as any[])
+      .filter((r) => r.status !== 'Deleting' && r.status !== 'Deleted')
+    const shapes = rules.map((r) => `${r.direction} ${r.protocol} ${r.startPort}-${r.endPort} ${r.cidr}`).sort()
+    log(`NET-29 rules ${rules.map((r) => `${r.direction} ${r.protocol} ${r.startPort}-${r.endPort} ${r.cidr} ${r.status}`).join(' | ')}`)
+    expect(shapes).toEqual(['Ingress TCP 22-22 0.0.0.0/0', 'Ingress TCP 22-22 ::/0'])
   })
 })

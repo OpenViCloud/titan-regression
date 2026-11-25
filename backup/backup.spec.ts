@@ -1,14 +1,17 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type Response } from '@playwright/test'
 import { ADMIN, closeSessions, pageOf, useBrowser } from './auth'
 import { bodyOf, call, expectStatus, get, log, RESULTS, startLog } from './api'
+import { envOf } from './fixtures'
 
-// Cases BAK-01..03, BAK-05..08, BAK-11 and BAK-13 of plan.md: the admin backup target and status API and the admin
-// portal's Backups page. BAK-15..17 and BAK-19 are kubectl reads by the agent, BAK-12/14 read the Incus host (Phase 4
-// of release:regression-prd), BAK-20 is the job backup/command-wait (an agent step), BAK-21 runs in an ops record of
-// titan-ops, not in a release, BAK-22 and BAK-23 are the job backup/config-again (an agent step, phase4.py bak22),
-// BAK-04 is N/A, BAK-09 is NOT COVERED, BAK-10 is an L-x case of a release that restores, BAK-28..36 and BAK-38 plan
-// only (an L-x job, not written) and BAK-37 NOT COVERED (plan.md). Runs after `admin`, creates no rg-* resource and
-// changes nothing: the target is the pod's configuration (titan-ops features/backup/design.md#backup-target).
+// Cases BAK-01..03, BAK-05..08, BAK-11, BAK-13, BAK-24 and BAK-26 of plan.md: the admin backup target and status API, the
+// day's restore drill as GET /v1/admin/backups reads it, and the admin portal's Backups page. BAK-15..17 and BAK-19 are
+// kubectl reads by the agent, BAK-12/14 and BAK-25 read the Incus host (Phase 4 of release:regression-prd), BAK-24's
+// row of core.provider_commands is the agent's read-only backup/restore-drill.sql before this module, BAK-20 is the job
+// backup/command-wait (an agent step), BAK-21 runs in an ops record of titan-ops, not in a release, BAK-22 and BAK-23
+// are the job backup/config-again (an agent step, phase4.py bak22), BAK-04 is N/A, BAK-09 is NOT COVERED, BAK-10 is an
+// L-x case of a release that restores, BAK-28..36 and BAK-38 plan only (an L-x job, not written) and BAK-27 and BAK-37
+// NOT COVERED (plan.md). Runs after `admin`, creates no rg-* resource and changes nothing: the target is the pod's
+// configuration (titan-ops features/backup/design.md#backup-target), the drill is the schedule's own.
 
 const STALE_HOURS = 26
 const READ_WITHIN_MINUTES = 30
@@ -19,6 +22,27 @@ async function walletOf(): Promise<Wallet> {
   const wallet = await get('tenant', '/v1/tenant/wallet')
   const statement = await get('tenant', '/v1/tenant/wallet/statement')
   return { balance: wallet.balance as number, lines: (statement.lines as any[]).length }
+}
+
+// A locator text that is the whole text, not a part of it.
+function exactly(text: string): RegExp {
+  return new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
+}
+
+function dayOf(iso: string): string {
+  return new Date(iso).toISOString().slice(0, 10)
+}
+
+// The page's own date and time, in the browser's time zone (OpenViCloud/titan-admin-console:portal/src/lib/money.ts formatDateTime).
+async function dateTimeOn(page: Page, iso: string, lang: 'en' | 'vi'): Promise<string> {
+  return page.evaluate(([value, l]) => {
+    const date = new Date(value)
+    if (l === 'vi') {
+      const two = (n: number) => String(n).padStart(2, '0')
+      return `${two(date.getDate())}/${two(date.getMonth() + 1)}/${date.getFullYear()} ${two(date.getHours())}:${two(date.getMinutes())}`
+    }
+    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }, [iso, lang] as const)
 }
 
 function hoursSince(iso: string): number {
@@ -38,6 +62,8 @@ test.describe.serial('backup', () => {
   let walletBefore: Wallet | null = null
   let postgres: any = null
   let diskItems: any[] = []
+  // BAK-24's element of restoreDrills when it measured a drill of today verified; BAK-26 reads the page for it.
+  let verifiedDrill: any = null
 
   test.beforeAll(async ({ browser }) => {
     startLog('backup')
@@ -187,20 +213,58 @@ test.describe.serial('backup', () => {
     }
   })
 
-  // OpenViCloud/titan-admin-console:portal/src/admin/pages/AdminBackupsPage.tsx (AdminBackupsPage, BackupTargetBlock,
-  // BackupTargetValues: plain text, no inputs; the restore section names the runbook in a <code>, no link); strings in
-  // OpenViCloud/titan-admin-console:portal/src/i18n/en.ts and OpenViCloud/titan-admin-console:portal/src/i18n/vi.ts (adminBackups). The Stale/Missing banner is NOT COVERED (plan.md).
-  test('BAK-08 the Backups page shows the target read-only, the base age, the runbook name, in English then Vietnamese', async () => {
+  // titan-ops features/backup/design.md#backups-page · titan-ops features/backup/design.md#restore-as-new-resource ·
+  // OpenViCloud/titan-admin-console:portal/src/admin/pages/AdminBackupsPage.tsx (AdminBackupsPage: the intro under the title, the
+  // restore section's body and RUNBOOK_REF in a <code>, no link; BackupTargetBlock, BackupTargetValues: plain text, no inputs;
+  // BackupTable and restorable: a Restore button only on a vm or volume row with a resourceId and at least one archive) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Platform/Backup/Contracts/BackupItemQueryResult.cs (ResourceId, Archives:
+  // none for Postgres and a cluster) · strings in OpenViCloud/titan-admin-console:portal/src/i18n/en.ts and
+  // OpenViCloud/titan-admin-console:portal/src/i18n/vi.ts (adminBackups: title, intro, restoreTitle, restoreBody, runbookName,
+  // restoreAction). The language is kept in localStorage `ovc-lang` (OpenViCloud/titan-admin-console:portal/src/i18n/lang.ts).
+  // The Stale/Missing banner and "Show them" are NOT COVERED (plan.md).
+  test('BAK-08 the Backups page shows the target read-only, the base age, Restore only where a backup is, the runbook name, in English then Vietnamese', async () => {
     const page = await pageOf('admin')
+    const runbook = 'titan-ops infra/oci/runbook.md#disaster-recovery'
     const expected = {
-      en: { title: 'Backups', target: 'Backup target', base: 'Newest base backup', restore: 'Restoring', ago: /^(\d+) (minute|minutes|hour|hours|days) ago$|^None yet$/ },
-      vi: { title: 'Sao lưu', target: 'Đích sao lưu', base: 'Bản sao lưu gốc mới nhất', restore: 'Khôi phục', ago: /^(\d+) (phút|giờ|ngày) trước$|^Chưa có$/ },
+      en: {
+        title: 'Backups', target: 'Backup target', base: 'Newest base backup', restore: 'Restoring', restoreAction: 'Restore',
+        table: 'Newest backup of each resource',
+        intro: 'The newest backup of what Titan protects, read from the backup bucket. A VM or a volume can be restored from here as a new resource; restoring the database or a whole cluster runs outside the console.',
+        restoreBody: 'A database restore runs outside this console, from the disaster recovery runbook.',
+        runbookLine: `Disaster recovery runbook: ${runbook}`,
+        ago: /^(\d+) (minute|minutes|hour|hours|days) ago$|^None yet$/,
+      },
+      vi: {
+        title: 'Sao lưu', target: 'Đích sao lưu', base: 'Bản sao lưu gốc mới nhất', restore: 'Khôi phục', restoreAction: 'Khôi phục',
+        table: 'Bản sao lưu mới nhất của từng tài nguyên',
+        intro: 'Bản sao lưu mới nhất của những gì Titan bảo vệ, đọc từ bucket sao lưu. Có thể khôi phục một VM hoặc một ổ đĩa ngay tại đây thành một tài nguyên mới; khôi phục cơ sở dữ liệu hay cả một cluster thì chạy ngoài console.',
+        restoreBody: 'Khôi phục cơ sở dữ liệu chạy ngoài console, theo runbook khôi phục sau thảm hoạ.',
+        runbookLine: `Runbook khôi phục sau thảm hoạ: ${runbook}`,
+        ago: /^(\d+) (phút|giờ|ngày) trước$|^Chưa có$/,
+      },
+    }
+    // Delete, Download, back up now and Save, in either language; Restore is checked row by row below.
+    const forbidden = /\b(delete|download|save|back ?up now)\b|^(xoá|xóa|tải xuống|lưu|sao lưu ngay)$/i
+    // Every answer of the backup target the page reads, on each load: no secret in the response either.
+    const targetBodies: Array<Promise<string>> = []
+    const onResponse = (response: Response): void => {
+      if (response.url().includes('/v1/admin/backup-target')) {
+        targetBodies.push(response.text().then((text) => text.toLowerCase(), () => ''))
+      }
+    }
+    page.on('response', onResponse)
+    // The same page as a fresh load: the language must hold.
+    const checkLanguageHeld = async (lang: 'en' | 'vi'): Promise<void> => {
+      const words = expected[lang]
+      await expect(page.getByRole('heading', { level: 1, name: words.title })).toBeVisible()
+      expect(await page.evaluate(() => document.documentElement.lang)).toBe(lang)
+      await expect(page.locator('h1 + p')).toHaveText(words.intro)
+      await expect(page.locator('section[aria-labelledby="backups-restore"] p')).toHaveText([words.restoreBody, words.runbookLine])
     }
     for (const lang of ['en', 'vi'] as const) {
       await setLanguage(page, lang)
       const words = expected[lang]
-      await expect(page.getByRole('heading', { level: 1, name: words.title })).toBeVisible()
-      expect(await page.evaluate(() => document.documentElement.lang)).toBe(lang)
+      await checkLanguageHeld(lang)
       const targetBlock = page.locator('section[aria-labelledby="backup-target"]')
       await expect(targetBlock.getByRole('heading', { name: words.target })).toBeVisible()
       await expect(targetBlock.locator('dd')).toHaveText([target.endpoint, target.region, target.bucket, target.accessKeyId])
@@ -216,12 +280,49 @@ test.describe.serial('backup', () => {
       }
       const restore = page.locator('section[aria-labelledby="backups-restore"]')
       await expect(restore.getByRole('heading', { name: words.restore })).toBeVisible()
-      await expect(restore.locator('code')).toHaveText('titan-ops infra/oci/runbook.md#disaster-recovery')
+      await expect(restore.locator('code')).toHaveText(runbook)
       expect(await restore.locator('a').count()).toBe(0)
-      expect(await page.getByRole('button', { name: /restore|delete|download|khôi phục|xoá|tải/i }).count()).toBe(0)
+
+      // Restore: one button on each vm or volume row with an archive, none on any other row (Postgres, cluster, a disk
+      // without an archive). Items are read again here: a backup may have landed since BAK-06.
+      await expect(page.getByRole('table', { name: words.table })).toBeVisible()
+      const rows = page.getByRole('row')
+      const rowOf = (name: string) => rows.filter({ has: page.locator('td:first-child', { hasText: exactly(name) }) })
+      await expect(rowOf('titan-db')).toHaveCount(1)
+      const items = (await get('admin', '/v1/admin/backups')).items as any[]
+      const hasArchive = (i: any) => (i.kind === 'vm' || i.kind === 'volume') && i.resourceId != null && (i.archives ?? []).length > 0
+      const names = [...new Set(items.map((i) => i.name as string))]
+      for (const name of names) {
+        const mine = items.filter((i) => i.name === name)
+        const want = mine.filter(hasArchive).length
+        log(`BAK-08 ${lang} row ${name}: ${mine.map((i) => `${i.kind} archives=${(i.archives ?? []).length}`).join(', ')} → Restore ×${want}`)
+        await expect(rowOf(name), `${name}: one row per item`).toHaveCount(mine.length)
+        await expect(rowOf(name).getByRole('button', { name: words.restoreAction, exact: true }), `${name}: Restore buttons`).toHaveCount(want)
+      }
+      const restorable = items.filter(hasArchive).length
+      if (restorable === 0) {
+        log(`BAK-08 ${lang}: no VM or volume item has an archive: the Restore button's presence is not measured this run, only its absence`)
+      }
+      const buttons = await page.getByRole('button').evaluateAll((els) =>
+        els.map((el) => (el.getAttribute('aria-label') || el.textContent || '').trim()))
+      log(`BAK-08 ${lang} buttons ${JSON.stringify(buttons)}`)
+      expect(buttons.filter((b) => forbidden.test(b)), 'no Delete, Download, back up now or Save').toEqual([])
+      expect(buttons.filter((b) => b === words.restoreAction).length, 'every Restore button is a row button').toBe(restorable)
+
       const html = (await page.content()).toLowerCase()
       expect(html).not.toContain('secretaccesskey')
       await page.screenshot({ path: `${RESULTS}/BAK-08-${lang}.png` })
+
+      await page.reload({ waitUntil: 'networkidle' })
+      await checkLanguageHeld(lang)
+      await page.screenshot({ path: `${RESULTS}/BAK-08-${lang}-reload.png` })
+    }
+    page.off('response', onResponse)
+    const bodies = await Promise.all(targetBodies)
+    log(`BAK-08 backup-target responses=${bodies.length}`)
+    expect(bodies.length, 'the page read the backup target').toBeGreaterThan(0)
+    for (const body of bodies) {
+      expect(body).not.toContain('secret')
     }
     await setLanguage(page, 'en')
   })
@@ -240,7 +341,6 @@ test.describe.serial('backup', () => {
       en: { vm: 'VM', volume: 'Volume', cluster: 'Cluster config', noBackup: 'No backup found.' },
       vi: { vm: 'VM', volume: 'Ổ đĩa', cluster: 'Cấu hình cụm', noBackup: 'Không thấy bản sao lưu nào.' },
     }
-    const exactly = (text: string) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
     for (const lang of ['en', 'vi'] as const) {
       await setLanguage(page, lang)
       const rows = page.getByRole('row')
@@ -266,6 +366,91 @@ test.describe.serial('backup', () => {
         await rowOf(clusterRow.name).scrollIntoViewIfNeeded()
       }
       await page.screenshot({ path: `${RESULTS}/BAK-13-${lang}.png` })
+    }
+    await setLanguage(page, 'en')
+  })
+
+  // titan-ops features/backup/design.md#restore-drill ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Admin/Backup/ListRestoreDrillsQueryHandler.cs (HandleAsync: one line
+  // per configured cluster; the newest Done or Failed restore.drill row of 30 days decides: Done ⇒ verified, VerifiedAt its
+  // CreatedAt, Kind and Name from the payload, no Reason; Failed ⇒ notVerified with LastError; none ⇒ none) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Queries/Admin/Backup/Contracts/RestoreDrillQueryResult.cs ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Admin/Backup/ScheduleBackupsCommandHandler.cs (AskRestoreDrillAsync:
+  // kind vm or volume) · OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/ProviderCommand/Enums/BackupCommandKeys.cs
+  // (RestoreDrill: one key per cluster per UTC day). The row's SQL part (one row for today's key, kind, no tenant or
+  // resource, status, payload, the drilled disk's backup of today) is the agent's backup/restore-drill.sql, read before
+  // this module; it compares the payload's kind and name with the `BAK-24 drill` line. A drill that is not verified today
+  // is NOT COVERED here, its verdict that read's (Failed ⇒ FAIL), since the API does not say which day a failed drill was.
+  test('BAK-24 restoreDrills has one element for the cluster: verified today, with the drilled disk kind and name and no reason', async () => {
+    const { clusterId } = await envOf()
+    const backups = await get('admin', '/v1/admin/backups')
+    const drills = backups.restoreDrills as any[] | undefined
+    log(`BAK-24 restoreDrills=${JSON.stringify(drills)}`)
+    expect(Array.isArray(drills), 'restoreDrills in GET /v1/admin/backups').toBe(true)
+    const mine = drills!.filter((d) => d.clusterId === clusterId)
+    expect(mine, `one element for cluster ${clusterId}`).toHaveLength(1)
+    const drill = mine[0]
+    const today = new Date().toISOString().slice(0, 10)
+    test.skip(drill.state === 'none',
+      `NOT COVERED: no restore drill of cluster ${clusterId} ended in the last 30 days (RestoreDrill:Enabled off, or no pass saw every disk end)`)
+    if (drill.state === 'notVerified') {
+      const deletedHeldVm = String(drill.name ?? '').startsWith('rg-bak22-') && String(drill.reason ?? '').includes('is not in project')
+      test.skip(true, deletedHeldVm
+        ? `NOT COVERED: the newest drill named ${drill.name}, the VM job backup/config-again deletes at its end (${drill.reason})`
+        : `NOT COVERED by the spec: the newest drill of cluster ${clusterId} failed (${drill.kind} ${drill.name}: ${drill.reason}); ` +
+          'the agent\'s read of today\'s row is the verdict: Failed today ⇒ FAIL')
+    }
+    test.skip(drill.state === 'verified' && dayOf(drill.verifiedAt) !== today,
+      `NOT COVERED: the newest verified drill of cluster ${clusterId} is of ${drill.verifiedAt}, none of today (${today}) has ended yet`)
+    log(`BAK-24 drill cluster=${clusterId} kind=${drill.kind} name=${drill.name} verifiedAt=${drill.verifiedAt}`)
+    expect(drill.state).toBe('verified')
+    expect(['vm', 'volume']).toContain(drill.kind)
+    expect(typeof drill.name).toBe('string')
+    expect((drill.name as string).length).toBeGreaterThan(0)
+    expect(dayOf(drill.verifiedAt)).toBe(today)
+    expect(drill.reason ?? null).toBeNull()
+    verifiedDrill = drill
+  })
+
+  // titan-ops features/backup/design.md#backups-page · OpenViCloud/titan-admin-console:portal/src/admin/pages/AdminBackupsPage.tsx
+  // (RestoreDrillBlock: a section labelled by its title, one <li> per cluster, the cluster's name then RestoreDrillLine:
+  // restoreDrillVerified(`${kinds[kind]} ${name}`, f.dateTime(verifiedAt))) · strings in
+  // OpenViCloud/titan-admin-console:portal/src/i18n/en.ts and OpenViCloud/titan-admin-console:portal/src/i18n/vi.ts
+  // (adminBackups.restoreDrillTitle, restoreDrillVerified, kinds) · OpenViCloud/titan-admin-console:portal/src/lib/money.ts
+  // (formatDateTime). The cluster's name is GET /v1/admin/clusters' (OpenViCloud/titan-control-plane:Titan.Application/Abstractions/IAdminClusterService.cs
+  // AdminClusterDto). The failed and the never-run lines are NOT COVERED (plan.md); so is this case when BAK-24 measured nothing.
+  test('BAK-26 the Latest verified restore block names the cluster, the drilled disk and when, in English then Vietnamese', async () => {
+    test.skip(verifiedDrill === null, 'NOT COVERED: BAK-24 measured no drill verified today')
+    const drill = verifiedDrill
+    const cluster = (await get('admin', '/v1/admin/clusters') as any[]).find((c) => c.clusterId === drill.clusterId)
+    expect(cluster, `cluster ${drill.clusterId} in GET /v1/admin/clusters`).toBeDefined()
+    const page = await pageOf('admin')
+    const words = {
+      en: {
+        title: 'Latest verified restore', kinds: { vm: 'VM', volume: 'Volume' } as Record<string, string>,
+        verified: (what: string, when: string) => `${what} was restored from its backup on ${when}.`,
+      },
+      vi: {
+        title: 'Lần khôi phục đã xác minh gần nhất', kinds: { vm: 'VM', volume: 'Ổ đĩa' } as Record<string, string>,
+        verified: (what: string, when: string) => `${what} đã được khôi phục từ bản sao lưu lúc ${when}.`,
+      },
+    }
+    for (const lang of ['en', 'vi'] as const) {
+      await setLanguage(page, lang)
+      const sentence = words[lang].verified(`${words[lang].kinds[drill.kind]} ${drill.name}`, await dateTimeOn(page, drill.verifiedAt, lang))
+      for (const load of ['first', 'reload']) {
+        if (load === 'reload') {
+          await page.reload({ waitUntil: 'networkidle' })
+        }
+        const block = page.locator('section[aria-labelledby="backups-restore-drill"]')
+        await expect(block.getByRole('heading', { name: words[lang].title })).toBeVisible()
+        const line = block.locator('li', { has: page.locator('span', { hasText: exactly(cluster.name) }) })
+        await expect(line, `${lang} ${load}: one line for ${cluster.name}`).toHaveCount(1)
+        log(`BAK-26 ${lang} ${load}: "${((await line.textContent()) ?? '').trim()}" want "${sentence}"`)
+        await expect(line.locator('p')).toHaveText(sentence)
+        await block.scrollIntoViewIfNeeded()
+        await page.screenshot({ path: `${RESULTS}/BAK-26-${lang}-${load}.png` })
+      }
     }
     await setLanguage(page, 'en')
   })

@@ -25,7 +25,7 @@ _spec.loader.exec_module(phase4)
 # kubectl `exec … psql` prints the next [output, exit] pair of FAKE_PSQL (the last repeats); when FAKE_PSQL is an object,
 # the pairs of its first key the SQL holds, each key with its own count. `create job`/`delete job` exit
 # FAKE_JOB_EXIT; `get job <name>` prints the status of FAKE_JOB_STATUS whose key the name holds (none: one pod succeeded),
-# `logs job/<name>` a curl error; `get cronjob` adds the names of FAKE_CRONJOBS, `get cronjob <name>` prints the next
+# `logs job/<name>` a curl error; `get jobs` lists FAKE_JOBS; `get cronjob` adds the names of FAKE_CRONJOBS, `get cronjob <name>` prints the next
 # `.status.active` of FAKE_CRONJOB_ACTIVE (unset: none); `get pods -l <the titan-db primary>` is titan-db-1.
 # kubectl `exec … openssl` prints FAKE_OPENSSL (unset ⇒ exit 127, no openssl); `exec -i … grep` counts the stdin lines
 # holding FAKE_POD_PASSWORD, the pod's password file, which no argument carries.
@@ -94,6 +94,8 @@ FAKE_KUBECTL = textwrap.dedent('''\
         output, code = reads[min(n, len(reads) - 1)]
         print(output)
         sys.exit(code)
+    elif args[:2] == ["get", "jobs"]:
+        print(json.dumps({"items": json.loads(os.environ.get("FAKE_JOBS", "[]"))}))
     elif args[:2] in (["create", "job"], ["delete", "job"]):
         sys.exit(int(os.environ.get("FAKE_JOB_EXIT", "0")))
     elif args[:2] == ["get", "job"]:
@@ -622,6 +624,174 @@ class Bak20Test(unittest.TestCase):
         self.assertIn("ended Failed", phase4.bak20_verdict([leased, [("vm.backup", key, "Done", 1), ("vm-snapshot.create", "s", "Failed", 5)]], key)[1])
         self.assertIn("did not land", phase4.bak20_verdict([[("vm.backup", key, "Done", 1)]], key)[1])
         self.assertEqual(phase4.command_rows("a|b|Pending|0\nnoise\n(0 rows)"), [("a", "b", "Pending", 0)])
+
+
+class Bak28Test(unittest.TestCase):
+    VM_ID = "0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"
+    VOL_ID = "1b1c2d3e-4f50-6172-8394-a5b6c7d8e9f1"
+    DAY = "20261125"
+    VM_KEY = f"vm-backup-{VM_ID}-{DAY}"
+    VOL_KEY = f"volume-backup-{VOL_ID}-{DAY}"
+    FACTS = {"vmIds": [VM_ID], "volumeIds": [VOL_ID], "day": DAY, "cronJob": "control-plane-job-backup-schedule"}
+
+    def rows(self, vm=None, vol=None):
+        lines = [f"vm.backup|{self.VM_KEY}|{vm}|1"] if vm else []
+        lines += [f"volume.backup|{self.VOL_KEY}|{vol}|1"] if vol else []
+        return ["\n".join(lines), 0]
+
+    def run_bak28(self, reads, facts=None, **env):
+        return run("bak28", "--kubeconfig", "kc", "--job", "regression-restore-p1", "--log", "{tmp}/bak28.log",
+                   "--every", "0", "--backup-minutes", "0.05",
+                   **{"FAKE_LOG_0": hold_line("bak28", facts or self.FACTS),
+                      "FAKE_LOG_AFTER_TOUCH": "2026-11-25T10:06:00.000Z GO bak28",
+                      "FAKE_CRONJOBS": json.dumps(["control-plane-job-backup-schedule"]),
+                      "FAKE_PSQL": json.dumps(reads), **env})
+
+    def test_a_job_queues_both_backups_then_go_once_both_are_done_and_the_job_is_deleted(self):
+        reads = [self.rows(), self.rows("Pending", "Pending"), self.rows("Leased", "Pending"), self.rows("Done", "Done")]
+        code, out, calls, state = self.run_bak28(reads)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"L_BAK28_BACKUPS=PASS 2 rows Done: {self.VM_KEY} {self.VOL_KEY}", out)
+        self.assertTrue((state / "pod" / "go-bak28").exists())
+        self.assertIn(f"WHERE key IN ('{self.VM_KEY}', '{self.VOL_KEY}')", calls)
+        self.assertRegex(calls, r"create job rg-bak28-\d+ --from=cronjob/control-plane-job-backup-schedule -n ns-control-plane-job-backup-schedule")
+        self.assertRegex(calls, r"delete job rg-bak28-\d+ -n ns-control-plane-job-backup-schedule")
+        self.assertTrue((state.parent / "bak28.log").read_text().rstrip().endswith("L_BAK28_BACKUPS=PASS 2 rows Done: "
+                                                                                   f"{self.VM_KEY} {self.VOL_KEY}"))
+
+    def test_backups_the_hourly_pass_already_ran_need_no_job(self):
+        code, out, calls, state = self.run_bak28([self.rows("Done", "Done")])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("create job", calls)
+        self.assertTrue((state / "pod" / "go-bak28").exists())
+
+    def test_a_failed_backup_fails_and_skips(self):
+        code, out, _, state = self.run_bak28([self.rows(), self.rows("Done", "Failed")])
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"L_BAK28_BACKUPS=FAIL {self.VOL_KEY} Failed attempts=1", out)
+        self.assertTrue((state / "pod" / "skip-bak28").exists())
+
+    def test_backups_not_ended_in_time_are_not_covered_skip_and_the_job_is_deleted(self):
+        code, out, calls, state = self.run_bak28([self.rows(), self.rows("Leased", "Pending")])
+        self.assertEqual(code, 4, out)
+        self.assertIn(f"L_BAK28_BACKUPS=NOT_COVERED not ended in 0.05 minutes: {self.VM_KEY} Leased {self.VOL_KEY} Pending", out)
+        self.assertTrue((state / "pod" / "skip-bak28").exists())
+        self.assertIn("delete job rg-bak28-", calls)
+
+    def test_a_first_read_that_fails_or_a_job_not_created_is_not_covered(self):
+        code, out, calls, state = self.run_bak28([["psql: error", 2]])
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK28_BACKUPS=NOT_COVERED could not read core.provider_commands", out)
+        self.assertNotIn("create job", calls)
+        self.assertTrue((state / "pod" / "skip-bak28").exists())
+        code, out, _, state = self.run_bak28([self.rows()], FAKE_JOB_EXIT="1")
+        self.assertEqual(code, 4, out)
+        self.assertIn("could not create a Job", out)
+        self.assertTrue((state / "pod" / "skip-bak28").exists())
+
+    def test_facts_out_of_shape_run_no_sql_and_skip(self):
+        code, out, calls, state = self.run_bak28([self.rows()], facts={"vmIds": ["x'; drop table t; --"], "volumeIds": [], "day": self.DAY})
+        self.assertEqual(code, 2, out)
+        self.assertNotIn("psql", calls)
+        self.assertTrue((state / "pod" / "skip-bak28").exists())
+        self.assertIsNone(phase4.restore_keys({"vmIds": [], "volumeIds": [], "day": self.DAY}))
+        self.assertIsNone(phase4.restore_keys({"vmIds": [self.VM_ID], "volumeIds": [], "day": "2026-11-25"}))
+
+
+class Bak36Test(unittest.TestCase):
+    SOURCE = "0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"
+    VM_ID = "2b1c2d3e-4f50-6172-8394-a5b6c7d8e9f2"
+    VOL_A = "3b1c2d3e-4f50-6172-8394-a5b6c7d8e9f3"
+    VOL_B = "4b1c2d3e-4f50-6172-8394-a5b6c7d8e9f4"
+    DAY = "20261125"
+    FACTS = {"vmIds": [VM_ID], "volumeIds": [VOL_A, VOL_B], "day": DAY, "sourceVmId": SOURCE,
+             "runningAt": "2026-11-25T10:00:00.000Z", "cronJob": "control-plane-job-backup-schedule"}
+
+    def rows(self, status=None):
+        if status is None:
+            return ["", 0]
+        return ["\n".join([f"vm.backup|vm-backup-{self.VM_ID}-{self.DAY}|{status}|1",
+                           f"volume.backup|volume-backup-{self.VOL_A}-{self.DAY}|{status}|1",
+                           f"volume.backup|volume-backup-{self.VOL_B}-{self.DAY}|{status}|1"]), 0]
+
+    @staticmethod
+    def meter_job(name, started, succeeded=1, owner="control-plane-job-meter"):
+        return {"metadata": {"name": name, "ownerReferences": [{"kind": "CronJob", "name": owner}]},
+                "status": {"startTime": started, "succeeded": succeeded}}
+
+    def run_bak36(self, reads, usage, jobs=None, facts=None, **env):
+        if jobs is None:
+            jobs = [self.meter_job("control-plane-job-meter-1", "2026-11-25T10:10:00Z")]
+        return run("bak36", "--kubeconfig", "kc", "--job", "regression-restore-p1", "--log", "{tmp}/bak36.log",
+                   "--every", "0", "--backup-minutes", "0.05", "--meter-minutes", "0.05",
+                   **{"FAKE_LOG_0": hold_line("bak36", facts or self.FACTS),
+                      "FAKE_LOG_AFTER_TOUCH": "2026-11-25T10:30:00.000Z GO bak36",
+                      "FAKE_CRONJOBS": json.dumps(["control-plane-job-backup-schedule", "control-plane-job-meter"]),
+                      "FAKE_JOBS": json.dumps(jobs),
+                      "FAKE_PSQL": json.dumps({"provider_commands": reads, "usage_records": [[usage, 0]]}), **env})
+
+    def test_the_restored_disks_backed_up_and_no_usage_row_of_them_after_a_meter_pass_pass(self):
+        usage = f"{self.SOURCE}|COMPUTE|20261125101000"
+        code, out, calls, state = self.run_bak36([self.rows(), self.rows("Pending"), self.rows("Done")], usage)
+        self.assertEqual(code, 0, out)
+        self.assertIn("L_BAK31=PASS source VM rows since 20261125100000: 1; rows of the restored VM and volumes: 0", out)
+        self.assertIn("L_BAK36=PASS 3 rows Done", out)
+        self.assertTrue((state / "pod" / "go-bak36").exists())
+        self.assertIn(f"FROM core.usage_records WHERE resource_id IN ('{self.SOURCE}', '{self.VM_ID}', '{self.VOL_A}', '{self.VOL_B}')", calls)
+        self.assertIn("get jobs -n ns-control-plane-job-meter -o json", calls)
+        self.assertRegex(calls, r"create job rg-bak36-\d+ --from=cronjob/control-plane-job-backup-schedule")
+        self.assertRegex(calls, r"delete job rg-bak36-\d+")
+        log = (state.parent / "bak36.log").read_text().rstrip().splitlines()
+        self.assertTrue(log[-2].startswith("L_BAK31=PASS") and log[-1].startswith("L_BAK36=PASS"), log[-2:])
+
+    def test_a_usage_row_of_a_restored_volume_fails_bak31_and_still_goes(self):
+        usage = f"{self.SOURCE}|COMPUTE|20261125101000\n{self.VOL_B}|STORAGE|20261125101000"
+        code, out, _, state = self.run_bak36([self.rows("Done")], usage)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"L_BAK31=FAIL usage rows of a restored resource: {self.VOL_B} STORAGE 20261125101000", out)
+        self.assertIn("L_BAK36=PASS", out)
+        self.assertTrue((state / "pod" / "go-bak36").exists())
+
+    def test_no_meter_pass_after_the_copy_ran_is_not_covered_for_bak31_only(self):
+        jobs = [self.meter_job("control-plane-job-meter-0", "2026-11-25T09:50:00Z"),
+                self.meter_job("control-plane-job-meter-1", "2026-11-25T10:10:00Z", succeeded=0),
+                self.meter_job("other", "2026-11-25T10:10:00Z", owner="control-plane-job-backup-status")]
+        code, out, calls, state = self.run_bak36([self.rows("Done")], f"{self.SOURCE}|COMPUTE|20261125101000", jobs=jobs)
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK31=NOT_COVERED no Job of CronJob control-plane-job-meter started after 2026-11-25T10:00:00Z", out)
+        self.assertIn("L_BAK36=PASS", out)
+        self.assertNotIn("usage_records", calls)
+        self.assertTrue((state / "pod" / "go-bak36").exists())
+
+    def test_a_failed_backup_of_a_restored_disk_fails_bak36_and_still_goes(self):
+        code, out, _, state = self.run_bak36([self.rows("Failed")], f"{self.SOURCE}|COMPUTE|20261125101000")
+        self.assertEqual(code, 1, out)
+        self.assertIn("L_BAK36=FAIL", out)
+        self.assertTrue((state / "pod" / "go-bak36").exists())
+
+    def test_backups_not_ended_in_time_skip(self):
+        code, out, _, state = self.run_bak36([self.rows(), self.rows("Leased")], f"{self.SOURCE}|COMPUTE|20261125101000")
+        self.assertEqual(code, 4, out)
+        self.assertIn("L_BAK36=NOT_COVERED not ended in 0.05 minutes", out)
+        self.assertTrue((state / "pod" / "skip-bak36").exists())
+
+    def test_facts_without_running_at_are_out_of_shape(self):
+        facts = {k: v for k, v in self.FACTS.items() if k != "runningAt"}
+        code, out, calls, state = self.run_bak36([self.rows("Done")], "", facts=facts)
+        self.assertEqual(code, 2, out)
+        self.assertNotIn("psql", calls)
+        self.assertTrue((state / "pod" / "skip-bak36").exists())
+
+    def test_the_verdicts(self):
+        after = "20261125100000"
+        self.assertEqual(phase4.bak31_verdict([(self.SOURCE, "COMPUTE", "20261125095000")], self.SOURCE, [self.VM_ID], after)[0],
+                         "NOT_COVERED")
+        self.assertEqual(phase4.bak31_verdict([(self.SOURCE, "COMPUTE", after)], self.SOURCE, [self.VM_ID], after)[0], "PASS")
+        self.assertEqual(phase4.usage_rows(f"{self.SOURCE}|COMPUTE|20261125101000\n(1 row)\n"),
+                         [(self.SOURCE, "COMPUTE", "20261125101000")])
+        at = phase4.datetime.datetime(2026, 11, 25, 10, 0, tzinfo=phase4.datetime.timezone.utc)
+        self.assertIsNone(phase4.meter_pass_after({"items": [self.meter_job("m", "2026-11-25T10:00:00Z")]}, at))
+        self.assertEqual(phase4.meter_pass_after({"items": [self.meter_job("m", "2026-11-25T10:00:01Z")]}, at), "m")
 
 
 class Bak22Test(unittest.TestCase):
