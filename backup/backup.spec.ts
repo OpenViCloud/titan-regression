@@ -6,9 +6,9 @@ import { bodyOf, call, expectStatus, get, log, RESULTS, startLog } from './api'
 // portal's Backups page. BAK-15..17 and BAK-19 are kubectl reads by the agent, BAK-12/14 read the Incus host (Phase 4
 // of release:regression-prd), BAK-20 is the job backup/command-wait (an agent step), BAK-21 runs in an ops record of
 // titan-ops, not in a release, BAK-22 and BAK-23 are the job backup/config-again (an agent step, phase4.py bak22),
-// BAK-04 is N/A, BAK-09 is NOT COVERED, BAK-10 is an L-x case of a release that restores, BAK-28..36 an L-x job of
-// their own and BAK-37 NOT COVERED (plan.md). Runs after `admin`, creates no rg-* resource and changes nothing: the
-// target is the pod's configuration (titan-ops features/backup/design.md#backup-target).
+// BAK-04 is N/A, BAK-09 is NOT COVERED, BAK-10 is an L-x case of a release that restores, BAK-28..36 plan only (an L-x
+// job, not written) and BAK-37 NOT COVERED (plan.md). Runs after `admin`, creates no rg-* resource and changes nothing:
+// the target is the pod's configuration (titan-ops features/backup/design.md#backup-target).
 
 const STALE_HOURS = 26
 const READ_WITHIN_MINUTES = 30

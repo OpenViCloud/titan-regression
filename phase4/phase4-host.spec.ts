@@ -19,7 +19,8 @@ import { incusName, phase4Key, projectOf } from './incus-names'
 const VM_DELETE_FAILED = 'The VM could not be deleted. Please try again or contact support.'
 const VM_CREATE_FAILED = 'VM provisioning failed due to a system error. Please try again or contact support.'
 // Statuses outside every quota (OpenViCloud/titan-cloud-console:portal/src/lib/quota.ts, the control plane's OccupiesQuota);
-// a VM or volume restored from a backup is outside too, and this module makes none
+// a VM or volume restored from a backup is outside too: this module makes none, and one left on the tenant by
+// another case is counted here, which only raises the caps the module sets
 const OUTSIDE = new Set(['Deleting', 'Deleted', 'NotFound', 'Failed'])
 // Statuses that wait on a command of their own, per resource (OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/*/Enums/*Status.cs at 8fd95ac)
 const LB_PENDING = new Set(['Creating', 'Updating', 'Deleting'])
