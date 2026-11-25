@@ -9,7 +9,7 @@ import { envOf } from './fixtures'
 // row of core.provider_commands is the agent's read-only backup/restore-drill.sql before this module, BAK-20 is the job
 // backup/command-wait (an agent step), BAK-21 runs in an ops record of titan-ops, not in a release, BAK-22 and BAK-23
 // are the job backup/config-again (an agent step, phase4.py bak22), BAK-04 is N/A, BAK-09 is NOT COVERED, BAK-10 is an
-// L-x case of a release that restores, BAK-28..36 and BAK-38 are the job backup/restore (an agent step, phase4.py bak28 and bak36) and BAK-27 and BAK-37
+// L-x case of a release that restores, BAK-28..36, BAK-38 and BAK-39 are the job backup/restore (an agent step, phase4.py bak28 and bak36) and BAK-27 and BAK-37
 // NOT COVERED (plan.md). Runs after `admin`, creates no rg-* resource and changes nothing: the target is the pod's
 // configuration (titan-ops features/backup/design.md#backup-target), the drill is the schedule's own.
 

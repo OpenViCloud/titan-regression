@@ -1,8 +1,9 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Locator } from '@playwright/test'
 import { PORTAL, closeSessions, pageOf, useBrowser } from './auth'
 import { RESULTS, bodyOf, call, expectStatus, get, log, pollUntil, startLog } from './api'
 import { activityOf, countOf, envOf, nameOf, runNetwork, runs, waitVm, waitVolume } from './fixtures'
 import { topUpEnabledOf } from './portal-config'
+import { type BillingRow, billingRowsDiff } from './billing-rows'
 
 // Cases UI-01..08 and UI-34 of plan.md: dashboard gate, VM create/snapshot/volume/stop-start-delete, billing,
 // wallet, buy-credit, the static account pages and the billing page's past months; and UI-39's check of UI-02's create
@@ -56,6 +57,23 @@ function currentMonth(): string {
 // Mirrors OpenViCloud/titan-cloud-console:portal/src/lib/money.ts formatMoney for 'en' + 'VND': Math.round(amount).toLocaleString('en-US') + ' ₫'.
 function moneyEn(amount: number): string {
   return `${Math.round(amount).toLocaleString('en-US')} ₫`
+}
+
+// The Billing page's usage table against the API's perVm by name and amount together (lib/billing-rows.ts): a row of
+// the table has two cells; the empty state has one, and the loading rows have no text, so the poll waits them out.
+async function expectBillingRows(main: Locator, expected: BillingRow[], label: string): Promise<void> {
+  const shown = async (): Promise<BillingRow[]> => {
+    const rows: BillingRow[] = []
+    for (const row of await main.locator('tbody tr').all()) {
+      const cells = await row.locator('td').allTextContents()
+      if (cells.length === 2) {
+        rows.push({ name: cells[0], amount: cells[1] })
+      }
+    }
+    return rows
+  }
+  await expect.poll(async () => billingRowsDiff(expected, await shown()), { message: `${label}: the Billing rows against perVm` }).toEqual([])
+  log(`${label}: ${expected.length} Billing rows as perVm has them`)
 }
 
 // The month's cost shown on a page against the API's, read before and after the page: metering can tick a VM's usage up
@@ -447,9 +465,7 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
         await page.screenshot({ path: `${RESULTS}/UI-05-billing.png` })
         return text
       })
-    for (const vm of after.perVm) {
-      await expect(page.getByRole('row', { name: new RegExp(vm.vmName) })).toContainText(moneyEn(vm.totalCost))
-    }
+    await expectBillingRows(page.locator('main'), after.perVm.map((vm: any) => ({ name: vm.vmName, amount: moneyEn(vm.totalCost) })), 'UI-05')
 
     await page.goto(PORTAL + '/billing/invoices', { waitUntil: 'networkidle' })
     await expect(page.getByRole('heading', { level: 1, name: 'Invoices' })).toBeVisible()
@@ -612,9 +628,7 @@ test.describe.serial('portal-ui flows: billing, wallet and account pages', () =>
       await back.click()
       const total = main.getByText(view.total, { exact: true }).locator('xpath=following-sibling::p[1]')
       await expect(total).toHaveText(money(previous.totalCost))
-      for (const vm of previous.perVm) {
-        await expect(main.getByRole('row', { name: new RegExp(vm.vmName) })).toContainText(money(vm.totalCost))
-      }
+      await expectBillingRows(main, previous.perVm.map((vm: any) => ({ name: vm.vmName, amount: money(vm.totalCost) })), `UI-34 ${view.lang}`)
       await page.screenshot({ path: `${RESULTS}/UI-34-previous-${view.lang}.png` })
 
       for (let k = 2; k <= clicks!; k++) {

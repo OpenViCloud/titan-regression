@@ -7,7 +7,7 @@ import { hold } from './host-hold'
 import { incusName, projectOf } from './incus-names'
 import { RUN, createVm, envOf, getVm, readVolume, runNetwork, runs, vmShape, volumeShape, waitVm, waitVolume } from './fixtures'
 
-// Cases BAK-28, BAK-29, BAK-31…BAK-36 and BAK-38 of plan.md (L-x; on prd only until
+// Cases BAK-28, BAK-29, BAK-31…BAK-36, BAK-38 and BAK-39 of plan.md (L-x; on prd only until
 // titan-ops status/known-state.md#first-real-customer): an admin's restore of a VM and of a volume from a backup as new
 // resources of the tenant. A job of its own (run-module.sh … backup/restore …, job regression-restore-<label>), like
 // backup/command-wait: the backup module's ConfigMap takes only the files of backup/, and the sequential lane never
@@ -21,7 +21,9 @@ import { RUN, createVm, envOf, getVm, readVolume, runNetwork, runs, vmShape, vol
 //                     are those cases' verdicts, the test's ✓ only says the hold was answered.
 // The order is the rows': BAK-32 during BAK-28 (before its 202, and its list read right after it), BAK-29 after
 // BAK-28, BAK-38 after BAK-29 and before BAK-36 (once BAK-36's Job gave the copy's volumes an archive, its restore would
-// be 202). afterAll deletes every rg-rs-* VM and volume of beta-user, the restores too: a restore is backed up daily.
+// be 202). BAK-39 sets the tenant's VM and volume caps to what it holds before BAK-28, so the two restores are asked at
+// the caps, and gives them back after BAK-29, before BAK-38 makes a volume of its own. afterAll gives the caps back
+// too, then deletes every rg-rs-* VM and volume of beta-user, the restores too: a restore is backed up daily.
 
 // The runner's job ends after 90 minutes (OpenViCloud/titan-local-cluster:base/regression-runner/cronjob.yaml
 // activeDeadlineSeconds 5400), the results copied before that: every wait is cut to what is left of 70 minutes from the
@@ -159,6 +161,33 @@ function vmPending(v: any): boolean {
   return ['Creating', 'Starting', 'Stopping', 'Snapshotting', 'Deleting'].includes(v.status)
 }
 
+// maxVms and maxNetworks are mandatory in the body; a cap not sent keeps its value
+// (OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Tenant/UpdateTenantQuotaEndpoint.cs UpdateQuotaValidator, UpdateQuotaRequest).
+async function setQuota(tenantId: string, body: Record<string, number>): Promise<void> {
+  log(`quota ← ${JSON.stringify(body)}`)
+  expectStatus(await call('admin', 'PATCH', `/v1/tenants/${tenantId}/quota`, body), 204)
+}
+
+// What the VM and volume caps count, as the customer portal counts it (OpenViCloud/titan-cloud-console:portal/src/lib/quota.ts,
+// vmOccupiesQuota, volumeOccupiesQuota): not a restored one, nor one Deleting, Deleted, NotFound or Failed. BAK-39 checks
+// it against the control plane's own count by a create refused at the caps.
+const OUTSIDE_QUOTA = new Set(['Deleting', 'Deleted', 'NotFound', 'Failed'])
+
+async function occupied(): Promise<{ vms: number, volumes: number }> {
+  const count = (rows: any[]) => rows.filter((r) => !OUTSIDE_QUOTA.has(r.status) && r.restoredFromBackup !== true).length
+  return { vms: count(await get('tenant', '/v1/tenant/vms')), volumes: count(await get('tenant', '/v1/tenant/volumes')) }
+}
+
+async function askVm(name: string, networkId: string): Promise<any> {
+  const { clusterId, smallTier, templateId } = await envOf()
+  return call('tenant', 'POST', '/v1/tenant/vms', { name, networkId, vmOfferingId: smallTier, templateId, clusterId, diskSizeGb: null }, newKey())
+}
+
+async function askVolume(name: string): Promise<any> {
+  const { clusterId, volumeOfferingId } = await envOf()
+  return call('tenant', 'POST', '/v1/tenant/volumes', { name, volumeOfferingId, clusterId, sizeGb: 1 }, newKey())
+}
+
 test.describe.serial('backup-restore', () => {
   test.describe.configure({ timeout: 72 * 60_000 })
 
@@ -180,6 +209,9 @@ test.describe.serial('backup-restore', () => {
   let newVmId = ''
   let copyVolumeId = ''
   let runningAt = ''
+  // BAK-39: the caps the job found, given back after BAK-29 and in afterAll, and the counts it set them to
+  let quotaBefore: { maxVms: number, maxNetworks: number, maxVolumes: number } | null = null
+  let atCap: { vms: number, volumes: number } | null = null
   const usedPortals = { admin: false, tenant: false }
   // the source VM's status and address every 10 s from its backup to the end of BAK-29
   const seen: Array<{ at: number, status: string, ip: string | null }> = []
@@ -196,6 +228,11 @@ test.describe.serial('backup-restore', () => {
     sampling = false
     await sampler
     await cleanUp([
+      ['quota', async () => {
+        if (quotaBefore !== null) {
+          await setQuota(tenantId, quotaBefore)
+        }
+      }],
       ['language', async () => {
         // BAK-34 and BAK-35 switch the language; leave none picked, so the next spec starts from the default.
         for (const [role, url] of [['admin', ADMIN], ['tenant', PORTAL]] as const) {
@@ -339,6 +376,24 @@ test.describe.serial('backup-restore', () => {
     expect(await lists(), 'the refusals made no VM or volume').toEqual(listsBefore)
   })
 
+  // plan.md BAK-39, its first half · titan-ops features/backup/design.md#restore-as-new-resource (free and outside the quota
+  // until the tenant deletes it) · OpenViCloud/titan-control-plane:Titan.Application/Services/Platform/Tenant/TenantQuotaGate.cs
+  // (VM_QUOTA_EXCEEDED, VOLUME_QUOTA_EXCEEDED). The caps stay there through BAK-28 and BAK-29: their 202 is the restore asked
+  // at the caps.
+  test('BAK-39 the tenant set at its VM and volume caps is refused one more VM and one more volume of its own', async () => {
+    test.skip(vmItem === null || volumeItem === null, NOT_SET_UP)
+    const row = (await get('admin', '/v1/tenants') as any[]).find((t) => t.id === tenantId)
+    expect(row, `tenant ${tenantId} in GET /v1/tenants`).toBeDefined()
+    quotaBefore = { maxVms: row.maxVms, maxNetworks: row.maxNetworks, maxVolumes: row.maxVolumes }
+    const counts = await occupied()
+    log(`BAK-39 caps before ${JSON.stringify(quotaBefore)}; occupied ${JSON.stringify(counts)}`)
+    await setQuota(tenantId, { maxVms: counts.vms, maxNetworks: quotaBefore.maxNetworks, maxVolumes: counts.volumes })
+    atCap = counts
+    const network = await runNetwork()
+    expectError(await askVm(`rg-rs-cap-0-${RUN}`, network.id), 422, 'VM_QUOTA_EXCEEDED')
+    expectError(await askVolume(`rg-rs-cap-0-${RUN}`), 422, 'VOLUME_QUOTA_EXCEEDED')
+  })
+
   // titan-ops features/backup/design.md#restore-as-new-resource ·
   // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/RestoreVolumeFromBackupEndpoint.cs (202 {newVolumeId},
   // IRequiresIdempotencyKey) ·
@@ -454,6 +509,37 @@ test.describe.serial('backup-restore', () => {
     expect(off.length, 'the source VM runs throughout and keeps its address').toBe(0)
   })
 
+  // plan.md BAK-39, its second half: the restores (BAK-28's volume, BAK-29's VM and the copy of its volume) took none of the
+  // room, so one cap more lets the tenant make exactly one VM and one volume; each is deleted at once, the caps given back.
+  test('BAK-39 after the restores, one cap more lets the tenant make exactly one more VM and one more volume', async () => {
+    test.skip(quotaBefore === null || atCap === null, NOT_SET_UP)
+    // the caps go back however the test ends, a skip too: a skip does not stop the tests after it, and BAK-38 makes a volume
+    try {
+      test.skip(newVmId === '' || copyVolumeId === '' || restoredVolumeId === '', NO_RESTORES)
+      const counts = await occupied()
+      log(`BAK-39 occupied after the restores ${JSON.stringify(counts)}, at the caps ${JSON.stringify(atCap)}`)
+      expect(counts, 'the tenant holds what it held at the caps, the restores aside').toEqual(atCap)
+      await setQuota(tenantId, { maxVms: atCap!.vms + 1, maxNetworks: quotaBefore!.maxNetworks, maxVolumes: atCap!.volumes + 1 })
+      const network = await runNetwork()
+      const vm = await askVm(`rg-rs-cap-1-${RUN}`, network.id)
+      expectStatus(vm, 202)
+      const capVmId = bodyOf(vm).vmId as string
+      expectError(await askVm(`rg-rs-cap-2-${RUN}`, network.id), 422, 'VM_QUOTA_EXCEEDED')
+      const volume = await askVolume(`rg-rs-cap-1-${RUN}`)
+      expectStatus(volume, 202)
+      const capVolumeId = bodyOf(volume).volumeId as string
+      expectError(await askVolume(`rg-rs-cap-2-${RUN}`), 422, 'VOLUME_QUOTA_EXCEEDED')
+      log(`BAK-39 made vm ${capVmId} and volume ${capVolumeId} under one cap more`)
+      // deleted from rest, as afterAll deletes; afterAll waits for Deleted
+      await waitFor('BAK-39 vm at rest', () => getVm(capVmId), (v) => !vmPending(v), vmShape, OBSERVED_WITHIN_MS)
+      expectStatus(await call('tenant', 'DELETE', `/v1/tenant/vms/${capVmId}`), 202)
+      await waitFor('BAK-39 volume at rest', () => readVolume(capVolumeId), (v) => !volumePending(v), volumeShape, OBSERVED_WITHIN_MS)
+      expectStatus(await call('tenant', 'DELETE', `/v1/tenant/volumes/${capVolumeId}`), 202)
+    } finally {
+      await setQuota(tenantId, quotaBefore!)
+    }
+  })
+
   // titan-ops features/backup/design.md#restore-as-new-resource · titan-ops architecture/tenancy-and-admin.md#admin-audit ·
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Admin/Backup/RestoreAudit.cs (VmAction, VolumeAction; Stage:
   // the new resource's id, the source's tenant, detail "source=<id> backup=<key>") ·
@@ -520,23 +606,37 @@ test.describe.serial('backup-restore', () => {
         await expect(restoreIn(rowOf(item.name)), `${item.kind} ${item.name}: no Restore`).toHaveCount(0)
       }
 
-      const dialogs: Array<[any, ReturnType<typeof rowOf>, string]> = [[vmNow, rowOf(vmName), w.vmName]]
-      if (dataWithArchives.length === 1) {
-        dialogs.push([volumeNow, rowOf(dataName), w.volumeName])
-      } else {
-        log(`BAK-34 ${lang}: the volume's dialog not opened: ${dataWithArchives.length} rows named ${dataName} have an archive, the page does not tell them apart`)
-      }
-      for (const [item, row, label] of dialogs) {
-        await restoreIn(row).click()
+      // Opens the dialog of one Restore button and closes it with Cancel. It is item's dialog when the archive checked is
+      // item's newest; only then are its radios, name and screenshot checked. The copy of the volume (BAK-29) keeps its
+      // source's name and can have an archive of its own, and the page shows no id. A backupKey is the time of the archive
+      // (OpenViCloud/titan-control-plane:Titan.Application/Services/Platform/Backup/IncusBackupKey.cs), and the copy's is
+      // taken after BAK-29, later than the source's newest: the archive checked tells the two apart.
+      const dialogOf = async (button: ReturnType<typeof restoreIn>, item: any, label: string): Promise<boolean> => {
+        await button.click()
         const dialog = page.getByRole('dialog', { name: w.dialog(item.name) })
         await expect(dialog).toBeVisible()
-        await expect(dialog.getByRole('radio')).toHaveCount((item.archives as any[]).length)
-        await expect(dialog.locator('input[type="radio"]:checked')).toHaveValue(item.archives[0].backupKey)
-        await expect(dialog.getByLabel(label)).toHaveValue(`${item.name}-restored`)
-        await page.screenshot({ path: `${RESULTS}/BAK-34-${lang}-${item.kind}-dialog.png` })
+        const checked = dialog.locator('input[type="radio"]:checked')
+        await expect(checked).toHaveCount(1)
+        const key = await checked.inputValue()
+        const mine = key === item.archives[0].backupKey
+        log(`BAK-34 ${lang}: a dialog of ${item.kind} ${item.name} has ${key} checked; ${mine ? 'its own newest' : 'not its archive'}`)
+        if (mine) {
+          await expect(dialog.getByRole('radio')).toHaveCount((item.archives as any[]).length)
+          await expect(dialog.getByLabel(label)).toHaveValue(`${item.name}-restored`)
+          await page.screenshot({ path: `${RESULTS}/BAK-34-${lang}-${item.kind}-dialog.png` })
+        }
         await dialog.getByRole('button', { name: w.cancel, exact: true }).click()
         await expect(dialog).toBeHidden()
+        return mine
       }
+      expect(await dialogOf(restoreIn(rowOf(vmName)), vmNow, w.vmName), `the dialog of VM ${vmName} has its newest archive checked`).toBe(true)
+      let sources = 0
+      for (let i = 0; i < dataWithArchives.length; i++) {
+        if (await dialogOf(restoreIn(rowOf(dataName)).nth(i), volumeNow, w.volumeName)) {
+          sources++
+        }
+      }
+      expect(sources, `of the ${dataWithArchives.length} rows named ${dataName} with an archive, one dialog has the source volume's newest checked`).toBe(1)
 
       const recent = page.getByRole('region', { name: w.recent })
       for (const [kind, name] of [['vm', copyName], ['volume', volName], ['volume', dataName]] as const) {
