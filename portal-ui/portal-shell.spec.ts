@@ -1,8 +1,8 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { ADMIN, PORTAL, closeSessions, pageOf, useBrowser } from './auth'
 import { RESULTS, log, startLog } from './api'
 
-// Cases UI-09..UI-11, UI-15 and UI-43 of plan.md: theme, brand, language and the shell of both portals.
+// Cases UI-09..UI-11, UI-15, UI-43 and UI-45 of plan.md: theme, brand, language and the shell of both portals.
 // Colours are the token values of OpenViCloud/titan-cloud-console:portal/src/index.css (light in @theme, dark under [data-theme=dark]).
 const LIGHT_BACKGROUND = 'rgb(243, 244, 247)'
 const DARK_BACKGROUND = 'rgb(13, 14, 18)'
@@ -201,5 +201,78 @@ test.describe.serial('portal-ui shell', () => {
     await admin.getByRole('banner').getByRole('button', { name: 'English', exact: true }).click()
     await expect(admin.getByRole('navigation', { name: 'Main' })).toBeVisible()
     log('UI-43 customer at 375px: Tiếng Việt fits, switches to vi and back, kept after reload; admin switches too')
+  })
+
+  // titan-ops features/public-site/design.md#brand-icon · titan-ops features/cloud-console/design.md#portal-shell ·
+  // OpenViCloud/titan-cloud-console:portal/src/components/shell/AppShell.tsx (BrandMark: <img src="/brand-mark.png" width 28
+  // height 28 class h-7 w-7>, first in the top bar's brand link before brand and brandSuffix, and in the drawer's header before
+  // brand; the old mark, an svg circle, is gone) · OpenViCloud/titan-admin-console:portal/src/components/shell/AppShell.tsx
+  // (BrandMark, the same) · OpenViCloud/titan-admin-console:portal/src/admin/layout/AdminLayout.tsx (brand OpenViCloud,
+  // brandSuffix Admin) · OpenViCloud/titan-cloud-console:portal/index.html, OpenViCloud/titan-admin-console:portal/admin.html
+  // (link rel=icon type image/png href /favicon.png, link rel=apple-touch-icon href /apple-touch-icon.png) ·
+  // OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts (shell.openNavigation)
+  test('UI-45 both portals show the OpenViCloud image mark before the brand in the top bar (and the customer drawer at 375px), and declare /favicon.png and /apple-touch-icon.png, served as PNG', async () => {
+    const PNG_SIGNATURE = '89504e470d0a1a0a'
+    const MARK = '/brand-mark.png'
+
+    // The children of a brand element in order: the image by its src, then each non-empty text.
+    const partsOf = (scope: Locator) => scope.evaluate((el) => Array.from(el.childNodes).map((node) => {
+      if (node instanceof HTMLImageElement) return `img ${node.getAttribute('src')}`
+      return (node.textContent ?? '').trim()
+    }).filter((part) => part !== ''))
+
+    const expectMark = async (scope: Locator, words: string[], at: string) => {
+      expect(await partsOf(scope), `${at}: the mark, then ${words.join(' ')}`).toEqual([`img ${MARK}`, ...words])
+      const mark = scope.locator(`img[src="${MARK}"]`)
+      await expect(mark).toBeVisible()
+      const box = await mark.boundingBox()
+      expect(box !== null && Math.round(box.width) === 28 && Math.round(box.height) === 28, `${at}: mark ${JSON.stringify(box)} is 28×28`).toBe(true)
+      expect(await mark.evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0), `${at}: ${MARK} loaded`).toBe(true)
+      await expect(scope.locator('svg'), `${at}: no drawn circle mark`).toHaveCount(0)
+    }
+
+    const expectIcons = async (page: Page, origin: string, at: string) => {
+      await expect(page.locator('head link[rel="icon"]')).toHaveAttribute('href', '/favicon.png')
+      await expect(page.locator('head link[rel="icon"]')).toHaveAttribute('type', 'image/png')
+      await expect(page.locator('head link[rel="apple-touch-icon"]')).toHaveAttribute('href', '/apple-touch-icon.png')
+      for (const path of ['/favicon.png', '/apple-touch-icon.png', MARK]) {
+        const reply = await page.request.get(origin + path)
+        expect(reply.status(), `${at} ${path}`).toBe(200)
+        expect(reply.headers()['content-type'] ?? '', `${at} ${path} content-type`).toMatch(/^image\/png\b/)
+        expect((await reply.body()).subarray(0, 8).toString('hex'), `${at} ${path} is a PNG, not the SPA's HTML`).toBe(PNG_SIGNATURE)
+      }
+      log(`UI-45 ${at}: icon /favicon.png, apple-touch-icon /apple-touch-icon.png; /favicon.png, /apple-touch-icon.png, ${MARK} 200 image/png`)
+    }
+
+    const page = await pageOf('tenant')
+    try {
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.goto(PORTAL + '/', { waitUntil: 'networkidle' })
+      await page.evaluate(() => localStorage.setItem('ovc-lang', 'en'))
+      await page.reload({ waitUntil: 'networkidle' })
+      const brandOf = (p: Page) => p.getByRole('banner').locator('a[href="/"]').filter({ hasText: 'OpenViCloud' })
+      await expectMark(brandOf(page), ['OpenViCloud'], 'customer 1440')
+      await page.screenshot({ path: `${RESULTS}/UI-45-customer-1440.png` })
+      await expectIcons(page, PORTAL, 'customer')
+
+      await page.setViewportSize({ width: 375, height: 812 })
+      await page.reload({ waitUntil: 'networkidle' })
+      await expectMark(brandOf(page), ['OpenViCloud'], 'customer 375')
+      await page.getByRole('button', { name: 'Open navigation' }).click()
+      const sidebar = page.locator('#app-sidebar')
+      await expect(sidebar).toHaveAttribute('data-open', 'true')
+      const drawerBrand = sidebar.locator('span').filter({ has: page.locator(`img[src="${MARK}"]`) })
+      await expectMark(drawerBrand, ['OpenViCloud'], 'customer 375 menu')
+      await page.screenshot({ path: `${RESULTS}/UI-45-customer-375-menu.png` })
+    } finally {
+      await page.setViewportSize({ width: 1400, height: 900 })
+    }
+
+    const admin = await pageOf('admin')
+    await admin.goto(ADMIN + '/', { waitUntil: 'networkidle' })
+    await expectMark(admin.getByRole('banner').locator('a[href="/"]').filter({ hasText: 'OpenViCloud' }), ['OpenViCloud', 'Admin'], 'admin 1400')
+    await admin.screenshot({ path: `${RESULTS}/UI-45-admin.png` })
+    await expectIcons(admin, ADMIN, 'admin')
+    log('UI-45 the image mark before OpenViCloud in both top bars and the customer drawer, no svg mark left')
   })
 })

@@ -2,9 +2,9 @@ import * as fs from 'node:fs'
 import { RESULTS, log, sleep } from './api'
 
 // The steps the agent does outside the runner: those of phase4/ on the Incus host, and the holds of
-// backup/command-wait and backup/config-again (cli/edge has a hold of its own). At each HOLD the spec logs what it holds and waits for RESULTS/go-<step>
+// backup/command-wait, backup/config-again and backup/restore (cli/edge has a hold of its own). At each HOLD the spec logs what it holds and waits for RESULTS/go-<step>
 // (or RESULTS/skip-<step>: the step was not run, or for bak20 and bak22 its verdict came before the answer), which
-// `python3 phase4.py` creates in the pod: `step`, `go|skip`, `vm35`, `bak20`, `bak22` (README.md §Phase 4).
+// `python3 phase4.py` creates in the pod: `step`, `go|skip`, `vm35`, `bak20`, `bak22`, `bak28`, `bak36` (README.md §Phase 4).
 
 export const HOLD_MS = 45 * 60_000
 

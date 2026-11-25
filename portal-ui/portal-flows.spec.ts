@@ -164,7 +164,12 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     log(`UI-01 vms=${vms.length} networks=${networks.length} volumes=${volumes.length} monthCost=${shown}`)
   })
 
-  // titan-ops features/vm/design.md#vm-portal · OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx
+  // titan-ops features/vm/design.md#vm-portal · titan-ops features/vm/design.md#vm-create-form (five choices, Access (optional),
+  // Advanced closed by default with its fields not rendered; no IPv6 field) ·
+  // OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx (advancedOpen false at mount; #stop-timeout and
+  // #vm-user-data only inside {advancedOpen && …}) · OpenViCloud/titan-cloud-console:portal/src/pages/VmListPage.tsx
+  // (sizeLabel: the offering's name first) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts (vmCreate.title, namePlaceholder,
+  // cluster, network, template, size, advanced, submit)
   test('UI-02 creating a VM through the form shows the transition then Running, with the right name and tier', async () => {
     const { clusterId, templateId, smallTier } = await envOf()
     const offerings = await get('anonymous', '/v1/vm-offerings') as Array<{ id: string, name: string }>
@@ -179,6 +184,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     // The form has no IPv6 field at all (titan-ops features/network/design.md#ipv6-public: IPv6 is a network
     // property, requested at network create, not at VM create).
     await expect(dialog.getByText(/ipv6/i)).toHaveCount(0)
+    await expect(dialog.getByLabel(/ipv6/i)).toHaveCount(0)
 
     await dialog.getByPlaceholder('e.g. web-server-01').fill(vmName)
     await dialog.getByRole('combobox', { name: 'Cluster' }).selectOption(clusterId)
@@ -188,6 +194,10 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     // Created with Advanced never opened: its user data field is not on the page (titan-ops features/vm/design.md#vm-create-form).
     const advanced = dialog.getByRole('button', { name: /^Advanced/ })
     advancedClosed = (await advanced.getAttribute('aria-expanded')) === 'false' && (await dialog.locator('#vm-user-data').count()) === 0
+    await expect(advanced, 'UI-02 never opens Advanced').toHaveAttribute('aria-expanded', 'false')
+    await expect(dialog.getByLabel('Stop timeout (seconds)', { exact: true })).toHaveCount(0)
+    await expect(dialog.getByLabel('Cloud-init user data', { exact: true })).toHaveCount(0)
+    await page.screenshot({ path: `${RESULTS}/UI-02-form-advanced-closed.png` })
     const sent = page.waitForRequest((req) => req.method() === 'POST' && new URL(req.url()).pathname === '/v1/tenant/vms')
     await dialog.getByRole('button', { name: 'Create VM' }).click()
     createBody = (await sent).postDataJSON()
