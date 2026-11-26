@@ -4,6 +4,7 @@ import { RESULTS, bodyOf, call, expectStatus, get, log, pollUntil, startLog } fr
 import { activityOf, countOf, envOf, nameOf, runNetwork, runs, waitVm, waitVolume } from './fixtures'
 import { topUpEnabledOf } from './portal-config'
 import { type BillingRow, billingRowsDiff } from './billing-rows'
+import { VM_FORM_EN, chooseLocation, chooseTemplateAndSize } from './vm-form'
 
 // Cases UI-01..08 and UI-34 of plan.md: dashboard gate, VM create/snapshot/volume/stop-start-delete, billing,
 // wallet, buy-credit, the static account pages and the billing page's past months; and UI-39's check of UI-02's create
@@ -182,7 +183,7 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     log(`UI-01 vms=${vms.length} networks=${networks.length} volumes=${volumes.length} monthCost=${shown}`)
   })
 
-  // titan-ops features/vm/design.md#vm-portal · titan-ops features/vm/design.md#vm-create-form (five choices, Access (optional),
+  // titan-ops features/vm/design.md#vm-portal · titan-ops features/vm/design.md#vm-create-form (location line with Change, template and size radio groups, Access (optional),
   // Advanced closed by default with its fields not rendered; no IPv6 field) ·
   // OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx (advancedOpen false at mount; #stop-timeout and
   // #vm-user-data only inside {advancedOpen && …}) · OpenViCloud/titan-cloud-console:portal/src/pages/VmListPage.tsx
@@ -205,10 +206,8 @@ test.describe.serial('portal-ui flows: VM lifecycle', () => {
     await expect(dialog.getByLabel(/ipv6/i)).toHaveCount(0)
 
     await dialog.getByPlaceholder('e.g. web-server-01').fill(vmName)
-    await dialog.getByRole('combobox', { name: 'Cluster' }).selectOption(clusterId)
-    await dialog.getByRole('combobox', { name: 'Network' }).selectOption(network.id)
-    await dialog.getByRole('combobox', { name: 'Template' }).selectOption(templateId)
-    await dialog.getByRole('combobox', { name: 'Size' }).selectOption(smallTier)
+    await chooseLocation(dialog, VM_FORM_EN, clusterId, network.id)
+    await chooseTemplateAndSize(dialog, VM_FORM_EN, templateId, smallTier)
     // Created with Advanced never opened: its user data field is not on the page (titan-ops features/vm/design.md#vm-create-form).
     const advanced = dialog.getByRole('button', { name: /^Advanced/ })
     advancedClosed = (await advanced.getAttribute('aria-expanded')) === 'false' && (await dialog.locator('#vm-user-data').count()) === 0

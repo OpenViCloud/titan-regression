@@ -4,6 +4,7 @@ import { PORTAL, closeSessions, pageOf, useBrowser } from './auth'
 import { API, RESULTS, bodyOf, call, expectStatus, get, log, newKey, sleep, startLog } from './api'
 import { cleanUp } from './clean-up'
 import { RUN, envOf, nameOf, runNetwork, runs, waitVm } from './fixtures'
+import { chooseLocation, chooseTemplateAndSize } from './vm-form'
 
 // Cases UI-35..UI-40, UI-42 and UI-44 of plan.md: the console password, stop timeout and cloud-init user data fields of the Create VM
 // form and its three sections at 375px and 1440px, the network the form chooses by itself, the Console tab of the VM page, its Stop timeout panel and its Add SSH key dialog. One VM, made through the form by
@@ -12,8 +13,8 @@ import { RUN, envOf, nameOf, runNetwork, runs, waitVm } from './fixtures'
 
 // The words of the form in each language (OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts,
 // OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts: vms.create, vmCreate.title, namePlaceholder, cluster, network, template,
-// size, consolePassword, stopTimeout, userData, submit, consolePasswordLength, stopTimeoutRange, userDataTooLarge, access, accessHint,
-// advanced). Stop timeout and user data sit under Advanced, closed until opened (titan-ops features/vm/design.md#vm-create-form).
+// size, changeLocation, consolePassword, stopTimeout, userData, submit, consolePasswordLength, stopTimeoutRange, userDataTooLarge, access,
+// accessHint, advanced). Stop timeout and user data sit under Advanced, closed until opened (titan-ops features/vm/design.md#vm-create-form).
 type FormWords = {
   lang: 'en' | 'vi'
   open: string
@@ -23,6 +24,7 @@ type FormWords = {
   network: string
   template: string
   size: string
+  change: string
   consolePassword: string
   stopTimeout: string
   userData: string
@@ -45,6 +47,7 @@ const FORM: Record<'en' | 'vi', FormWords> = {
     network: 'Network',
     template: 'Template',
     size: 'Size',
+    change: 'Change',
     consolePassword: 'Console password',
     stopTimeout: 'Stop timeout (seconds)',
     userData: 'Cloud-init user data',
@@ -53,7 +56,7 @@ const FORM: Record<'en' | 'vi', FormWords> = {
     stopTimeoutRange: 'The stop timeout must be a whole number of seconds from 30 to 1800.',
     userDataTooLarge32770: 'Cloud-init user data is 32770 bytes; the limit is 32768.',
     access: 'Access (optional)',
-    accessHint: 'Without an SSH key, log in on the Console tab with a console password, or add a key later on the VM page.',
+    accessHint: 'Without an SSH key, log in on the Console tab as ubuntu with the console password, which can’t be shown again, or add a key later on the VM page.',
     advanced: 'Advanced',
   },
   vi: {
@@ -65,6 +68,7 @@ const FORM: Record<'en' | 'vi', FormWords> = {
     network: 'Mạng',
     template: 'Template',
     size: 'Cấu hình',
+    change: 'Đổi',
     consolePassword: 'Mật khẩu console',
     stopTimeout: 'Thời gian dừng (giây)',
     userData: 'Cloud-init user data',
@@ -73,7 +77,7 @@ const FORM: Record<'en' | 'vi', FormWords> = {
     stopTimeoutRange: 'Thời gian dừng phải là số giây nguyên, từ 30 đến 1800.',
     userDataTooLarge32770: 'Cloud-init user data dài 32770 byte, vượt giới hạn 32768.',
     access: 'Truy cập (không bắt buộc)',
-    accessHint: 'Không có SSH key thì đăng nhập ở tab Console bằng mật khẩu console, hoặc thêm key sau ở trang VM.',
+    accessHint: 'Không có SSH key thì đăng nhập user ubuntu ở tab Console bằng mật khẩu console (không xem lại được), hoặc thêm key sau ở trang VM.',
     advanced: 'Nâng cao',
   },
 }
@@ -106,10 +110,8 @@ async function openFilledForm(page: Page, words: FormWords, name: string, choice
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('heading', { name: words.title })).toBeVisible()
   await dialog.getByPlaceholder(words.namePlaceholder).fill(name)
-  await dialog.getByRole('combobox', { name: words.cluster, exact: true }).selectOption(choices.clusterId)
-  await dialog.getByRole('combobox', { name: words.network, exact: true }).selectOption(choices.networkId)
-  await dialog.getByRole('combobox', { name: words.template, exact: true }).selectOption(choices.templateId)
-  await dialog.getByRole('combobox', { name: words.size, exact: true }).selectOption(choices.tier)
+  await chooseLocation(dialog, words, choices.clusterId, choices.networkId)
+  await chooseTemplateAndSize(dialog, words, choices.templateId, choices.tier)
   return dialog
 }
 
@@ -314,12 +316,12 @@ test.describe.serial('portal-ui vm form: stop timeout and sections', () => {
     }
   })
 
-  // titan-ops features/vm/design.md#vm-create-form (five choices, then Access (optional) open with its hint, then Advanced
-  // closed; the dialog scrolls inside itself when taller than the screen) · titan-ops features/cloud-console/design.md#portal-shell
+  // titan-ops features/vm/design.md#vm-create-form (the choices, then Access (optional) open with its hint, then Advanced
+  // closed; only the form body scrolls when the dialog is taller than the screen) · titan-ops features/cloud-console/design.md#portal-shell
   // (nothing scrolls sideways at 375px) · OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx (advancedOpen,
-  // DialogContent max-h and overflow-y-auto) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts,
+  // max-h on DialogContent, overflow-y-auto on the form body) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts,
   // OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts (vmCreate.access, accessHint, advanced). Nothing is sent: no create.
-  test('UI-42 the Create VM form at 375px and 1440px: five choices, then Access (optional) with its hint, then Advanced closed; the whole form reachable, nothing scrolls sideways; Vietnamese at 375px', async () => {
+  test('UI-42 the Create VM form at 375px and 1440px: the choices, then Access (optional) with its hint, then Advanced closed; the Create VM in view without scrolling, nothing scrolls sideways; Vietnamese at 375px', async () => {
     const page = await pageOf('tenant')
     const held = await holdCreates(page)
     try {
@@ -339,14 +341,14 @@ test.describe.serial('portal-ui vm form: stop timeout and sections', () => {
         await expect(access).toBeVisible()
         await expect(access.getByText(words.accessHint, { exact: true })).toBeVisible()
         await expect(access.getByLabel(words.consolePassword, { exact: true })).toBeVisible()
-        const size = await dialog.getByRole('combobox', { name: words.size, exact: true }).boundingBox()
+        const size = await dialog.getByRole('radiogroup', { name: words.size, exact: true }).boundingBox()
         const group = await access.boundingBox()
         expect(size !== null && group !== null && size.y < group.y, `${at}: Size above Access`).toBe(true)
         await expect(advancedOf(dialog, words)).toHaveAttribute('aria-expanded', 'false')
         await expect(dialog.getByLabel(words.stopTimeout, { exact: true })).toHaveCount(0)
         await expect(dialog.getByLabel(words.userData, { exact: true })).toHaveCount(0)
 
-        // The dialog stays inside the screen; what does not fit scrolls inside it.
+        // The dialog stays inside the screen; only the form body scrolls, the footer with Create VM stays in view.
         const box = await dialog.boundingBox()
         expect(box !== null && box.y >= 0 && box.y + box.height <= height + 1, `${at}: dialog ${JSON.stringify(box)} inside ${height}px`).toBe(true)
         expect(await page.evaluate(() => document.documentElement.scrollWidth), `${at}: no sideways scroll`).toBe(width)
@@ -355,8 +357,7 @@ test.describe.serial('portal-ui vm form: stop timeout and sections', () => {
         await openAdvanced(dialog, words)
         await expect(dialog.getByLabel(words.stopTimeout, { exact: true })).toHaveValue('120')
         const submit = dialog.getByRole('button', { name: words.submit, exact: true })
-        await submit.scrollIntoViewIfNeeded()
-        await expect(submit).toBeInViewport()
+        await expect(submit).toBeInViewport({ ratio: 1 })
         expect(await page.evaluate(() => document.documentElement.scrollWidth), `${at} open: no sideways scroll`).toBe(width)
         await page.screenshot({ path: `${RESULTS}/UI-42-${at}-advanced.png` })
         log(`UI-42 ${at}: Access (optional) after Size, Advanced closed then open, dialog inside the screen, scrollWidth ${width}`)
@@ -434,11 +435,10 @@ test.describe.serial('portal-ui vm form: network chosen for the cluster', () => 
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: words.title })).toBeVisible()
     await dialog.getByPlaceholder(words.namePlaceholder).fill(nameNet)
-    await dialog.getByRole('combobox', { name: words.cluster, exact: true }).selectOption(runCluster)
+    await chooseLocation(dialog, words, runCluster)
     // The Network field is never touched: the cluster's one usable network shows as chosen.
     await expect(dialog.getByRole('combobox', { name: words.network, exact: true })).toHaveValue(run.id)
-    await dialog.getByRole('combobox', { name: words.template, exact: true }).selectOption(templates[0].id)
-    await dialog.getByRole('combobox', { name: words.size, exact: true }).selectOption(smallTier)
+    await chooseTemplateAndSize(dialog, words, templates[0].id, smallTier)
     await page.screenshot({ path: `${RESULTS}/UI-44-network-chosen.png` })
 
     const sent = page.waitForResponse((res) => res.request().method() === 'POST' && new URL(res.url()).pathname === '/v1/tenant/vms')
@@ -472,7 +472,7 @@ test.describe.serial('portal-ui vm form: network chosen for the cluster', () => 
     const picks = usableOn(twoNetworks.id)
     await page.getByRole('button', { name: words.open, exact: true }).click()
     await expect(dialog.getByRole('heading', { name: words.title })).toBeVisible()
-    await dialog.getByRole('combobox', { name: words.cluster, exact: true }).selectOption(twoNetworks.id)
+    await chooseLocation(dialog, words, twoNetworks.id)
     const field = dialog.getByRole('combobox', { name: words.network, exact: true })
     await expect(field).toHaveValue('')
     await page.screenshot({ path: `${RESULTS}/UI-44-two-networks.png` })
