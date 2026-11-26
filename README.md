@@ -265,7 +265,7 @@ environment enables it, and a drill leased holds the restores back
 
 Not run by the runner (Phase 4 of `release:regression-prd`): `observation` — state changed on the Incus host outside
 OpenViCloud, needs an approved `L-x` command (OBS-13 only reads the host's trust list), run by the agent with the
-spec of `phase4/`; `site` — the public site through Playwright MCP on the agent's machine;
+spec of `phase4/`; `site` — the public site through a browser on the agent's machine (Playwright MCP, or `playwright-core` with the Chromium already there when MCP is not connected);
 `worker`, `control-plane-image` — read-only `gh`/`curl`/`kubectl` and `go test` of a worker clone on the agent's machine.
 
 Five things change state every tenant of the environment shares: ADM-06 (a global price), ADM-15 (the cluster's
