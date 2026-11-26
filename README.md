@@ -174,7 +174,7 @@ create a network and beta-user's network cap may leave no room for it.
 |---|---|---|---|---|---|
 | 1 | `smoke` | health, clusters, anonymous catalog, clean test account, no metrics on the API host | yes | yes | yes |
 | 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync | yes | yes | yes, except CAT-14 (host, not covered), CAT-16 (host) |
-| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21, NET-27 (host, not covered), NET-25 (host); NET-29 (extended); NET-31 (plan only); NET-30 (host, plan only); NET-32 (not covered: measured by tests of the control plane) |
+| 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21, NET-27 (host, not covered), NET-25 (host); NET-31 (plan only); NET-30 (host); NET-32 (not covered: measured by tests of the control plane) |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-08 (host), FW-14 (host, not covered) |
 | 5 | `vm` | VMs: create per tier (cluster named or taken from the network), stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys and SSH sessions; console password, console tickets and console sessions; stop timeout | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered), VM-35 (host); SSH-08 and CSL-06 (inside SSH-08) also a job of its own at the release environment's run, `vm/ssh-sessions` |
 | 6 | `vm-snapshot` | VM snapshots: create, cap, revert, delete, deleted with their VM | yes | yes | yes, except VMS-14, VMS-15, VMS-20 (host, not covered), VMS-17 (host) |
@@ -326,7 +326,7 @@ this machine on the release environment, the host with `--env dev` (the spec's `
 `obs05` found behind the template alias, which `obs05-after-sync` deletes only once the alias points elsewhere) are kept
 in the `--state` file, a working file outside the evidence, one per run. Whether an output matches the plan row stays the agent's
 call; 18 steps write on the host (`WRITES` of `phase4_steps.py`), so they run only under the release's approved `L-x`.
-A step runs nothing (exit 2) when a value it needs is missing: `setup` wants `--api`, `ssh06` `--keys` and
+A step runs nothing (exit 2) when a value it needs is missing: `setup` wants `--api`, `ssh06` and `net30` `--keys` and
 `--guest-known-hosts` (the known_hosts file for the guests), `vm24-restart` `--keys`. `setup` clears the values recorded
 by an earlier run, and a failed read records none.
 

@@ -58,7 +58,7 @@ def setup(f, o):
         Cmd("sudo incus storage volume show default {volume} " + P + " | grep -A3 used_by"),
         Cmd("sudo incus snapshot list " + P + " {vmA} -f csv -c n"),
         Cmd("sudo incus network show {net6} " + P),
-        Cmd("sudo incus network show {netEmpty} " + P + " | grep -E 'default|acls|description'"),
+        Cmd("sudo incus network show {netEmpty} " + P + " | grep -E 'default|acls|description|^  network:'"),
         Cmd("sudo incus network acl show {acl} " + P),
         Cmd("sudo incus image alias list -f csv"),
         Cmd("sudo incus info | grep -A3 architectures"),
@@ -121,7 +121,7 @@ def obs05_after_sync(f, o):
 
 
 def facts_commands(f, o):
-    """fw08-*, lb18-*: the spec lists its commands in the facts (outside[] and host[], without sudo)."""
+    """fw08-*, lb18-*, net30: the spec lists its commands in the facts (outside[] and host[], without sudo)."""
     cmds = []
     if f.get("uplink"):
         cmds.append(Cmd("sudo incus network get {uplink} ipv6.gateway"))
@@ -181,6 +181,7 @@ STEPS = {
                            Cmd("sudo incus network acl show {acl} " + P + " | grep -c {ruleId}")],
     "obs12": lambda f, o: [Cmd("sudo incus network load-balancer delete {network} {vip} " + P, write=True),
                            Cmd("sudo incus network load-balancer list {network} " + P + " -f csv")],
+    "net30": facts_commands,
     "fw08-before": facts_commands,
     "fw08-after-rule": facts_commands,
     "lb18-before": facts_commands,
