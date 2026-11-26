@@ -527,8 +527,8 @@ test.describe.serial('network', () => {
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Networking/Network/Contracts/NetworkQueryResult.cs (Cidr, PublicIpv6Subnet) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Networking/FirewallRule/Contracts/FirewallRuleQueryResult.cs (FirewallRuleQueryResult).
   // Read only, with admin-test's token; a default network made before 80 and 443 has them after a backfill pass (NET-31).
-  // NOT COVERED when admin-test has no live network `default`: it got none from the
-  // backfill or a first approval after the change, or it deleted it (plan.md).
+  // NOT COVERED when admin-test has no live network `default`: it got none from the backfill or a first approval after
+  // the change, or it deleted it (plan.md).
   test('NET-29 admin-test has one network default: Created, a public /64, Deny in and Allow out, a private range, TCP 22, 80 and 443 open from anywhere', async () => {
     const own = await get('admin', '/v1/tenant')
     const networks = await get('admin', '/v1/tenant/networks') as any[]

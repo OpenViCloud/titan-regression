@@ -465,6 +465,7 @@ class StepTest(unittest.TestCase):
     def test_writes_lists_the_steps_with_a_host_write(self):
         self.assertEqual(len(phase4.phase4_steps.WRITES), 18)
         self.assertNotIn("net25", phase4.phase4_steps.WRITES)
+        self.assertNotIn("net30", phase4.phase4_steps.WRITES)
         self.assertIn("obs11", phase4.phase4_steps.WRITES)
 
     def test_cln02_needs_no_hold(self):

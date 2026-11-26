@@ -121,7 +121,7 @@ def obs05_after_sync(f, o):
 
 
 def facts_commands(f, o):
-    """fw08-*, lb18-*: the spec lists its commands in the facts (outside[] and host[], without sudo)."""
+    """fw08-*, lb18-*, net30: the spec lists its commands in the facts (outside[] and host[], without sudo)."""
     cmds = []
     if f.get("uplink"):
         cmds.append(Cmd("sudo incus network get {uplink} ipv6.gateway"))
