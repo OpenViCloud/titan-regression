@@ -17,7 +17,8 @@ export const VM_FORM_VI: VmFormWords = {
 
 // Opens the cluster and network selects if they sit behind Change, then picks the cluster and, if given, the network.
 export async function chooseLocation(dialog: Locator, words: VmFormWords, clusterId: string, networkId?: string): Promise<void> {
-  // Create VM turns enabled once the networks have loaded; until then the selects can still fold into the line.
+  // Create VM turns enabled once a usable network is listed (every caller makes one first); until then the selects
+  // can still fold into the line.
   await expect(dialog.getByRole('button', { name: words.submit, exact: true })).toBeEnabled()
   const cluster = dialog.getByRole('combobox', { name: words.cluster, exact: true })
   const change = dialog.getByRole('button', { name: words.change, exact: true })

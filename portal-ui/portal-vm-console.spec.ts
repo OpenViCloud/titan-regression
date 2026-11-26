@@ -357,7 +357,7 @@ test.describe.serial('portal-ui vm form: stop timeout and sections', () => {
         await openAdvanced(dialog, words)
         await expect(dialog.getByLabel(words.stopTimeout, { exact: true })).toHaveValue('120')
         const submit = dialog.getByRole('button', { name: words.submit, exact: true })
-        await expect(submit).toBeInViewport()
+        await expect(submit).toBeInViewport({ ratio: 1 })
         expect(await page.evaluate(() => document.documentElement.scrollWidth), `${at} open: no sideways scroll`).toBe(width)
         await page.screenshot({ path: `${RESULTS}/UI-42-${at}-advanced.png` })
         log(`UI-42 ${at}: Access (optional) after Size, Advanced closed then open, dialog inside the screen, scrollWidth ${width}`)
