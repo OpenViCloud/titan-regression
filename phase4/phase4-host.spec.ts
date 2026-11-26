@@ -465,6 +465,19 @@ test.describe.serial('phase4 host', () => {
     expectStatus(rule, 201)
     ruleId = bodyOf(rule).ruleId
     await pollUntil('rule on Incus', readRule, (r) => r.status === 'enabled', existenceShape)
+    // plan.md ADM-11, CAT-09: the admin's side, which the agent compares at HOLD setup with `incus info` and the aliases on
+    // the host (OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Admin/ListAdminClustersEndpoint.cs ·
+    // OpenViCloud/titan-control-plane:Titan.Application/Abstractions/IAdminClusterService.cs (AdminClusterDto) ·
+    // OpenViCloud/titan-control-plane:Titan.Infrastructure/Endpoints/Catalog/ListAdminTemplatesEndpoint.cs ·
+    // OpenViCloud/titan-control-plane:Titan.Application/Queries/Catalog/VmTemplate/Contracts/AdminTemplateClusterQueryResult.cs).
+    for (const c of await get('admin', '/v1/admin/clusters') as any[]) {
+      log(`ADM-11 admin cluster ${c.clusterId} serverFingerprint=${c.serverFingerprint}`)
+    }
+    for (const tpl of await get('admin', '/v1/admin/templates') as any[]) {
+      for (const z of tpl.clusters ?? []) {
+        log(`CAT-09 admin template ${tpl.id} ${z.clusterId} ${z.status} externalTemplateId=${z.externalTemplateId}`)
+      }
+    }
     await hold('setup', {
       project: projectOf(tenantId), templateId, subnet, vip: lbRow.vip,
       net6: `net-${net6}`, netEmpty: `net-${netEmpty}`, acl: `acl-${net6}`, ruleId,

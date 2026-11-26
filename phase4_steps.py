@@ -58,7 +58,7 @@ def setup(f, o):
         Cmd("sudo incus storage volume show default {volume} " + P + " | grep -A3 used_by"),
         Cmd("sudo incus snapshot list " + P + " {vmA} -f csv -c n"),
         Cmd("sudo incus network show {net6} " + P),
-        Cmd("sudo incus network show {netEmpty} " + P + " | grep -E 'default|acls|description'"),
+        Cmd("sudo incus network show {netEmpty} " + P + " | grep -E 'default|acls|description|^  network:'"),
         Cmd("sudo incus network acl show {acl} " + P),
         Cmd("sudo incus image alias list -f csv"),
         Cmd("sudo incus info | grep -A3 architectures"),
