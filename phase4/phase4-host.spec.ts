@@ -104,7 +104,7 @@ function gatewayOf(block: string): string {
   return groups.map((g) => g.toString(16)).join(':')
 }
 
-// Where the checks "from outside the network" run (plan.md FW-08, LB-18): the runner's pod has no IPv6 route out
+// Where the checks "from outside the network" run (plan.md FW-08, LB-18, NET-30): the runner's pod has no IPv6 route out
 const FROM_OUTSIDE = 'dev: on titan-incus (phase4.py step --env dev, or host); release env: this machine (phase4.py step, or host --local; over the Internet, this machine without IPv6 => N/A)'
 
 test.describe.serial('phase4 host', () => {
@@ -592,7 +592,7 @@ test.describe.serial('phase4 host', () => {
     const network = nets.find((n) => n.name === 'default' && n.status === 'Created')
     test.skip(network === undefined, 'NOT COVERED: admin-test has no network default in Created')
     const templates = await get('admin', `/v1/templates?clusterId=${clusterId}`) as any[]
-    const ubuntu = templates.find((x) => String(x.name).toLowerCase().includes('ubuntu'))
+    const ubuntu = templates.find((x) => /ubuntu/i.test(x.name) || /ubuntu/i.test(x.os))
     expect(ubuntu, `an Ubuntu template in ${templates.map((x) => x.name).join(',')}`).toBeDefined()
     const key = await call('admin', 'POST', '/v1/tenant/ssh-keys', { name: `rg-keyn30-${RUN}`, publicKey: V }, newKey())
     expectStatus(key, 201)
@@ -608,8 +608,9 @@ test.describe.serial('phase4 host', () => {
     const project = projectOf(admin.id)
     const onIncus = incusName('vm', net30Vm)
     log(`NET-30 vm ${net30Vm} ${vm.status} ipv6=${ip} network=${network.id} template=${ubuntu.id} (${ubuntu.name})`)
-    await hold('net30', { vm: onIncus, ipv6: ip, project,
-      outside: [`ssh -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={guestKnownHosts} -i {keys}/v ubuntu@${ip} whoami`],
+    await hold('net30', { vm: onIncus, ipv6: ip, project, fromOutside: FROM_OUTSIDE,
+      // a VM just made: sshd and the key come with cloud-init, so the login is tried for up to three minutes
+      outside: [`sh -c 'for i in $(seq 1 36); do ssh -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={guestKnownHosts} -i {keys}/v ubuntu@${ip} whoami && break; sleep 5; done'`],
       host: [
         `sh -c 'for i in $(seq 1 36); do nc -6 -z -w 5 ${ip} 22 && break; sleep 5; done; nc -6 -v -z -w 10 ${ip} 22; echo exit=$?'`,
         `sh -c 'ssh -6 -o BatchMode=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 ubuntu@${ip} true; echo exit=$?'`,
@@ -619,7 +620,7 @@ test.describe.serial('phase4 host', () => {
         `sh -c 's=$(date +%s); nc -6 -v -z -w 10 ${ip} 8080; echo exit=$? seconds=$(( $(date +%s) - s ))'`,
       ],
       expect: 'outside: ubuntu; 22 succeeded; Permission denied (publickey) with no password method; ACL: allow tcp 80 from ::/0 and 0.0.0.0/0; '
-        + 'guest: no firewall rule ⇒ 80 Connection refused within a second, 8080 timed out; a guest firewall ⇒ 80 cannot be graded' })
+        + 'guest: no firewall rule and nothing on 80 or 8080 (ss -ltn) ⇒ 80 Connection refused within a second, 8080 timed out; a guest firewall ⇒ neither 80 nor 8080 can be graded' })
     await dropNet30()
   })
 
