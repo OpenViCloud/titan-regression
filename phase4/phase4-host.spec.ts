@@ -579,12 +579,12 @@ test.describe.serial('phase4 host', () => {
   // OpenViCloud/titan-incus-worker:resource/network/create.go (DefaultAction)): admin-test's VM of the Ubuntu template,
   // made with key V and a console password, on its network default, nothing listening on 80 or 8080. At HOLD net30 the
   // agent runs the commands of the facts and grades them:
-  // - from outside (this machine on the release environment, like ssh06): key V logs in;
+  // - from outside (FROM_OUTSIDE, like ssh06): key V logs in;
   // - on the host: 22 open; a password login refused, graded on the methods `Permission denied (…)` lists (BatchMode
   //   never sends a password, so its exit says nothing); the ACL of the network holds the allow rules of 80; the guest's
-  //   firewall read; then 80 refused at once when the guest has no firewall (the ACL lets it through, the guest answers
-  //   RST) and 8080 times out (Deny in is a drop).
-  test('NET-30 the default network: key V logs in, a password is refused, the ACL allows 80, 80 is refused by a guest without a firewall, 8080 is dropped', async () => {
+  //   firewall read; then, with no guest firewall and nothing listening: 80 refused at once (the ACL lets it through,
+  //   the guest answers RST) and 8080 times out (Deny in is a drop).
+  test('NET-30 the default network: key V logs in, a password is refused, the ACL allows 80, with no guest firewall 80 is refused and 8080 dropped', async () => {
     test.setTimeout(HOLD_MS + 20 * 60_000)
     const { clusterId, smallTier } = await envOf()
     const admin = await get('admin', '/v1/tenant')
@@ -609,8 +609,8 @@ test.describe.serial('phase4 host', () => {
     const onIncus = incusName('vm', net30Vm)
     log(`NET-30 vm ${net30Vm} ${vm.status} ipv6=${ip} network=${network.id} template=${ubuntu.id} (${ubuntu.name})`)
     await hold('net30', { vm: onIncus, ipv6: ip, project, fromOutside: FROM_OUTSIDE,
-      // a VM just made: sshd and the key come with cloud-init, so the login is tried for up to three minutes
-      outside: [`sh -c 'for i in $(seq 1 36); do ssh -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={guestKnownHosts} -i {keys}/v ubuntu@${ip} whoami && break; sleep 5; done'`],
+      // a VM just made: sshd and the key come with cloud-init, so the login is tried 36 times, 5 s apart
+      outside: [`sh -c 'for i in $(seq 1 36); do ssh -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={guestKnownHosts} -i {keys}/v ubuntu@${ip} whoami && exit 0; sleep 5; done; exit 1'`],
       host: [
         `sh -c 'for i in $(seq 1 36); do nc -6 -z -w 5 ${ip} 22 && break; sleep 5; done; nc -6 -v -z -w 10 ${ip} 22; echo exit=$?'`,
         `sh -c 'ssh -6 -o BatchMode=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 ubuntu@${ip} true; echo exit=$?'`,
