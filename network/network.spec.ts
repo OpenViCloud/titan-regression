@@ -522,8 +522,8 @@ test.describe.serial('network', () => {
   // OpenViCloud/titan-control-plane:Titan.Application/Services/Networking/Network/DefaultNetwork.cs (GiveIfNeverHadOneAsync: name
   // "default", public IPv6, chosenCidr null so Incus picks the range) ·
   // OpenViCloud/titan-control-plane:Titan.Domain/Aggregates/Network/Network.Creation.cs (NewNetworkIngressPolicy Deny, NewNetworkEgressPolicy Allow) ·
-  // OpenViCloud/titan-control-plane:Titan.Application/Commands/Networking/Network/EndNetworkRequestCommandHandler.cs (OpenSshAsync:
-  // two rules Ingress TCP 22-22, ::/0 then 0.0.0.0/0) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Networking/Network/DefaultNetworkPorts.cs (WhenCreated, OpenAsync:
+  // the default network's Ingress TCP rules) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Networking/Network/Contracts/NetworkQueryResult.cs (Cidr, PublicIpv6Subnet) ·
   // OpenViCloud/titan-control-plane:Titan.Application/Queries/Networking/FirewallRule/Contracts/FirewallRuleQueryResult.cs (FirewallRuleQueryResult).
   // Read only, with admin-test's token. NOT COVERED when admin-test has no live network `default`: it got none from the
