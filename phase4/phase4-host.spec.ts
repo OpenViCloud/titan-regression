@@ -609,7 +609,7 @@ test.describe.serial('phase4 host', () => {
     const onIncus = incusName('vm', net30Vm)
     log(`NET-30 vm ${net30Vm} ${vm.status} ipv6=${ip} network=${network.id} template=${ubuntu.id} (${ubuntu.name})`)
     await hold('net30', { vm: onIncus, ipv6: ip, project, fromOutside: FROM_OUTSIDE,
-      // a VM just made: sshd and the key come with cloud-init, so the login is tried 36 times, 5 s apart
+      // a VM just made: sshd and the key come with cloud-init
       outside: [`sh -c 'for i in $(seq 1 36); do ssh -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={guestKnownHosts} -i {keys}/v ubuntu@${ip} whoami && exit 0; sleep 5; done; exit 1'`],
       host: [
         `sh -c 'for i in $(seq 1 36); do nc -6 -z -w 5 ${ip} 22 && break; sleep 5; done; nc -6 -v -z -w 10 ${ip} 22; echo exit=$?'`,
