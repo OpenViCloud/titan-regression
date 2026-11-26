@@ -321,7 +321,7 @@ test.describe.serial('portal-ui vm form: stop timeout and sections', () => {
   // (nothing scrolls sideways at 375px) · OpenViCloud/titan-cloud-console:portal/src/components/VmCreateModal.tsx (advancedOpen,
   // max-h on DialogContent, overflow-y-auto on the form body) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts,
   // OpenViCloud/titan-cloud-console:portal/src/i18n/vi.ts (vmCreate.access, accessHint, advanced). Nothing is sent: no create.
-  test('UI-42 the Create VM form at 375px and 1440px: the choices, then Access (optional) with its hint, then Advanced closed; the whole form reachable, nothing scrolls sideways; Vietnamese at 375px', async () => {
+  test('UI-42 the Create VM form at 375px and 1440px: the choices, then Access (optional) with its hint, then Advanced closed; the Create VM in view without scrolling, nothing scrolls sideways; Vietnamese at 375px', async () => {
     const page = await pageOf('tenant')
     const held = await holdCreates(page)
     try {
@@ -348,7 +348,7 @@ test.describe.serial('portal-ui vm form: stop timeout and sections', () => {
         await expect(dialog.getByLabel(words.stopTimeout, { exact: true })).toHaveCount(0)
         await expect(dialog.getByLabel(words.userData, { exact: true })).toHaveCount(0)
 
-        // The dialog stays inside the screen; what does not fit scrolls inside it.
+        // The dialog stays inside the screen; only the form body scrolls, the footer with Create VM stays in view.
         const box = await dialog.boundingBox()
         expect(box !== null && box.y >= 0 && box.y + box.height <= height + 1, `${at}: dialog ${JSON.stringify(box)} inside ${height}px`).toBe(true)
         expect(await page.evaluate(() => document.documentElement.scrollWidth), `${at}: no sideways scroll`).toBe(width)
@@ -357,7 +357,6 @@ test.describe.serial('portal-ui vm form: stop timeout and sections', () => {
         await openAdvanced(dialog, words)
         await expect(dialog.getByLabel(words.stopTimeout, { exact: true })).toHaveValue('120')
         const submit = dialog.getByRole('button', { name: words.submit, exact: true })
-        await submit.scrollIntoViewIfNeeded()
         await expect(submit).toBeInViewport()
         expect(await page.evaluate(() => document.documentElement.scrollWidth), `${at} open: no sideways scroll`).toBe(width)
         await page.screenshot({ path: `${RESULTS}/UI-42-${at}-advanced.png` })

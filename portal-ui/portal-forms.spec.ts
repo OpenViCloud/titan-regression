@@ -3,7 +3,7 @@ import { PORTAL, closeSessions, pageOf, useBrowser } from './auth'
 import { RESULTS, bodyOf, call, expectStatus, get, log, newKey, pollUntil, startLog } from './api'
 import { envOf, nameOf, runNetwork, runs, waitVm, waitVolume } from './fixtures'
 import { topUpEnabledOf } from './portal-config'
-import { VM_FORM_EN, chooseLocation, chooseTemplateAndSize } from './vm-form'
+import { VM_FORM_EN, chooseLocation, chooseTemplate, chooseTemplateAndSize } from './vm-form'
 
 // Cases UI-18..21, UI-24..26 of plan.md: form validation (network, VM, firewall rule), the buy-credit
 // amount parser, the VM delete button's status invariant, deleting a volume that still has a
@@ -145,16 +145,17 @@ test.describe.serial('portal-ui forms: network, firewall, volume and VM form val
   // titan-ops features/vm/design.md#vm-create-form) · OpenViCloud/titan-cloud-console:portal/src/i18n/en.ts (vmCreate.choicesRequired)
   test('UI-24 Create VM with no size shows "Choose a cluster, network, template and size." and sends no request', async () => {
     await runNetwork() // the Network select must offer at least one usable network, or Create VM stays disabled
-    const { clusterId } = await envOf()
+    const { clusterId, templateId } = await envOf()
     const page = await pageOf('tenant')
     await page.goto(PORTAL + '/vms', { waitUntil: 'networkidle' })
     await page.getByRole('button', { name: 'Create VM' }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: 'Create Virtual Machine' })).toBeVisible()
-    await dialog.getByPlaceholder('e.g. web-server-01').fill(nameOf('vmnotpl'))
+    await dialog.getByPlaceholder('e.g. web-server-01').fill(nameOf('vmnosize'))
     const network = await runNetwork()
     await chooseLocation(dialog, VM_FORM_EN, clusterId, network.id)
-    // Size left unpicked on purpose: the form picks no size by itself, so a required choice is missing.
+    await chooseTemplate(dialog, VM_FORM_EN, templateId)
+    // Size left unpicked on purpose: the form picks no size by itself, so only that choice is missing.
 
     let posted = false
     page.on('request', (req) => {
