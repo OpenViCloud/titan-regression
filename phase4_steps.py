@@ -181,6 +181,7 @@ STEPS = {
                            Cmd("sudo incus network acl show {acl} " + P + " | grep -c {ruleId}")],
     "obs12": lambda f, o: [Cmd("sudo incus network load-balancer delete {network} {vip} " + P, write=True),
                            Cmd("sudo incus network load-balancer list {network} " + P + " -f csv")],
+    "net30": facts_commands,
     "fw08-before": facts_commands,
     "fw08-after-rule": facts_commands,
     "lb18-before": facts_commands,

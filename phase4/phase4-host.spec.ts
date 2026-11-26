@@ -133,6 +133,9 @@ test.describe.serial('phase4 host', () => {
   let refusedVmId = ''
   let vol2Id = ''
   let vol2SnapId = ''
+  // NET-30: admin-test's VM on its network default, and the SSH key it was made with
+  let net30Vm = ''
+  let net30Key = ''
   // What FW-08 and LB-18 made and have not yet seen deleted: their finally deletes it, afterAll whatever that left
   const extraRules: Array<{ network: string, rule: string }> = []
   const extraLbs: string[] = []
@@ -254,6 +257,23 @@ test.describe.serial('phase4 host', () => {
     await cleanUp(steps)
   }
 
+  // NET-30's VM, then its key: admin-test's, deleted through admin-test's token
+  async function dropNet30(): Promise<void> {
+    if (net30Vm !== '') {
+      const read = () => get('admin', `/v1/tenant/vms/${net30Vm}`)
+      const vm = await read()
+      if (vm.status !== 'Deleting' && vm.status !== 'Deleted') {
+        expectStatus(await call('admin', 'DELETE', `/v1/tenant/vms/${net30Vm}`), 202)
+      }
+      await pollUntil('NET-30 vm deleted', read, (v) => v.status === 'Deleted', vmShape)
+      net30Vm = ''
+    }
+    if (net30Key !== '') {
+      expectStatus(await call('admin', 'DELETE', `/v1/tenant/ssh-keys/${net30Key}`), 204)
+      net30Key = ''
+    }
+  }
+
   test.beforeAll(async ({ browser }) => {
     test.setTimeout(30 * 60_000)
     startLog('phase4-host')
@@ -279,6 +299,7 @@ test.describe.serial('phase4 host', () => {
         fs.rmSync(VM35_HAND_OFF, { recursive: true, force: true })
       }],
       ['FW-08 and LB-18 leftovers', () => dropExtras(null)],
+      ['NET-30 vm of admin-test', () => dropNet30()],
       ['load balancer', async () => {
         if (lbId === '') {
           return
@@ -535,6 +556,44 @@ test.describe.serial('phase4 host', () => {
     expectStatus(await call('tenant', 'DELETE', `/v1/tenant/networks/${netDeny}`), 202)
     await waitNetwork('NET-25 deleted', netDeny, (n) => n.status === 'Deleted')
     netDeny = ''
+  })
+
+  // plan.md NET-30 (titan-ops features/network/design.md#default-network · titan-ops features/network/design.md#ipv6-public ·
+  // titan-ops features/network/design.md#firewall-default-policy ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Networking/Network/DefaultNetworkPorts.cs (WhenCreated) ·
+  // OpenViCloud/titan-control-plane:Titan.Application/Services/Compute/VmVendorData.cs (AppendPassword) ·
+  // OpenViCloud/titan-incus-worker:resource/network/create.go (DefaultAction)): admin-test's VM of the Ubuntu template, made
+  // with key V, on its network default, nothing listening on 80 or 8080 and no firewall in the guest. At HOLD net30 the
+  // agent runs the host commands of the facts and grades them: 22 open, 80 refused at once (the ACL lets it through, the
+  // guest answers RST), 8080 times out (Deny in is a drop), a password login refused (Titan only sets a console
+  // password). The login with the key is not read here: the host holds no private half of V.
+  test('NET-30 the default network from the host: 22 open, a password refused, 80 refused by the guest, 8080 dropped', async () => {
+    const { clusterId, smallTier } = await envOf()
+    const nets = await get('admin', '/v1/tenant/networks') as any[]
+    const network = nets.find((n) => n.name === 'default' && n.status === 'Created')
+    test.skip(network === undefined, 'NOT COVERED: admin-test has no network default in Created')
+    const templates = await get('admin', `/v1/templates?clusterId=${clusterId}`) as any[]
+    const ubuntu = templates.find((x) => JSON.stringify(x).toLowerCase().includes('ubuntu'))
+    expect(ubuntu, `an Ubuntu template in ${templates.map((x) => x.name).join(',')}`).toBeDefined()
+    const key = await call('admin', 'POST', '/v1/tenant/ssh-keys', { name: `rg-keyn30-${RUN}`, publicKey: V }, newKey())
+    expectStatus(key, 201)
+    net30Key = bodyOf(key).id
+    const reply = await call('admin', 'POST', '/v1/tenant/vms',
+      { name: `rg-vmn30-${RUN}`, networkId: network.id, vmOfferingId: smallTier, templateId: ubuntu.id, clusterId, diskSizeGb: null,
+        sshKeyIds: [net30Key] }, newKey())
+    expectStatus(reply, 202)
+    net30Vm = bodyOf(reply).vmId
+    const vm = await pollUntil('NET-30 vm Running with a public IPv6', () => get('admin', `/v1/tenant/vms/${net30Vm}`),
+      (v) => v.status === 'Running' && !!v.publicIpv6Address, vmShape)
+    const ip = vm.publicIpv6Address
+    log(`NET-30 vm ${net30Vm} ${vm.status} ipv6=${ip} network=${network.id} template=${ubuntu.id}`)
+    await hold('net30', { vm: incusName('vm', net30Vm), ipv6: ip, host: [
+      `sh -c 'for i in $(seq 1 36); do nc -6 -z -w 5 ${ip} 22 && break; sleep 5; done; nc -6 -v -z -w 10 ${ip} 22; echo exit=$?'`,
+      `sh -c 'ssh -6 -o BatchMode=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 ubuntu@${ip} true; echo exit=$?'`,
+      `sh -c 's=$(date +%s); nc -6 -v -z -w 10 ${ip} 80; echo exit=$? seconds=$(( $(date +%s) - s ))'`,
+      `sh -c 's=$(date +%s); nc -6 -v -z -w 10 ${ip} 8080; echo exit=$? seconds=$(( $(date +%s) - s ))'`,
+    ] })
+    await dropNet30()
   })
 
   // plan.md SSH-06: from the Internet, the key chosen at create logs in, another key does not
