@@ -82,8 +82,9 @@ export async function fiveSessionsThenRefused(vmId: string, vmName: string): Pro
   const path = `/v1/tenant/vms/${vmId}/ssh`
   // The guest may still be starting (422 VM_AGENT_NOT_READY, then 422 VM_SSH_NOT_READY until its sshd listens). Right
   // after sshd first listens the guest can still hold the banner past the control plane's wait and drop connections
-  // (measured on dev 2026-11-14, with the control plane waiting 5 s, on a VM just made: two of six sessions ended with no
-  // byte, which freed a place and let the sixth open). So counting starts only after three probes in a row got the banner within 2 s of their 101.
+  // (measured on dev 2026-11-14, with the control plane waiting 5 s, on a VM just made: two of six sessions ended with
+  // no byte, which freed a place and let the sixth open). So counting starts only after three probes in a row got the
+  // banner within 2 s of their 101.
   const started = Date.now()
   let quickInARow = 0
   while (quickInARow < 3) {
