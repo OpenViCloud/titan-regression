@@ -113,10 +113,12 @@ export function sha256(data: Buffer): string {
   return crypto.createHash('sha256').update(data).digest('hex')
 }
 
+// ConnectTimeout also bounds the banner exchange through the ProxyCommand: past the control plane's 30 s wait for the
+// guest's first byte plus up to 15 s to open the exec (titan-ops features/vm/design.md#ssh-session).
 export function sshOptions(dir: string, key: string, hostKeyCheck: 'accept-new' | 'yes'): string[] {
   return ['-i', `${dir}/${key}`, '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes',
     '-o', `StrictHostKeyChecking=${hostKeyCheck}`, '-o', `UserKnownHostsFile=${dir}/known_hosts`,
-    '-o', 'ConnectTimeout=30', '-o', 'LogLevel=ERROR']
+    '-o', 'ConnectTimeout=60', '-o', 'LogLevel=ERROR']
 }
 
 // A call the control plane refuses before the session opens prints `<title> (<CODE>)` and records no activity
@@ -125,7 +127,7 @@ export const SESSION_REFUSED = /\((VM_[A-Z_]+|CLUSTER_[A-Z_]+|TENANT_[A-Z_]+|WEB
 
 // Right after the VM runs, the guest is still starting: VM_AGENT_NOT_READY (agent not up), VM_SSH_NOT_READY (agent up,
 // sshd not listening yet), ssh exiting 255 with nothing to say at LogLevel=ERROR (a control plane older than
-// VM_SSH_NOT_READY), or a refused key.
+// VM_SSH_NOT_READY), a refused key, or a connection the guest closes.
 export function guestStillStarting(result: CliResult): boolean {
   const sshdNotUp = result.code === 255 && result.stderr.trim() === ''
   return sshdNotUp || /VM_AGENT_NOT_READY|VM_SSH_NOT_READY|Permission denied|Connection closed/.test(result.stderr)
@@ -137,6 +139,19 @@ export async function untilGuestAnswers(label: string, attempt: () => Promise<Cl
   let result = await attempt()
   while (result.code !== 0 && Date.now() < deadline) {
     expect(guestStillStarting(result), `exit=${result.code} stderr=${result.stderr}`).toBe(true)
+    log(`${label} not yet: exit=${result.code} ${result.stderr.trim().slice(0, 160)}`)
+    await sleep(10_000)
+    result = await attempt()
+  }
+  return result
+}
+
+// Retries `attempt` while the guest is still starting, for up to GUEST_START_WAIT_MS, and returns the first result that
+// is not, whatever its exit code (at the deadline, the last one): for a case that checks a non-zero exit.
+export async function untilGuestStarted(label: string, attempt: () => Promise<CliResult>): Promise<CliResult> {
+  const deadline = Date.now() + GUEST_START_WAIT_MS
+  let result = await attempt()
+  while (guestStillStarting(result) && Date.now() < deadline) {
     log(`${label} not yet: exit=${result.code} ${result.stderr.trim().slice(0, 160)}`)
     await sleep(10_000)
     result = await attempt()
@@ -252,9 +267,10 @@ export class CliSshChain {
   }
 
   // CLI-09 · OpenViCloud/titan-cli:command/root.go ExitCodeOf, OpenViCloud/titan-cli:cmd/openvicloud/main.go main: the
-  // CLI exits with ssh's exit code, which is the remote command's
+  // CLI exits with ssh's exit code, which is the remote command's. The guest may still be finishing its first boot
+  // (titan-ops features/vm/design.md#ssh-session), so a refusal of a guest still starting is tried again.
   async cli09(): Promise<void> {
-    const result = await this.vmSsh('rg-key', 'yes', ['exit', '7'])
+    const result = await untilGuestStarted('CLI-09', () => this.vmSsh('rg-key', 'yes', ['exit', '7']))
     log(`CLI-09 exit=${result.code}`)
     expect(result.code).toBe(7)
   }
