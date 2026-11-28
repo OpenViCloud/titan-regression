@@ -127,7 +127,7 @@ export const SESSION_REFUSED = /\((VM_[A-Z_]+|CLUSTER_[A-Z_]+|TENANT_[A-Z_]+|WEB
 
 // Right after the VM runs, the guest is still starting: VM_AGENT_NOT_READY (agent not up), VM_SSH_NOT_READY (agent up,
 // sshd not listening yet), ssh exiting 255 with nothing to say at LogLevel=ERROR (a control plane older than
-// VM_SSH_NOT_READY), or a refused key.
+// VM_SSH_NOT_READY), a refused key, or a connection the guest closes.
 export function guestStillStarting(result: CliResult): boolean {
   const sshdNotUp = result.code === 255 && result.stderr.trim() === ''
   return sshdNotUp || /VM_AGENT_NOT_READY|VM_SSH_NOT_READY|Permission denied|Connection closed/.test(result.stderr)
