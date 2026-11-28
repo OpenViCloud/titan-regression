@@ -173,7 +173,7 @@ create a network and beta-user's network cap may leave no room for it.
 | # | Module | Measures | Dev | Release | Spec |
 |---|---|---|---|---|---|
 | 1 | `smoke` | health, clusters, anonymous catalog, clean test account, no metrics on the API host | yes | yes | yes |
-| 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync, function runtimes and their sync | yes | yes | yes, except CAT-14 (host, not covered), CAT-16 (host), CAT-18, CAT-19, CAT-20, CAT-21, CAT-22 (plan only) |
+| 2 | `catalog` | offerings and prices, templates per cluster, live clusters/OS images, template sync, function runtimes and their sync | yes | yes | yes, except CAT-14 (host, not covered), CAT-16 (host), CAT-18, CAT-20 (plan only), CAT-19, CAT-21, CAT-22 (host) |
 | 3 | `network` | the run's network on Incus: create, Idempotency-Key, quota, overlapping CIDR, rename; public IPv6 (two networks, a /64 given back, the IPv6 quota) | yes | yes | yes, except NET-14 to NET-19 (not covered: measured by tests of the control plane), NET-20, NET-21, NET-27 (host, not covered), NET-25 (host); NET-31 (plan only); NET-30 (host); NET-32 (not covered: measured by tests of the control plane) |
 | 4 | `firewall` | rules in the network's ACL: create, delete, quota | yes | yes | yes, except FW-08 (host), FW-14 (host, not covered) |
 | 5 | `vm` | VMs: create per tier (cluster named or taken from the network), stop/start, repeats and conflicts, IPv6, rename, delete; SSH keys and SSH sessions; console password, console tickets and console sessions; stop timeout | yes | yes | yes, except VM-28 (host, `L-x`), VM-30 (not covered), VM-35 (host); SSH-08 and CSL-06 (inside SSH-08) also a job of its own at the release environment's run, `vm/ssh-sessions` |
