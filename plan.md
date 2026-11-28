@@ -7,7 +7,7 @@ Kỳ vọng chung cho mọi case tạo tài nguyên (không nhắc lại từng 
 - Tài nguyên tạo ra mang tên `rg-<loại>-<lượt>` và được xoá trong `finally`; xoá xong `GET` list không còn nó, `GET` theo id (nếu route giữ hàng) báo `status = Deleted`.
 - Lỗi đọc ở `code`, không ở `detail` (`titan-ops architecture/http-contract.md#error-envelope`).
 
-**(host)** = đọc trên host Incus của cluster (Phase 4 của `release:regression-prd`, lệnh `L-x`). **(`L-x`)** = case cần một lệnh ghi trên env của release mà release đã duyệt; không có `L-x` ⇒ report ghi **N/A — không có `L-x`**.
+**(host)** = đọc trên host Incus của cluster, hay trên máy của cụm function (dev: chính máy Ubuntu; kubeconfig `/etc/rancher/k3s/k3s.yaml`) (Phase 4 của `release:regression-prd`, lệnh `L-x`). **(`L-x`)** = case cần một lệnh ghi trên env của release mà release đã duyệt; không có `L-x` ⇒ report ghi **N/A — không có `L-x`**.
 
 Case đổi trạng thái mà mọi tenant của env dùng chung (giá toàn cục, dừng worker của cụm, hoá đơn seed ghi thẳng vào DB, lệnh ghi trên host, lượt lịch backup chạy sớm) ghi **trên prd dừng sau khách thật đầu tiên** ngay trong cột Khi, kèm `titan-ops status/known-state.md#first-real-customer`; case chỉ chạy khi `config.json` của portal đặt một cờ (`topUpEnabled`) ghi **N/A** kèm tên cờ trong cột Kỳ vọng. Skill của release đọc hai câu đó, không đọc danh sách ID.
 
