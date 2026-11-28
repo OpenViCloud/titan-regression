@@ -147,7 +147,7 @@ export async function untilGuestAnswers(label: string, attempt: () => Promise<Cl
 }
 
 // Retries `attempt` while the guest is still starting, for up to GUEST_START_WAIT_MS, and returns the first result that
-// is not, whatever its exit code: for a case that checks a non-zero exit.
+// is not, whatever its exit code (at the deadline, the last one): for a case that checks a non-zero exit.
 export async function untilGuestStarted(label: string, attempt: () => Promise<CliResult>): Promise<CliResult> {
   const deadline = Date.now() + GUEST_START_WAIT_MS
   let result = await attempt()
