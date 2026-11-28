@@ -36,7 +36,7 @@ export async function upgrade(path: string): Promise<Upgrade> {
       },
     })
     request.on('upgrade', (res, socket, head) => {
-      // The request's 30 s timeout must not end a session held open on purpose.
+      // The request's 60 s timeout must not end a session held open on purpose.
       socket.setTimeout(0)
       socket.removeAllListeners('timeout')
       let gotByte = (): void => {}
@@ -63,7 +63,9 @@ export async function upgrade(path: string): Promise<Upgrade> {
       })
     })
     request.on('error', reject)
-    request.setTimeout(30_000, () => request.destroy(new Error('upgrade timed out')))
+    // Past the control plane's 30 s wait for the guest's first byte, plus up to 15 s to open the exec
+    // (titan-ops features/vm/design.md#ssh-session).
+    request.setTimeout(60_000, () => request.destroy(new Error('upgrade timed out')))
     request.end()
   })
 }
@@ -79,8 +81,8 @@ export async function upgrade(path: string): Promise<Upgrade> {
 export async function fiveSessionsThenRefused(vmId: string, vmName: string): Promise<void> {
   const path = `/v1/tenant/vms/${vmId}/ssh`
   // The guest may still be starting (422 VM_AGENT_NOT_READY, then 422 VM_SSH_NOT_READY until its sshd listens). Right
-  // after sshd first listens it can still hold its banner past the control plane's 5 s wait and drop connections
-  // (measured on dev 2026-11-14 on a VM just made: two of six sessions ended with no byte, which freed a place and let
+  // after sshd first listens the guest can still hold the banner past the control plane's wait (5 s at the time) and
+  // drop connections (measured on dev 2026-11-14 on a VM just made: two of six sessions ended with no byte, which freed a place and let
   // the sixth open). So counting starts only after three probes in a row got the banner within 2 s of their 101.
   const started = Date.now()
   let quickInARow = 0

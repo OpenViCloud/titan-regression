@@ -231,7 +231,9 @@ async function openWs(path: string, withToken: boolean): Promise<Ws> {
       })
     })
     request.on('error', reject)
-    request.setTimeout(30_000, () => request.destroy(new Error('upgrade timed out')))
+    // Past the control plane's 30 s wait for the guest's first byte, plus up to 15 s to open the exec
+    // (titan-ops features/vm/design.md#ssh-session).
+    request.setTimeout(60_000, () => request.destroy(new Error('upgrade timed out')))
     request.end()
   })
 }
@@ -618,7 +620,7 @@ test.describe.serial('vm', () => {
     }
     const accepted = session
     try {
-      // The control plane may accept after its 5 s banner wait with nothing read yet; the banner then follows.
+      // The control plane may accept after its 30 s banner wait with nothing read yet; the banner then follows.
       await accepted.until(() => accepted.bytes() >= 8 || accepted.isClosed(), 30_000)
       const first = accepted.textSince(0)
       log(`SSH-09 101 after ${Math.round((Date.now() - started) / 1000)} s; first bytes ${JSON.stringify(first.slice(0, 40))}`)
